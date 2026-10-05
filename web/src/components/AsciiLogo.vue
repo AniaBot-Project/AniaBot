@@ -2,13 +2,14 @@
   <!-- 由 ASCII 字符画（ANSI Shadow 字体的 "AniaBot"）逐格转换而来的矢量 logo：
        每个 <rect> 对应一个字符格（█ = 实心，░ = 半透明），
        不依赖任何等宽字体的字宽，手机/桌面渲染完全一致。
+       渐变按深色磨砂玻璃卡片上的白→靛蓝配色设计。
        重新生成：node scripts/logo-to-svg.mjs -->
   <svg viewBox="0 0 73 14.4" role="img" aria-hidden="true" class="block" preserveAspectRatio="xMidYMid meet">
     <defs>
       <linearGradient id="ania-logo-grad" x1="0" y1="0" x2="0" y2="14.4" gradientUnits="userSpaceOnUse">
-        <stop offset="0" stop-color="#f4f4f5" />
-        <stop offset="0.5" stop-color="#d4d4d8" />
-        <stop offset="1" stop-color="#52525b" />
+        <stop offset="0" stop-color="#f8fafc" />
+        <stop offset="0.5" stop-color="#c7d2fe" />
+        <stop offset="1" stop-color="#818cf8" />
       </linearGradient>
     </defs>
     <!-- ░ 轻影块 -->

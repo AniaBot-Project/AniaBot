@@ -5,39 +5,39 @@
     </Transition>
 
     <div class="flex flex-wrap items-center justify-between gap-2">
-      <div class="flex gap-1 bg-white border border-slate-200 rounded-lg p-1 shadow-sm overflow-x-auto">
+      <div class="flex gap-1 glass rounded-xl p-1 overflow-x-auto">
         <button
           v-for="tab in tabs"
           :key="tab.name"
           class="px-4 py-1.5 text-sm rounded-md transition-colors"
-          :class="current === tab.name ? 'bg-zinc-900 text-white font-medium shadow-sm' : 'text-slate-500 hover:text-slate-800'"
+          :class="current === tab.name ? 'btn-accent font-medium shadow-sm' : 'text-slate-500 hover:text-slate-800'"
           @click="switchTab(tab.name)"
         >
           {{ tab.label }}
         </button>
       </div>
       <div class="flex gap-2">
-        <button v-if="hasForm" class="px-3 py-1.5 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors" @click="toggleRaw">
+        <button v-if="hasForm" class="px-3 py-1.5 text-sm rounded-lg border border-slate-300/60 text-slate-600 hover:bg-white/55 transition-colors" @click="toggleRaw">
           {{ rawMode ? '表单模式' : '源码模式 (JSON)' }}
         </button>
-        <button v-if="!rawMode && hasForm && current !== 'prompt'" :disabled="saving" class="px-4 py-1.5 text-sm rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40 transition-colors" @click="onSave">
+          <button v-if="!rawMode && hasForm && current !== 'prompt'" :disabled="saving" class="px-4 py-1.5 text-sm rounded-lg btn-accent disabled:opacity-40 transition-colors" @click="onSave">
           {{ saving ? '保存中...' : '保存' }}
         </button>
       </div>
     </div>
 
     <!-- 源码模式：原始 JSON（无表单的 tab 恒为源码模式） -->
-    <section v-if="rawMode || !hasForm" class="bg-white rounded-xl shadow-sm border border-slate-200/60 p-6 space-y-3">
+    <section v-if="rawMode || !hasForm" class="bg-white rounded-xl shadow-sm border border-white/60 p-6 space-y-3">
       <p class="text-xs text-slate-500">{{ currentTab.desc }}</p>
       <textarea
         v-model="rawText"
         rows="20"
         spellcheck="false"
-        class="w-full bg-zinc-950 text-slate-200 rounded-lg px-4 py-3 text-xs font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-zinc-400"
+        class="w-full bg-slate-950/85 text-slate-200 rounded-lg px-4 py-3 text-xs font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-zinc-400"
       />
       <div class="flex items-center gap-3">
-        <button class="px-3 py-1.5 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors" @click="formatRaw">格式化</button>
-        <button :disabled="saving" class="px-4 py-1.5 text-sm rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40 transition-colors" @click="onSaveRaw">
+        <button class="px-3 py-1.5 text-sm rounded-lg border border-slate-300/60 text-slate-600 hover:bg-white/55 transition-colors" @click="formatRaw">格式化</button>
+          <button :disabled="saving" class="px-4 py-1.5 text-sm rounded-lg btn-accent disabled:opacity-40 transition-colors" @click="onSaveRaw">
           {{ saving ? '保存中...' : '保存' }}
         </button>
         <span v-if="error" class="text-sm text-red-600">{{ error }}</span>
@@ -48,8 +48,8 @@
     <template v-else-if="current === 'mcp'">
       <p class="text-xs text-slate-500">配置 AI 可调用的 MCP 服务器，修改保存后重启生效。</p>
 
-      <section v-for="(srv, i) in mcpServers" :key="i" class="bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden">
-        <div class="px-6 py-3.5 border-b border-slate-100 flex items-center justify-between">
+      <section v-for="(srv, i) in mcpServers" :key="i" class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
+        <div class="px-6 py-3.5 border-b border-white/50 flex items-center justify-between">
           <h2 class="text-sm font-semibold text-slate-800 flex items-center gap-2">
             <span class="w-2 h-2 rounded-full" :class="srv.name ? 'bg-emerald-400' : 'bg-slate-300'" />
             {{ srv.name || `服务器 ${i + 1}` }}
@@ -108,7 +108,7 @@
         </div>
       </section>
 
-      <button class="w-full py-3 text-sm rounded-xl border-2 border-dashed border-slate-300 text-slate-400 hover:border-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 transition-all" @click="addServer">
+      <button class="w-full py-3 text-sm rounded-xl border-2 border-dashed border-slate-300/60 text-slate-400 hover:border-zinc-500 hover:text-zinc-700 hover:bg-white/60 transition-all" @click="addServer">
         + 添加 MCP 服务器
       </button>
       <p v-if="error" class="text-sm text-red-600">{{ error }}</p>
@@ -119,8 +119,8 @@
       <p class="text-xs text-slate-500">按群聊 / 好友覆盖 AI 的系统提示词，点击条目弹出编辑框，保存后立即生效（无需重启）。</p>
 
       <template v-for="section in promptSections" :key="section.kind">
-        <section class="bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden">
-          <div class="px-6 py-3.5 border-b border-slate-100 flex items-center justify-between">
+        <section class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
+          <div class="px-6 py-3.5 border-b border-white/50 flex items-center justify-between">
             <h2 class="text-sm font-semibold text-slate-800">
               {{ section.title }}
               <span class="ml-2 text-xs font-normal text-slate-400">{{ section.items.length }} 条</span>
@@ -132,7 +132,7 @@
             <li
               v-for="(item, i) in section.items"
               :key="i"
-              class="px-5 py-3.5 flex items-start gap-4 cursor-pointer hover:bg-slate-50/80 transition-colors"
+              class="px-5 py-3.5 flex items-start gap-4 cursor-pointer hover:bg-white/55 transition-colors"
               @click="openPromptEditor(section.kind, item, i)"
             >
               <div class="min-w-0 flex-1">
@@ -144,7 +144,7 @@
               </div>
               <div class="flex items-center gap-1 shrink-0">
                 <button
-                  class="text-xs text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
+                  class="text-xs text-zinc-600 hover:text-zinc-900 hover:bg-white/60 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
                   @click.stop="openPromptEditor(section.kind, item, i)"
                 >
                   编辑
@@ -167,7 +167,7 @@
     <Teleport to="body">
       <div
         v-if="showPromptEditor"
-        class="fixed inset-0 bg-zinc-950/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        class="fixed inset-0 bg-slate-900/45 backdrop-blur-md flex items-center justify-center z-50 p-4"
         v-backdrop-close="closePromptEditor"
       >
         <form
@@ -202,8 +202,8 @@
             </div>
             <p v-if="promptEditorError" class="text-sm text-red-600">{{ promptEditorError }}</p>
             <div class="flex justify-end gap-2 pt-1">
-              <button type="button" class="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" @click="closePromptEditor">取消</button>
-              <button type="submit" :disabled="saving" class="px-4 py-2 text-sm bg-zinc-900 text-white rounded-lg hover:bg-zinc-800 disabled:opacity-40 transition-colors">{{ saving ? '保存中...' : '保存并生效' }}</button>
+              <button type="button" class="px-4 py-2 text-sm text-slate-600 hover:bg-white/60 rounded-lg transition-colors" @click="closePromptEditor">取消</button>
+            <button type="submit" :disabled="saving" class="px-4 py-2 text-sm btn-accent rounded-lg disabled:opacity-40 transition-colors">{{ saving ? '保存中...' : '保存并生效' }}</button>
             </div>
           </div>
         </form>
@@ -216,7 +216,7 @@
 import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue'
 import { api } from '../api.js'
 
-const inputClass = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400 transition-shadow'
+const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400 transition-shadow'
 const labelClass = 'block text-xs font-medium text-slate-600 mb-1.5'
 
 // 键值对编辑器（环境变量 / 请求头）

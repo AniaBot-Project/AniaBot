@@ -2,14 +2,14 @@
   <div class="space-y-4">
     <!-- 筛选与操作栏 -->
     <div class="flex items-center justify-between flex-wrap gap-3">
-      <div class="flex items-center gap-1 bg-white border border-slate-200/60 rounded-lg p-1 shadow-sm overflow-x-auto">
+      <div class="flex items-center gap-1 glass rounded-xl p-1 overflow-x-auto">
         <button
           v-for="t in categoryTabs"
           :key="t.value"
           class="px-3 py-1.5 text-xs rounded-md transition-all whitespace-nowrap"
           :class="filters.category === t.value
-            ? 'bg-zinc-900 text-white font-medium shadow-sm'
-            : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'"
+            ? 'btn-accent font-medium shadow-sm'
+            : 'text-slate-500 hover:text-slate-800 hover:bg-white/60'"
           @click="filters.category = t.value; applyFilters()"
         >
           {{ t.label }}
@@ -25,7 +25,7 @@
     </div>
 
     <!-- 条件查询栏 -->
-    <section class="bg-white rounded-xl shadow-sm border border-slate-200/60 px-5 py-4">
+    <section class="bg-white rounded-xl shadow-sm border border-white/60 px-5 py-4">
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
         <label class="block">
           <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">开始时间</span>
@@ -41,14 +41,14 @@
         </label>
         <div class="flex items-end gap-2">
           <button
-            class="px-4 py-1.5 text-[11px] tracking-widest uppercase bg-zinc-900 text-white rounded-md hover:bg-zinc-700 transition-colors"
+            class="px-4 py-1.5 text-[11px] tracking-widest uppercase btn-accent rounded-md transition-colors"
             @click="applyFilters"
           >
             查询
           </button>
           <button
             v-if="hasFilter"
-            class="px-3 py-1.5 text-[11px] tracking-widest uppercase text-zinc-500 hover:bg-zinc-100 rounded-md transition-colors"
+            class="px-3 py-1.5 text-[11px] tracking-widest uppercase text-zinc-500 hover:bg-white/60 rounded-md transition-colors"
             @click="resetFilters"
           >
             重置
@@ -58,12 +58,12 @@
     </section>
 
     <!-- 日志列表（新在上，滚动到底部自动加载更早的记录） -->
-    <section class="bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden">
+    <section class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
       <div v-if="logs.length === 0" class="py-12 text-sm text-slate-400 text-center">
         暂无符合条件的操作日志（登录、配置修改、内容管理、AI 工具操作等在此展示）
       </div>
       <ul v-else class="divide-y divide-zinc-100">
-        <li v-for="log in logs" :key="log.id" class="px-5 py-3 flex items-start gap-3 hover:bg-slate-50/60 transition-colors">
+        <li v-for="log in logs" :key="log.id" class="px-5 py-3 flex items-start gap-3 hover:bg-white/55 transition-colors">
           <span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap mt-0.5" :class="categoryClass(log.category)">
             {{ categoryText(log.category) }}
           </span>
@@ -160,7 +160,7 @@ function categoryText(c) {
 function categoryClass(c) {
   return {
     auth: 'bg-amber-50 text-amber-700 border border-amber-200',
-    config: 'bg-zinc-900 text-white',
+    config: 'btn-accent',
     ai: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
     system: 'bg-zinc-100 text-zinc-600 border border-zinc-200',
     update: 'bg-zinc-100 text-zinc-600 border border-zinc-200',

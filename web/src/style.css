@@ -10,54 +10,118 @@
   --font-mono: "IBM Plex Mono", "JetBrains Mono", "Cascadia Mono", ui-monospace, SFMono-Regular, Consolas, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", monospace;
 }
 
-html {
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
+/* ============ 玻璃拟态设计令牌 ============ */
+:root {
+  --accent: #6366f1;
+  --accent-strong: #4f46e5;
+  --accent-soft: rgb(99 102 241 / 0.16);
+  --ink: #1e2433;
+  --ink-soft: #5b6478;
+
+  /* 玻璃面板：底色 / 描边 / 模糊 / 投影 */
+  --glass-fill: rgb(255 255 255 / 0.55);
+  --glass-fill-strong: rgb(255 255 255 / 0.74);
+  --glass-border: rgb(255 255 255 / 0.7);
+  --glass-blur: blur(20px) saturate(180%);
+  --glass-shadow: 0 18px 44px -26px rgb(30 41 90 / 0.55), 0 2px 8px -4px rgb(30 41 90 / 0.12);
+  --glass-sheen: inset 0 1px 0 rgb(255 255 255 / 0.65);
 }
 
-body {
-  font-family: var(--font-sans);
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    scroll-behavior: smooth;
+  }
+
+  /* 极光底：柔和彩斑 + 细点阵网格，所有玻璃面板的底色来源 */
+  body {
+    font-family: var(--font-sans);
+    color: var(--ink);
+    min-height: 100vh;
+    background-color: #edf0f9;
+    background-image:
+      radial-gradient(rgb(30 41 90 / 0.05) 1px, transparent 1.4px),
+      radial-gradient(56rem 38rem at 4% -10%, rgb(129 140 248 / 0.40), transparent 62%),
+      radial-gradient(48rem 34rem at 102% 0%, rgb(56 189 248 / 0.32), transparent 60%),
+      radial-gradient(52rem 40rem at 90% 94%, rgb(244 114 182 / 0.24), transparent 62%),
+      radial-gradient(46rem 34rem at 2% 98%, rgb(45 212 191 / 0.24), transparent 62%),
+      linear-gradient(155deg, #f9fafd 0%, #eef2fb 46%, #f7f2fc 100%);
+    background-size: 24px 24px, auto, auto, auto, auto, auto;
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
+    color: var(--ink);
+  }
+
+  /* 按钮 / 链接保留键盘可达的焦点圈，输入类控件走各自的 ring 样式 */
+  .app-shell button:focus-visible,
+  .app-shell a:focus-visible,
+  .app-shell [role="button"]:focus-visible {
+    outline: 2px solid rgb(99 102 241 / 0.55);
+    outline-offset: 2px;
+  }
+
+  /* 复选框 / 单选框 / 滑杆统一强调色 */
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"] {
+    accent-color: var(--accent);
+  }
 }
 
 /* 细滚动条 */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgb(161 161 170 / 0.4);
+  background: rgb(100 116 139 / 0.32);
   border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(161 161 170 / 0.7);
+  background: rgb(99 102 241 / 0.55);
+  background-clip: content-box;
 }
 
 /* 页面切换淡入 */
 .fade-enter-active {
-  transition: opacity 0.18s ease, transform 0.18s ease;
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 .fade-enter-from {
   opacity: 0;
-  transform: translateY(4px);
+  transform: translateY(6px);
 }
 
-/* 锚点滚动平滑 */
-html {
-  scroll-behavior: smooth;
-}
+/* ============ 玻璃拟态共享组件 ============ */
 
-/* ============ 仪器面板风格共享组件 ============ */
-
-/* 卡片 */
+/* 玻璃卡片：真正的磨砂层放在伪元素上，避免 backdrop-filter 改变卡片的
+   包含块（否则卡片内 fixed/absolute 弹层会被错误定位） */
 .tcard {
-  background: #fff;
-  border: 1px solid #e4e4e7;
-  border-radius: 10px;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.03);
+  position: relative;
+  isolation: isolate;
+  border-radius: 16px;
+  background: transparent;
+}
+.tcard::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--glass-fill);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), var(--glass-sheen);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
 }
 
 /* 小号大写技术标签 */
@@ -65,35 +129,40 @@ html {
   font-size: 10px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: #71717a;
+  color: var(--ink-soft);
   font-weight: 500;
 }
 
-/* 状态药丸（带圆点） */
+/* 状态药丸（带圆点）：毛玻璃胶囊 */
 .tpill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid #d4d4d8;
+  border: 1px solid rgb(255 255 255 / 0.75);
   border-radius: 999px;
   padding: 3px 10px;
   font-size: 9px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #52525b;
+  color: #46506a;
   white-space: nowrap;
+  background: rgb(255 255 255 / 0.5);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.6), 0 2px 6px -3px rgb(30 41 90 / 0.25);
+  backdrop-filter: blur(8px) saturate(160%);
+  -webkit-backdrop-filter: blur(8px) saturate(160%);
 }
 .tdot {
   width: 5px;
   height: 5px;
   border-radius: 999px;
   flex-shrink: 0;
+  box-shadow: 0 0 0 3px rgb(255 255 255 / 0.35);
 }
 
 /* 点阵分隔线 */
 .dotline {
   height: 5px;
-  background-image: radial-gradient(circle, #d4d4d8 1px, transparent 1px);
+  background-image: radial-gradient(circle, rgb(100 116 139 / 0.45) 1px, transparent 1px);
   background-size: 6px 5px;
   background-repeat: repeat-x;
   background-position: center;
@@ -101,7 +170,7 @@ html {
 
 /* 点阵装饰块 */
 .dotgrid {
-  background-image: radial-gradient(circle, #d4d4d8 1.5px, transparent 1.5px);
+  background-image: radial-gradient(circle, rgb(100 116 139 / 0.35) 1.5px, transparent 1.5px);
   background-size: 9px 9px;
 }
 
@@ -109,14 +178,17 @@ html {
 .seg {
   height: 14px;
   flex: 1;
-  border-radius: 2px;
-  background: #e4e4e7;
+  border-radius: 3px;
+  background: rgb(100 116 139 / 0.22);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.5);
 }
 .seg.on {
-  background: #18181b;
+  background: linear-gradient(180deg, #818cf8, #6366f1);
+  box-shadow: 0 2px 8px -4px rgb(79 70 229 / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.4);
 }
 .seg.on-ok {
-  background: #10b981;
+  background: linear-gradient(180deg, #34d399, #10b981);
+  box-shadow: 0 2px 8px -4px rgb(16 185 129 / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.4);
 }
 
 /* 时钟冒号闪烁 */
@@ -128,19 +200,263 @@ html {
   animation: blink 1s steps(1) infinite;
 }
 
-/* Markdown 渲染（插件市场 README / Skill 详情等）：marked 生成 HTML 后需要这套样式
-   否则表格/代码块/引用等没有任何视觉效果 */
+/* 状态点呼吸 */
+@keyframes glass-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(16 185 129 / 0.55); }
+  70% { box-shadow: 0 0 0 6px rgb(16 185 129 / 0); }
+}
+.pulse-dot {
+  animation: glass-pulse 2.2s ease-out infinite;
+}
+
+/* 玻璃表面（单次使用，等价于 .tcard 的磨砂层） */
+.glass {
+  position: relative;
+  isolation: isolate;
+}
+.glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--glass-fill);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), var(--glass-sheen);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+/* 告警 / 错误玻璃：在同一层磨砂上叠加语义色雾 */
+.glass-warn::before,
+.glass-danger::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow), var(--glass-sheen);
+}
+.glass-warn {
+  position: relative;
+  isolation: isolate;
+}
+.glass-warn::before {
+  background: linear-gradient(120deg, rgb(255 251 235 / 0.85), rgb(254 243 199 / 0.6));
+  border: 1px solid rgb(253 230 138 / 0.9);
+}
+.glass-danger {
+  position: relative;
+  isolation: isolate;
+}
+.glass-danger::before {
+  background: linear-gradient(120deg, rgb(254 242 242 / 0.85), rgb(254 226 226 / 0.6));
+  border: 1px solid rgb(254 202 202 / 0.9);
+}
+
+/* 主操作按钮（强调色玻璃渐变） */
+.btn-accent {  color: #fff;
+  font-weight: 500;
+  background: linear-gradient(135deg, #6d6ff5, #4f46e5);
+  border: 1px solid rgb(255 255 255 / 0.28);
+  box-shadow: 0 12px 26px -14px rgb(79 70 229 / 0.95), inset 0 1px 0 rgb(255 255 255 / 0.3);
+  transition: filter 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.btn-accent:hover {
+  filter: brightness(1.07);
+  box-shadow: 0 16px 30px -14px rgb(79 70 229 / 1), inset 0 1px 0 rgb(255 255 255 / 0.35);
+}
+.btn-accent:active {
+  transform: translateY(1px);
+}
+.btn-accent:disabled {
+  opacity: 0.5;
+  filter: grayscale(0.3);
+}
+
+/* ============ 面板内玻璃化兼容层 ============
+   面板各页大量直接使用浅色 Tailwind 工具类（bg-white / border-slate-200 ...），
+   这里在 .app-shell 作用域内统一把它们映射为半透明玻璃表面；
+   未分层（unlayered）规则天然优先于 Tailwind 的 utilities 层，
+   因此无需改动各个页面模板。 */
+.app-shell [class~="bg-white"] {
+  background-color: rgb(255 255 255 / 0.56);
+}
+.app-shell [class~="bg-white/85"] {
+  background-color: rgb(255 255 255 / 0.55);
+}
+.app-shell [class~="bg-slate-50"],
+.app-shell [class~="bg-slate-50/60"],
+.app-shell [class~="bg-slate-50/70"],
+.app-shell [class~="bg-slate-50/80"],
+.app-shell [class~="bg-zinc-50"],
+.app-shell [class~="bg-zinc-50/60"],
+.app-shell [class~="bg-zinc-50/70"] {
+  background-color: rgb(255 255 255 / 0.42);
+}
+.app-shell [class~="bg-slate-100"],
+.app-shell [class~="bg-zinc-100"] {
+  background-color: rgb(255 255 255 / 0.5);
+}
+.app-shell [class~="bg-slate-200/60"],
+.app-shell [class~="bg-zinc-200"] {
+  background-color: rgb(255 255 255 / 0.55);
+}
+/* 图表 / 进度条中性色：半透明化，避免在玻璃上出现"实心灰块" */
+.app-shell [class~="bg-zinc-300"] {
+  background-color: rgb(148 163 184 / 0.45);
+}
+.app-shell [class~="bg-zinc-400"] {
+  background-color: rgb(129 140 248 / 0.55);
+}
+.app-shell [class~="bg-zinc-700"],
+.app-shell [class~="bg-zinc-800"] {
+  background-color: rgb(45 55 85 / 0.88);
+}
+.app-shell [class~="bg-zinc-900"] {
+  background-color: rgb(26 30 46 / 0.92);
+}
+
+/* 悬停态：统一为"提亮玻璃"而非不透明灰 */
+.app-shell [class~="hover:bg-zinc-100"]:hover,
+.app-shell [class~="hover:bg-slate-100"]:hover,
+.app-shell [class~="hover:bg-zinc-200"]:hover,
+.app-shell [class~="hover:bg-slate-200/60"]:hover {
+  background-color: rgb(255 255 255 / 0.62);
+}
+.app-shell [class~="hover:bg-slate-50"]:hover,
+.app-shell [class~="hover:bg-zinc-50"]:hover,
+.app-shell [class~="hover:bg-zinc-50/70"]:hover,
+.app-shell [class~="hover:bg-slate-50/60"]:hover,
+.app-shell [class~="hover:bg-slate-50/70"]:hover,
+.app-shell [class~="hover:bg-slate-50/80"]:hover {
+  background-color: rgb(255 255 255 / 0.55);
+}
+.app-shell [class~="hover:bg-zinc-700"]:hover,
+.app-shell [class~="hover:bg-zinc-800"]:hover {
+  background-color: rgb(38 46 72 / 0.95);
+}
+.app-shell [class~="hover:bg-red-50"]:hover,
+.app-shell [class~="hover:bg-red-100"]:hover {
+  background-color: rgb(254 226 226 / 0.75);
+}
+.app-shell [class~="hover:bg-amber-100"]:hover {
+  background-color: rgb(254 243 199 / 0.75);
+}
+
+/* 语义浅色底：改为半透明色雾，保留语义又透出玻璃光 */
+.app-shell [class~="bg-red-50"],
+.app-shell [class~="bg-red-50!"] {
+  background-color: rgb(254 226 226 / 0.62);
+}
+.app-shell [class~="bg-red-100"] {
+  background-color: rgb(254 202 202 / 0.6);
+}
+.app-shell [class~="bg-amber-50"],
+.app-shell [class~="bg-amber-50!"] {
+  background-color: rgb(254 243 199 / 0.62);
+}
+.app-shell [class~="bg-amber-100"] {
+  background-color: rgb(253 230 138 / 0.55);
+}
+.app-shell [class~="bg-emerald-50"] {
+  background-color: rgb(209 250 229 / 0.6);
+}
+.app-shell [class~="bg-emerald-100"] {
+  background-color: rgb(167 243 208 / 0.55);
+}
+
+/* 描边：浅色描边 → 白色玻璃棱线；强描边（输入框/开关）→ 中性半透明 */
+.app-shell [class~="border-slate-100"],
+.app-shell [class~="border-slate-200"],
+.app-shell [class~="border-slate-200/60"],
+.app-shell [class~="border-slate-200/70"],
+.app-shell [class~="border-zinc-100"],
+.app-shell [class~="border-zinc-200"] {
+  border-color: rgb(255 255 255 / 0.7);
+}
+.app-shell [class~="border-slate-300"],
+.app-shell [class~="border-zinc-300"] {
+  border-color: rgb(100 116 139 / 0.3);
+}
+
+/* 输入类控件：更实的玻璃底 + 中性描边，与卡片区分开；
+   自带背景色工具类的控件（如深色 JSON 编辑区）保持原样，不被覆盖 */
+.app-shell input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([class*="bg-"]),
+.app-shell select:not([class*="bg-"]),
+.app-shell textarea:not([class*="bg-"]) {
+  background-color: rgb(255 255 255 / 0.68);
+  border-color: rgb(100 116 139 / 0.28);
+  box-shadow: inset 0 1px 2px rgb(15 23 42 / 0.04);
+}
+.app-shell input::placeholder,
+.app-shell textarea::placeholder {
+  color: rgb(100 116 139 / 0.75);
+}
+
+/* 焦点环：统一主题色 */
+.app-shell [class*="focus:ring-"]:focus {
+  --tw-ring-color: rgb(99 102 241 / 0.5);
+}
+.app-shell [class*="focus:border-"]:focus {
+  border-color: rgb(99 102 241 / 0.55);
+}
+
+/* 大块浅色容器（卡片 / 弹窗 / 侧栏列表）升级为真正的磨砂玻璃 */
+.app-shell
+  :is(
+    .tcard,
+    section[class~="bg-white"],
+    form[class~="bg-white"],
+    div[class~="bg-white"][class~="rounded-xl"],
+    div[class~="bg-white"][class~="rounded-2xl"]
+  ) {
+  position: relative;
+  isolation: isolate;
+  background-color: transparent;
+  box-shadow: none;
+}
+.app-shell
+  :is(
+    .tcard,
+    section[class~="bg-white"],
+    form[class~="bg-white"],
+    div[class~="bg-white"][class~="rounded-xl"],
+    div[class~="bg-white"][class~="rounded-2xl"]
+  )::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--glass-fill);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), var(--glass-sheen);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  transition: box-shadow 0.25s ease, background-color 0.25s ease;
+}
+/* 可点击卡片：悬停时玻璃更亮、投影更深 */
+.app-shell
+  :is(section[class~="bg-white"], div[class~="bg-white"][class~="rounded-xl"])[class*="cursor-pointer"]:hover::before {
+  background: var(--glass-fill-strong, rgb(255 255 255 / 0.72));
+  box-shadow: 0 26px 50px -26px rgb(30 41 90 / 0.6), var(--glass-sheen);
+}
+
+/* ============ Markdown 渲染（插件市场 README / Skill 详情等） ============ */
 .markdown-body {
   font-size: 13px;
   line-height: 1.75;
-  color: #3f3f46;
+  color: #3c4557;
   word-break: break-word;
 }
 .markdown-body h1,
 .markdown-body h2,
 .markdown-body h3,
 .markdown-body h4 {
-  color: #18181b;
+  color: #171d2b;
   font-weight: 600;
   margin: 1.25em 0 0.5em;
   line-height: 1.4;
@@ -152,38 +468,42 @@ html {
 .markdown-body ul,
 .markdown-body ol { padding-left: 1.4em; margin: 0.6em 0; }
 .markdown-body li { margin: 0.2em 0; }
-.markdown-body a { color: #2563eb; text-decoration: underline; text-underline-offset: 2px; }
+.markdown-body a { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 2px; }
 .markdown-body blockquote {
   margin: 0.8em 0;
   padding: 0.25em 1em;
-  border-left: 3px solid #d4d4d8;
-  color: #71717a;
-  background: #fafafa;
+  border-left: 3px solid rgb(99 102 241 / 0.45);
+  color: #5b6478;
+  background: rgb(255 255 255 / 0.45);
+  border-radius: 0 8px 8px 0;
 }
 .markdown-body code {
-  background: #f4f4f5;
-  border-radius: 4px;
+  background: rgb(255 255 255 / 0.65);
+  border: 1px solid rgb(255 255 255 / 0.7);
+  border-radius: 5px;
   padding: 0.15em 0.4em;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.9em;
-  color: #be185d;
+  color: #b02a67;
 }
 .markdown-body pre {
-  background: #18181b;
-  color: #e4e4e7;
-  border-radius: 8px;
+  background: rgb(24 28 44 / 0.9);
+  color: #e6e9f2;
+  border-radius: 10px;
   padding: 12px;
   overflow-x: auto;
   margin: 0.8em 0;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
 }
 .markdown-body pre code {
   background: transparent;
+  border: none;
   color: inherit;
   padding: 0;
   font-size: 12px;
 }
-.markdown-body img { max-width: 100%; border-radius: 6px; }
-.markdown-body hr { border: none; border-top: 1px solid #e4e4e7; margin: 1.2em 0; }
+.markdown-body img { max-width: 100%; border-radius: 8px; }
+.markdown-body hr { border: none; border-top: 1px solid rgb(255 255 255 / 0.7); margin: 1.2em 0; }
 /* 表格：默认浏览器样式没有边框，补上后 README 表格才"像"表格 */
 .markdown-body table {
   width: 100%;
@@ -195,13 +515,13 @@ html {
 }
 .markdown-body th,
 .markdown-body td {
-  border: 1px solid #e4e4e7;
+  border: 1px solid rgb(255 255 255 / 0.7);
   padding: 6px 10px;
   text-align: left;
 }
 .markdown-body th {
-  background: #fafafa;
+  background: rgb(255 255 255 / 0.5);
   font-weight: 600;
-  color: #18181b;
+  color: #171d2b;
 }
-.markdown-body tr:nth-child(even) { background: #fafafa; }
+.markdown-body tr:nth-child(even) { background: rgb(255 255 255 / 0.32); }

@@ -2,14 +2,14 @@
   <div class="space-y-4">
     <!-- 筛选与操作栏 -->
     <div class="flex items-center justify-between flex-wrap gap-3">
-      <div class="flex items-center gap-1 bg-white border border-slate-200/60 rounded-lg p-1 shadow-sm">
+      <div class="flex items-center gap-1 glass rounded-xl p-1">
         <button
           v-for="t in typeTabs"
           :key="t.value"
           class="px-3 py-1.5 text-xs rounded-md transition-all"
           :class="filters.chat_type === t.value
-            ? 'bg-zinc-900 text-white font-medium shadow-sm'
-            : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'"
+            ? 'btn-accent font-medium shadow-sm'
+            : 'text-slate-500 hover:text-slate-800 hover:bg-white/60'"
           @click="filters.chat_type = t.value; applyFilters()"
         >
           {{ t.label }}
@@ -25,7 +25,7 @@
     </div>
 
     <!-- 条件查询栏 -->
-    <section class="bg-white rounded-xl shadow-sm border border-slate-200/60 px-5 py-4">
+    <section class="bg-white rounded-xl shadow-sm border border-white/60 px-5 py-4">
       <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         <label class="block">
           <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">触发人 ID</span>
@@ -49,14 +49,14 @@
         </label>
         <div class="flex items-end gap-2">
           <button
-            class="px-4 py-1.5 text-[11px] tracking-[0.1em] uppercase bg-zinc-900 text-white rounded-md hover:bg-zinc-700 transition-colors"
+            class="px-4 py-1.5 text-[11px] tracking-[0.1em] uppercase btn-accent rounded-md transition-colors"
             @click="applyFilters"
           >
             查询
           </button>
           <button
             v-if="hasFilter"
-            class="px-3 py-1.5 text-[11px] tracking-[0.1em] uppercase text-zinc-500 hover:bg-zinc-100 rounded-md transition-colors"
+            class="px-3 py-1.5 text-[11px] tracking-[0.1em] uppercase text-zinc-500 hover:bg-white/60 rounded-md transition-colors"
             @click="resetFilters"
           >
             重置
@@ -67,17 +67,17 @@
 
     <!-- 日志列表（新在上，滚动到底部自动加载更早的记录） -->
     <section class="space-y-3">
-      <div v-if="logs.length === 0" class="bg-white rounded-xl shadow-sm border border-slate-200/60 py-12 text-sm text-slate-400 text-center">
+      <div v-if="logs.length === 0" class="bg-white rounded-xl shadow-sm border border-white/60 py-12 text-sm text-slate-400 text-center">
         暂无符合条件的 Query 记录（@ 机器人或私聊触发 AI 回复后在此展示）
       </div>
 
       <div
         v-for="log in logs"
         :key="log.id"
-        class="bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden"
+        class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden"
       >
         <!-- 摘要行（点击弹出详情窗口） -->
-        <button class="w-full text-left px-5 py-3.5 hover:bg-slate-50/60 transition-colors" @click="detail = log">
+        <button class="w-full text-left px-5 py-3.5 hover:bg-white/55 transition-colors" @click="detail = log">
           <div class="flex items-center gap-2 flex-wrap">
             <span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap" :class="statusClass(log.status)">
               {{ statusText(log.status) }}
@@ -115,7 +115,7 @@
     <!-- 详情弹窗：点遮罩 / 右上角关闭 / Esc 均可关闭 -->
     <div
       v-if="detail"
-      class="fixed inset-0 bg-zinc-950/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      class="fixed inset-0 bg-slate-900/45 backdrop-blur-md flex items-center justify-center z-50 p-4"
       v-backdrop-close="() => (detail = null)"
     >
       <div class="bg-white rounded-xl shadow-2xl border border-zinc-200 w-full max-w-3xl max-h-[85vh] flex flex-col">
@@ -129,7 +129,7 @@
           </span>
           <span class="text-[11px] text-slate-400 font-mono">{{ fmtTime(detail.time) }}</span>
           <button
-            class="ml-auto w-7 h-7 flex items-center justify-center rounded-md text-zinc-400 hover:text-zinc-800 hover:bg-zinc-100 transition-colors"
+            class="ml-auto w-7 h-7 flex items-center justify-center rounded-md text-zinc-400 hover:text-zinc-800 hover:bg-white/60 transition-colors"
             title="关闭"
             @click="detail = null"
           >
@@ -155,7 +155,7 @@
           <!-- 用户输入 -->
           <div>
             <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium mb-2">用户输入</h3>
-            <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-slate-200/70 rounded-lg px-3 py-2">{{ detail.query }}</p>
+            <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-white/60 rounded-lg px-3 py-2">{{ detail.query }}</p>
           </div>
 
           <!-- 错误信息 -->
@@ -174,9 +174,9 @@
             <div
               v-for="(tc, i) in detail.tool_calls"
               :key="i"
-              class="bg-white border border-slate-200/70 rounded-lg overflow-hidden"
+              class="bg-white border border-white/60 rounded-lg overflow-hidden"
             >
-              <div class="flex items-center gap-2 px-3 py-2 border-b border-slate-100">
+              <div class="flex items-center gap-2 px-3 py-2 border-b border-white/50">
                 <span class="text-xs font-mono font-medium text-zinc-800">{{ tc.name }}</span>
                 <span v-if="tc.error" class="text-[11px] px-1.5 py-0.5 rounded bg-red-50 text-red-600 border border-red-100">失败</span>
                 <span class="ml-auto text-[11px] text-slate-400 font-mono">{{ fmtDuration(tc.duration_ms) }}</span>
@@ -201,7 +201,7 @@
           <!-- 最终回复 -->
           <div v-if="detail.reply">
             <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium mb-2">最终回复</h3>
-            <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-slate-200/70 rounded-lg px-3 py-2">{{ detail.reply }}</p>
+            <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-white/60 rounded-lg px-3 py-2">{{ detail.reply }}</p>
           </div>
         </div>
       </div>
@@ -299,7 +299,7 @@ function statusText(s) {
 
 function statusClass(s) {
   return {
-    running: 'bg-zinc-900 text-white',
+    running: 'btn-accent',
     success: 'bg-white text-zinc-600 border border-zinc-300',
     stopped: 'bg-zinc-100 text-zinc-500 border border-zinc-200',
     timeout: 'bg-zinc-100 text-zinc-500 border border-zinc-200',

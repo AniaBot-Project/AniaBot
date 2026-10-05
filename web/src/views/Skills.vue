@@ -11,7 +11,7 @@
       <div class="flex items-center gap-3">
         <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="load">刷新</button>
         <button
-          class="text-xs bg-zinc-900 text-white px-3.5 py-2 rounded-lg hover:bg-zinc-700 font-medium transition-colors shadow-sm disabled:opacity-50"
+          class="text-xs btn-accent px-3.5 py-2 rounded-lg font-medium transition-colors shadow-sm disabled:opacity-50"
           :disabled="uploading"
           @click="fileInput?.click()"
         >
@@ -30,7 +30,7 @@
     <p v-if="msg" class="text-xs" :class="msgOk ? 'text-emerald-600' : 'text-red-600'">{{ msg }}</p>
 
     <!-- Skill 列表 -->
-    <section class="bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden">
+    <section class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
       <ul class="divide-y divide-slate-100">
         <li v-if="skills.length === 0" class="py-12 text-sm text-slate-400 text-center list-none">
           暂无已加载的 skill，点击右上角上传 zip 压缩包（需包含 SKILL.md）
@@ -47,12 +47,12 @@
             <p v-if="s.description" class="text-xs text-slate-500 mt-0.5 leading-relaxed">{{ s.description }}</p>
             <div v-if="(s.refs?.length || s.extras?.length)" class="flex items-center gap-1.5 mt-2 flex-wrap">
               <span v-for="f in s.refs" :key="'r' + f" class="text-[11px] px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-600 font-mono">{{ f }}</span>
-              <span v-for="f in s.extras" :key="'e' + f" class="text-[11px] px-2 py-0.5 rounded-full bg-zinc-900/5 text-zinc-500 font-mono border border-zinc-200/60">{{ f }}</span>
+              <span v-for="f in s.extras" :key="'e' + f" class="text-[11px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-zinc-500 font-mono border border-zinc-200/60">{{ f }}</span>
             </div>
           </div>
           <div class="flex items-center gap-1 shrink-0">
             <button
-              class="text-xs text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
+              class="text-xs text-zinc-600 hover:text-zinc-900 hover:bg-white/60 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
               @click="onDetail(s)"
             >
               详情
@@ -71,7 +71,7 @@
     <!-- Skill 详情弹窗 -->
     <div
       v-if="detail"
-      class="fixed inset-0 bg-zinc-950/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      class="fixed inset-0 bg-slate-900/45 backdrop-blur-md flex items-center justify-center z-50 p-4"
       v-backdrop-close="() => (detail = null)"
     >
       <div class="bg-white rounded-xl shadow-2xl border border-zinc-200 w-full max-w-4xl max-h-[85vh] flex flex-col">
@@ -84,7 +84,7 @@
             <p v-if="detail.description" class="text-xs text-slate-500 mt-1 leading-relaxed">{{ detail.description }}</p>
           </div>
           <button
-            class="w-7 h-7 flex items-center justify-center rounded-md text-zinc-400 hover:text-zinc-800 hover:bg-zinc-100 transition-colors"
+            class="w-7 h-7 flex items-center justify-center rounded-md text-zinc-400 hover:text-zinc-800 hover:bg-white/60 transition-colors"
             title="关闭"
             @click="detail = null"
           >
@@ -100,7 +100,7 @@
                 <span v-if="detailLoading" class="text-[11px] text-slate-400">加载中...</span>
                 <button
                   v-if="isMarkdownFile && currentContent"
-                  class="text-[11px] px-2 py-1 rounded-md border border-slate-200 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 font-medium transition-colors"
+                  class="text-[11px] px-2 py-1 rounded-md border border-white/60 text-zinc-600 hover:bg-white/60 hover:text-zinc-900 font-medium transition-colors"
                   @click="showSource = !showSource"
                 >
                   {{ showSource ? '渲染视图' : '查看源码' }}
@@ -109,18 +109,18 @@
             </div>
             <div
               v-if="isMarkdownFile && !showSource"
-              class="markdown-body bg-white border border-slate-200/70 rounded-lg px-4 py-3"
+              class="markdown-body bg-white border border-white/60 rounded-lg px-4 py-3"
               v-html="renderedContent"
             />
-            <pre v-else class="text-xs text-slate-700 font-mono whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-slate-200/70 rounded-lg px-3 py-2">{{ currentContent }}</pre>
+            <pre v-else class="text-xs text-slate-700 font-mono whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-white/60 rounded-lg px-3 py-2">{{ currentContent }}</pre>
           </section>
 
           <section v-if="detail.files?.length" class="space-y-2">
             <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium">文件</h3>
-            <ul class="divide-y divide-slate-100 border border-slate-200/70 rounded-lg overflow-hidden">
+            <ul class="divide-y divide-slate-100 border border-white/60 rounded-lg overflow-hidden">
               <li
                 class="px-3 py-2 text-[11px] font-mono text-zinc-600 cursor-pointer transition-colors"
-                :class="selectedFile === 'SKILL.md' ? 'bg-zinc-900/5' : 'bg-white hover:bg-slate-50'"
+                :class="selectedFile === 'SKILL.md' ? 'bg-indigo-500/10' : 'bg-white hover:bg-white/55'"
                 @click="selectFile('SKILL.md')"
               >
                 SKILL.md
@@ -129,7 +129,7 @@
                 v-for="f in detail.files"
                 :key="f.name"
                 class="px-3 py-2 flex items-center gap-2 text-[11px] cursor-pointer transition-colors"
-                :class="selectedFile === f.name ? 'bg-zinc-900/5' : 'bg-white hover:bg-slate-50'"
+                :class="selectedFile === f.name ? 'bg-indigo-500/10' : 'bg-white hover:bg-white/55'"
                 @click="selectFile(f.name)"
               >
                 <span class="font-mono text-zinc-700 truncate">{{ f.name }}</span>

@@ -1,12 +1,12 @@
 <template>
   <div class="space-y-4">
     <!-- 定时任务管理 -->
-    <section class="bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden">
+    <section class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
       <div class="px-6 py-4 border-b border-zinc-100 flex items-center justify-between">
         <h2 class="text-[10px] tracking-[0.15em] uppercase text-zinc-800 font-medium">定时任务</h2>
         <div class="flex items-center gap-3">
           <button class="text-[10px] tracking-[0.15em] uppercase text-zinc-500 hover:text-zinc-900 font-medium transition-colors" @click="loadClocks">刷新</button>
-          <button class="text-[10px] tracking-[0.15em] uppercase bg-zinc-900 text-white px-3 py-1.5 rounded-md hover:bg-zinc-700 font-medium transition-colors" @click="openCreate">新建任务</button>
+        <button class="text-[10px] tracking-[0.15em] uppercase btn-accent px-3 py-1.5 rounded-md font-medium transition-colors" @click="openCreate">新建任务</button>
         </div>
       </div>
       <p v-if="clocks.length === 0" class="px-6 py-8 text-xs text-zinc-400 text-center tracking-wide">暂无定时任务，点击右上角「新建任务」创建（也可在群聊/私聊中使用 /clock）</p>
@@ -25,7 +25,7 @@
           <tbody>
           <template v-for="t in clocks" :key="t.id">
             <tr
-              class="border-b border-dashed border-zinc-100 last:border-0 hover:bg-zinc-50/70 transition-colors cursor-pointer"
+              class="border-b border-dashed border-zinc-100 last:border-0 hover:bg-white/55 transition-colors cursor-pointer"
               :class="{ 'bg-zinc-50/70': expanded.has(t.id) }"
               @click="toggleExpand(t.id)"
             >
@@ -51,7 +51,7 @@
                   :aria-checked="t.enabled"
                   :disabled="toggling.has(t.id)"
                   class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50"
-                  :class="t.enabled ? 'bg-zinc-900' : 'bg-zinc-200'"
+                  :class="t.enabled ? 'bg-indigo-500' : 'bg-slate-300/70'"
                   @click="toggleClock(t)"
                 >
                   <span
@@ -86,12 +86,12 @@
                 </dl>
                 <div class="mt-4 flex items-center gap-2">
                   <button
-                    class="text-[10px] tracking-[0.15em] uppercase bg-zinc-900 text-white px-3 py-1.5 rounded-md hover:bg-zinc-700 font-medium transition-colors disabled:opacity-50"
+                    class="text-[10px] tracking-[0.15em] uppercase btn-accent px-3 py-1.5 rounded-md font-medium transition-colors disabled:opacity-50"
                     :disabled="toggling.has(t.id)"
                     @click="openEdit(t)"
                   >编辑</button>
                   <button
-                    class="text-[10px] tracking-[0.15em] uppercase border border-zinc-300 text-zinc-600 px-3 py-1.5 rounded-md hover:bg-zinc-100 hover:text-red-600 hover:border-red-300 font-medium transition-colors disabled:opacity-50"
+                    class="text-[10px] tracking-[0.15em] uppercase border border-zinc-300 text-zinc-600 px-3 py-1.5 rounded-md hover:bg-white/60 hover:text-red-600 hover:border-red-300 font-medium transition-colors disabled:opacity-50"
                     :disabled="toggling.has(t.id)"
                     @click="removeClock(t)"
                   >删除</button>
@@ -108,14 +108,14 @@
     <div class="flex items-center justify-between flex-wrap gap-3">
       <div class="flex items-center gap-3">
         <h2 class="text-[10px] tracking-[0.15em] uppercase text-zinc-500 font-medium">执行日志</h2>
-        <div class="flex items-center gap-1 bg-white border border-slate-200/60 rounded-lg p-1 shadow-sm">
+        <div class="flex items-center gap-1 glass rounded-xl p-1">
         <button
           v-for="t in typeTabs"
           :key="t.value"
           class="px-3 py-1.5 text-xs rounded-md transition-all"
           :class="filters.target_type === t.value
-            ? 'bg-zinc-900 text-white font-medium shadow-sm'
-            : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'"
+            ? 'btn-accent font-medium shadow-sm'
+            : 'text-slate-500 hover:text-slate-800 hover:bg-white/60'"
           @click="filters.target_type = t.value; applyFilters()"
         >
           {{ t.label }}
@@ -132,7 +132,7 @@
     </div>
 
     <!-- 条件查询栏 -->
-    <section class="bg-white rounded-xl shadow-sm border border-slate-200/60 px-5 py-4">
+    <section class="bg-white rounded-xl shadow-sm border border-white/60 px-5 py-4">
       <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         <label class="block">
           <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">状态</span>
@@ -163,14 +163,14 @@
         </label>
         <div class="flex items-end gap-2">
           <button
-            class="px-4 py-1.5 text-[11px] tracking-widest uppercase bg-zinc-900 text-white rounded-md hover:bg-zinc-700 transition-colors"
+            class="px-4 py-1.5 text-[11px] tracking-widest uppercase btn-accent rounded-md transition-colors"
             @click="applyFilters"
           >
             查询
           </button>
           <button
             v-if="hasFilter"
-            class="px-3 py-1.5 text-[11px] tracking-widest uppercase text-zinc-500 hover:bg-zinc-100 rounded-md transition-colors"
+            class="px-3 py-1.5 text-[11px] tracking-widest uppercase text-zinc-500 hover:bg-white/60 rounded-md transition-colors"
             @click="resetFilters"
           >
             重置
@@ -181,17 +181,17 @@
 
     <!-- 日志列表（新在上，滚动到底部自动加载更早的记录） -->
     <section class="space-y-3">
-      <div v-if="logs.length === 0" class="bg-white rounded-xl shadow-sm border border-slate-200/60 py-12 text-sm text-slate-400 text-center">
+      <div v-if="logs.length === 0" class="bg-white rounded-xl shadow-sm border border-white/60 py-12 text-sm text-slate-400 text-center">
         暂无符合条件的执行记录（定时任务触发后在此展示）
       </div>
 
       <div
         v-for="log in logs"
         :key="log.id"
-        class="bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden"
+        class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden"
       >
         <!-- 摘要行（点击弹出详情窗口） -->
-        <button class="w-full text-left px-5 py-3.5 hover:bg-slate-50/60 transition-colors" @click="detail = log">
+        <button class="w-full text-left px-5 py-3.5 hover:bg-white/55 transition-colors" @click="detail = log">
           <div class="flex items-center gap-2 flex-wrap">
             <span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap" :class="statusClass(log.status)">
               {{ statusText(log.status) }}
@@ -229,7 +229,7 @@
     <!-- 详情弹窗：点遮罩 / 右上角关闭 / Esc 均可关闭 -->
     <div
       v-if="detail"
-      class="fixed inset-0 bg-zinc-950/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      class="fixed inset-0 bg-slate-900/45 backdrop-blur-md flex items-center justify-center z-50 p-4"
       v-backdrop-close="() => (detail = null)"
     >
       <div class="bg-white rounded-xl shadow-2xl border border-zinc-200 w-full max-w-3xl max-h-[85vh] flex flex-col">
@@ -243,7 +243,7 @@
           </span>
           <span class="text-sm text-zinc-800 font-medium truncate">{{ detail.task_title || '(无标题)' }}</span>
           <button
-            class="ml-auto w-7 h-7 flex items-center justify-center rounded-md text-zinc-400 hover:text-zinc-800 hover:bg-zinc-100 transition-colors"
+            class="ml-auto w-7 h-7 flex items-center justify-center rounded-md text-zinc-400 hover:text-zinc-800 hover:bg-white/60 transition-colors"
             title="关闭"
             @click="detail = null"
           >
@@ -277,7 +277,7 @@
           <!-- 任务内容（触发时发送给 AI 的内容） -->
           <div v-if="detail.trigger_content">
             <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium mb-2">任务内容</h3>
-            <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-slate-200/70 rounded-lg px-3 py-2">{{ detail.trigger_content }}</p>
+            <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-white/60 rounded-lg px-3 py-2">{{ detail.trigger_content }}</p>
           </div>
 
           <!-- 错误信息 -->
@@ -296,9 +296,9 @@
             <div
               v-for="(tc, i) in detail.tool_calls"
               :key="i"
-              class="bg-white border border-slate-200/70 rounded-lg overflow-hidden"
+              class="bg-white border border-white/60 rounded-lg overflow-hidden"
             >
-              <div class="flex items-center gap-2 px-3 py-2 border-b border-slate-100">
+              <div class="flex items-center gap-2 px-3 py-2 border-b border-white/50">
                 <span class="text-xs font-mono font-medium text-zinc-800">{{ tc.name }}</span>
                 <span v-if="tc.error" class="text-[11px] px-1.5 py-0.5 rounded bg-red-50 text-red-600 border border-red-100">失败</span>
                 <span class="ml-auto text-[11px] text-slate-400 font-mono">{{ fmtDuration(tc.duration_ms) }}</span>
@@ -323,7 +323,7 @@
           <!-- 最终回复 -->
           <div v-if="detail.reply">
             <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium mb-2">最终回复</h3>
-            <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-slate-200/70 rounded-lg px-3 py-2">{{ detail.reply }}</p>
+            <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-white/60 rounded-lg px-3 py-2">{{ detail.reply }}</p>
           </div>
         </div>
       </div>
@@ -331,7 +331,7 @@
 
     <!-- 新建 / 编辑定时任务弹窗 -->
     <Teleport to="body">
-      <div v-if="clockForm" class="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/40 p-4" v-backdrop-close="() => (clockForm = null)">
+      <div v-if="clockForm" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 backdrop-blur-md p-4" v-backdrop-close="() => (clockForm = null)">
         <div class="bg-white rounded-xl shadow-2xl border border-zinc-200 w-full max-w-lg max-h-[90vh] overflow-y-auto">
           <div class="px-6 py-4 border-b border-zinc-100 flex items-center justify-between">
             <h3 class="text-[10px] tracking-[0.15em] uppercase text-zinc-800 font-medium">{{ clockForm.id ? '编辑定时任务' : '新建定时任务' }}</h3>
@@ -384,7 +384,7 @@
             <p v-if="clockFormError" class="text-xs text-red-600">{{ clockFormError }}</p>
             <div class="flex justify-end gap-2 pt-1">
               <button type="button" class="px-4 py-2 text-[11px] tracking-widest uppercase text-zinc-500 hover:text-zinc-800 font-medium transition-colors" @click="clockForm = null">取消</button>
-              <button type="submit" class="px-4 py-2 text-[11px] tracking-widest uppercase bg-zinc-900 text-white rounded-md hover:bg-zinc-700 font-medium transition-colors disabled:opacity-50" :disabled="clockSaving">
+                <button type="submit" class="px-4 py-2 text-[11px] tracking-widest uppercase btn-accent rounded-md font-medium transition-colors disabled:opacity-50" :disabled="clockSaving">
                 {{ clockSaving ? '保存中…' : '保存' }}
               </button>
             </div>
@@ -627,7 +627,7 @@ function statusText(s) {
 
 function statusClass(s) {
   return {
-    running: 'bg-zinc-900 text-white',
+    running: 'btn-accent',
     success: 'bg-white text-zinc-600 border border-zinc-300',
     timeout: 'bg-zinc-100 text-zinc-500 border border-zinc-200',
     error: 'bg-red-50 text-red-600 border border-red-200',

@@ -8,7 +8,7 @@
           v-model="search"
           type="text"
           placeholder="搜索配置项..."
-          class="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400 transition-shadow"
+          class="w-full bg-white border border-white/60 rounded-lg pl-9 pr-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400 transition-shadow"
         />
       </div>
 
@@ -38,7 +38,7 @@
                 class="w-full flex items-center justify-between pl-6 pr-3 py-1.5 rounded-lg text-[13px] transition-colors"
                 :class="activeGroup === s.name
                   ? 'bg-zinc-100 text-zinc-900 font-medium'
-                  : 'text-slate-600 hover:bg-slate-200/60'"
+                  : 'text-slate-600 hover:bg-white/70'"
                 @click="jumpTo(s.name)"
               >
                 <span class="truncate">{{ s.label }}</span>
@@ -51,7 +51,7 @@
               class="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-[13px] transition-colors"
               :class="activeGroup === node.name
                 ? 'bg-zinc-100 text-zinc-900 font-medium'
-                : 'text-slate-600 hover:bg-slate-200/60'"
+                : 'text-slate-600 hover:bg-white/70'"
               @click="jumpTo(node.name)"
             >
               <span class="truncate">{{ node.name }}</span>
@@ -68,7 +68,7 @@
       <!-- 移动端分组选择（桌面端用左侧导航） -->
       <div v-if="!rawMode" class="lg:hidden">
         <select
-          class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400 transition-shadow"
+          class="w-full bg-white border border-white/60 rounded-lg px-3 py-2.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400 transition-shadow"
           :value="activeCategory"
           @change="selectCategory($event.target.value)"
         >
@@ -93,22 +93,22 @@
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <button
-            class="px-3 py-1.5 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors"
+            class="px-3 py-1.5 text-sm rounded-lg border border-slate-300/60 text-slate-600 hover:bg-white/55 transition-colors"
             title="导出完整配置为 JSON 文件（含密钥等敏感字段，请妥善保管）"
             @click="onExportConfig"
           >
             导出 JSON
           </button>
-          <button class="px-3 py-1.5 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors" @click="rawMode = !rawMode">
+          <button class="px-3 py-1.5 text-sm rounded-lg border border-slate-300/60 text-slate-600 hover:bg-white/55 transition-colors" @click="rawMode = !rawMode">
             {{ rawMode ? '表单模式' : '高级模式 (JSON)' }}
           </button>
         </div>
       </div>
 
       <!-- 配置预设 -->
-      <section v-if="!rawMode" class="bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden">
+      <section v-if="!rawMode" class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
         <button
-          class="w-full flex items-center justify-between gap-3 px-4 py-4 sm:px-6 text-sm font-semibold text-slate-800 hover:bg-slate-50 transition-colors"
+          class="w-full flex items-center justify-between gap-3 px-4 py-4 sm:px-6 text-sm font-semibold text-slate-800 hover:bg-white/55 transition-colors"
           @click="presetsOpen = !presetsOpen"
         >
           <span class="flex items-center gap-2.5">
@@ -122,7 +122,7 @@
           </span>
         </button>
         <Transition name="fade">
-          <div v-show="presetsOpen" class="p-4 sm:p-6 space-y-4 border-t border-slate-100">
+          <div v-show="presetsOpen" class="p-4 sm:p-6 space-y-4 border-t border-white/50">
             <p class="text-xs text-slate-500">把当前全部配置（含密钥、MCP / Prompt 覆盖）保存为一份快照，之后可一键切换。应用预设后重启生效。</p>
 
             <div class="flex gap-2">
@@ -130,12 +130,12 @@
                 v-model="presetName"
                 type="text"
                 placeholder="预设名称，如：DeepSeek 日常"
-                class="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400 transition-shadow"
+                class="flex-1 border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400 transition-shadow"
                 @keyup.enter="onSavePreset()"
               />
               <button
                 :disabled="presetSaving || !presetName.trim()"
-                class="px-4 py-2 text-sm rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40 transition-colors shrink-0"
+                class="px-4 py-2 text-sm rounded-lg btn-accent disabled:opacity-40 transition-colors shrink-0"
                 @click="onSavePreset()"
               >
                 {{ presetSaving ? '保存中...' : '保存当前配置' }}
@@ -143,27 +143,27 @@
             </div>
 
             <p v-if="presets.length === 0" class="text-sm text-slate-400">还没有预设。调整好配置后，在上方输入名称即可保存。</p>
-            <ul v-else class="divide-y divide-slate-100 border border-slate-200/70 rounded-lg">
+            <ul v-else class="divide-y divide-slate-100 border border-white/60 rounded-lg">
               <li v-for="p in presets" :key="p.name" class="flex items-center gap-3 px-4 py-3">
                 <div class="min-w-0 flex-1">
                   <p class="text-sm font-medium text-slate-800 truncate">{{ p.name }}</p>
                   <p class="text-xs text-slate-400 mt-0.5">{{ p.key_count }} 项配置 · 更新于 {{ formatPresetTime(p.updated_at) }}</p>
                 </div>
                 <button
-                  class="px-3 py-1.5 text-xs rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 transition-colors shrink-0"
+                  class="px-3 py-1.5 text-xs rounded-lg btn-accent transition-colors shrink-0"
                   @click="onApplyPreset(p)"
                 >
                   应用
                 </button>
                 <button
-                  class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors shrink-0"
+                  class="px-3 py-1.5 text-xs rounded-lg border border-slate-300/60 text-slate-600 hover:bg-white/55 transition-colors shrink-0"
                   title="用当前配置覆盖该预设"
                   @click="onSavePreset(p.name)"
                 >
                   更新
                 </button>
                 <button
-                  class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 text-slate-500 hover:text-red-600 hover:border-red-300 transition-colors shrink-0"
+                  class="px-3 py-1.5 text-xs rounded-lg border border-slate-300/60 text-slate-500 hover:text-red-600 hover:border-red-300 transition-colors shrink-0"
                   @click="onDeletePreset(p)"
                 >
                   删除
@@ -183,15 +183,15 @@
             :key="cat.name"
             class="px-4 py-2 rounded-lg text-sm transition-colors"
             :class="activeCategory === cat.name
-              ? 'bg-zinc-900 text-white font-medium shadow-sm'
-              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'"
+              ? 'btn-accent font-medium shadow-sm'
+              : 'bg-white border border-white/60 text-slate-600 hover:bg-white/55'"
             @click="selectCategory(cat.name)"
           >
             {{ cat.name }}
             <span class="ml-1.5 text-[11px]" :class="activeCategory === cat.name ? 'text-zinc-300' : 'text-slate-400'">{{ cat.total }} 项</span>
           </button>
           <button
-            class="ml-auto px-3 py-2 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
+            class="ml-auto px-3 py-2 text-xs rounded-lg border border-white/60 text-slate-500 hover:bg-white/55 transition-colors"
             @click="toggleAll"
           >
             {{ allOpen ? '收起全部' : '展开全部' }}
@@ -202,10 +202,10 @@
           v-for="node in displayCards"
           :key="node.name"
           :id="sectionId(node.name)"
-          class="bg-white rounded-xl shadow-sm border border-slate-200/60 scroll-mt-24 overflow-hidden"
+          class="bg-white rounded-xl shadow-sm border border-white/60 scroll-mt-24 overflow-hidden"
         >
           <button
-            class="w-full flex items-center justify-between gap-3 px-4 py-4 sm:px-6 text-left hover:bg-slate-50 transition-colors"
+            class="w-full flex items-center justify-between gap-3 px-4 py-4 sm:px-6 text-left hover:bg-white/55 transition-colors"
             @click="toggleGroup(node.name)"
           >
             <span class="flex items-center gap-2.5 min-w-0">
@@ -220,13 +220,13 @@
           </button>
 
           <Transition name="fade">
-            <div v-show="isOpen(node)" class="p-4 sm:p-6 border-t border-slate-100" :class="{ 'space-y-5': hasSubs(node) }">
+            <div v-show="isOpen(node)" class="p-4 sm:p-6 border-t border-white/50" :class="{ 'space-y-5': hasSubs(node) }">
               <!-- 子分组分节：线框归类；平铺分组只有一个无名分节，直接铺字段 -->
               <div
                 v-for="s in node.sections"
                 :key="s.name"
                 :id="s.name !== node.name ? sectionId(s.name) : undefined"
-                :class="hasSubs(node) ? 'rounded-lg border border-slate-200 p-5 scroll-mt-24' : ''"
+                :class="hasSubs(node) ? 'rounded-lg border border-white/60 p-5 scroll-mt-24' : ''"
               >
                 <p v-if="s.label" class="flex items-center gap-2 text-xs font-semibold text-slate-500 mb-4">
                   <span class="w-1 h-3.5 rounded-full bg-zinc-400" />
@@ -246,7 +246,7 @@
                   <button
                     v-if="valueOf(field.key) === MASK"
                     type="button"
-                    class="shrink-0 px-3 py-2 text-xs rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors"
+                    class="shrink-0 px-3 py-2 text-xs rounded-lg border border-slate-300/60 text-slate-600 hover:bg-white/55 transition-colors"
                     @click="clearField(field)"
                   >清除</button>
                 </div>
@@ -263,7 +263,7 @@
                       :key="opt"
                       type="button"
                       class="px-3 py-1.5 text-sm rounded-lg border transition-colors"
-                      :class="isSelected(field, opt) ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'"
+                      :class="isSelected(field, opt) ? 'btn-accent' : 'bg-white text-slate-600 border-slate-300/60 hover:bg-white/55'"
                       @click="toggleOption(field, opt)"
                     >{{ opt }}</button>
                   </div>
@@ -276,7 +276,7 @@
                 <label v-else-if="field.type === 'bool'" class="inline-flex items-center gap-2.5 cursor-pointer select-none py-1" @click.prevent="form[field.key] = !form[field.key]">
                   <span
                     class="relative inline-flex w-9 h-5 rounded-full transition-colors duration-200"
-                    :class="form[field.key] ? 'bg-zinc-900' : 'bg-slate-300'"
+                    :class="form[field.key] ? 'bg-indigo-500' : 'bg-slate-300/70'"
                   >
                     <span
                       class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all duration-200"
@@ -307,12 +307,12 @@
       </template>
 
       <!-- 高级模式：原始 JSON -->
-      <section v-else class="bg-white rounded-xl shadow-sm border border-slate-200/60 p-4 sm:p-6 space-y-3">
+      <section v-else class="bg-white rounded-xl shadow-sm border border-white/60 p-4 sm:p-6 space-y-3">
         <p class="text-xs text-slate-500">全部配置键的扁平 JSON 视图（键为小写点分路径）。编辑后点击保存。</p>
-        <textarea v-model="rawText" rows="24" spellcheck="false" class="w-full bg-zinc-950 text-slate-200 rounded-lg px-4 py-3 text-xs font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-zinc-400" />
+        <textarea v-model="rawText" rows="24" spellcheck="false" class="w-full bg-slate-950/85 text-slate-200 rounded-lg px-4 py-3 text-xs font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-zinc-400" />
         <div class="flex items-center gap-3">
-          <button class="px-3 py-1.5 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors" @click="formatRaw">格式化</button>
-          <button :disabled="saving" class="px-4 py-1.5 text-sm rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40 transition-colors" @click="onSaveRaw">保存</button>
+          <button class="px-3 py-1.5 text-sm rounded-lg border border-slate-300/60 text-slate-600 hover:bg-white/55 transition-colors" @click="formatRaw">格式化</button>
+          <button :disabled="saving" class="px-4 py-1.5 text-sm rounded-lg btn-accent disabled:opacity-40 transition-colors" @click="onSaveRaw">保存</button>
           <span v-if="rawError" class="text-sm text-red-600">{{ rawError }}</span>
         </div>
       </section>
@@ -322,13 +322,13 @@
     <Transition name="fade">
       <div
         v-if="!rawMode && dirty"
-        class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 bg-zinc-900 text-white rounded-full pl-5 pr-2 py-2 shadow-2xl shadow-slate-900/30"
+      class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 btn-accent rounded-full pl-5 pr-2 py-2 shadow-2xl shadow-slate-900/30"
       >
         <span class="text-sm text-slate-300">有未保存的修改</span>
         <button class="text-sm text-slate-400 hover:text-white transition-colors" @click="resetForm">放弃</button>
         <button
           :disabled="saving"
-          class="px-4 py-1.5 text-sm rounded-full bg-white text-zinc-900 hover:bg-zinc-200 disabled:opacity-40 transition-colors font-medium"
+          class="px-4 py-1.5 text-sm rounded-full bg-white text-zinc-900 hover:bg-white/70 disabled:opacity-40 transition-colors font-medium"
           @click="onSave"
         >
           {{ saving ? '保存中...' : '保存修改' }}
@@ -344,7 +344,7 @@ import { api } from '../api.js'
 import QrLoginCard from '../components/QrLoginCard.vue'
 
 const MASK = '********'
-const inputClass = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400 transition-shadow'
+const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400 transition-shadow'
 
 const iconSearch = '<svg fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>'
 const iconCheck = '<svg fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>'

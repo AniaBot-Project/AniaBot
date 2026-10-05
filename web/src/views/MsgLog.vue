@@ -2,14 +2,14 @@
   <div class="space-y-4">
     <!-- 筛选与操作栏 -->
     <div class="flex items-center justify-between flex-wrap gap-3">
-      <div class="flex items-center gap-1 bg-white border border-slate-200/60 rounded-lg p-1 shadow-sm">
+      <div class="flex items-center gap-1 glass rounded-xl p-1">
         <button
           v-for="t in typeTabs"
           :key="t.value"
           class="px-3 py-1.5 text-xs rounded-md transition-all"
           :class="filter === t.value
-            ? 'bg-zinc-900 text-white font-medium shadow-sm'
-            : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'"
+            ? 'btn-accent font-medium shadow-sm'
+            : 'text-slate-500 hover:text-slate-800 hover:bg-white/60'"
           @click="filter = t.value"
         >
           {{ t.label }}
@@ -25,7 +25,7 @@
     </div>
 
     <!-- 日志列表（旧在上、新在下，自动滚到底部；滚动到顶部加载更早的记录） -->
-    <section class="bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden">
+    <section class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
       <ul ref="listEl" class="h-[60vh] overflow-y-auto px-5 py-3 space-y-3" @scroll="onScroll">
         <li v-if="loadingMore" class="py-2 text-xs text-slate-400 text-center list-none">加载更早的消息…</li>
         <li v-else-if="!hasMore && logs.length" class="py-2 text-xs text-slate-300 text-center list-none">没有更早的消息了</li>
@@ -55,9 +55,9 @@
       </ul>
 
       <!-- 有新消息提示（用户上翻查看历史时） -->
-      <div v-if="hasNew" class="border-t border-slate-100 px-5 py-2 flex justify-center">
+      <div v-if="hasNew" class="border-t border-white/50 px-5 py-2 flex justify-center">
         <button
-          class="text-xs bg-zinc-900 text-white px-3 py-1.5 rounded-full hover:bg-zinc-700 font-medium transition-colors shadow-sm"
+          class="text-xs btn-accent px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm"
           @click="scrollToBottom(true)"
         >
           ↓ 有新消息，回到底部
@@ -111,7 +111,7 @@ function typeText(log) {
 
 function typeClass(type) {
   return {
-    group: 'bg-zinc-900 text-white',
+    group: 'btn-accent',
     friend: 'bg-zinc-100 text-zinc-700 border border-zinc-200',
     notice: 'bg-white text-zinc-500 border border-zinc-300',
   }[type] || 'bg-slate-100 text-slate-600'

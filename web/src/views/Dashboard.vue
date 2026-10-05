@@ -3,7 +3,7 @@
     <!-- 适配器未连接提示 -->
     <div
       v-if="status.adapter_status && status.adapter_status !== 'connected'"
-      class="tcard border-amber-300! bg-amber-50! px-5 py-3.5 flex items-center justify-between gap-4"
+      class="glass-warn px-5 py-3.5 flex items-center justify-between gap-4"
     >
       <span class="flex items-center gap-3 text-xs text-amber-800">
         <span class="[&>svg]:w-4 [&>svg]:h-4 text-amber-500 shrink-0" v-html="icons.warn" />
@@ -284,7 +284,7 @@
         <div class="flex items-center justify-between">
           <span class="tlabel">API Balance</span>
           <button
-            class="tpill cursor-pointer hover:bg-zinc-100 transition-colors"
+            class="tpill cursor-pointer hover:bg-white/60 transition-colors"
             :class="{ 'opacity-50 pointer-events-none': balanceLoading }"
             title="强制刷新（绕过服务端缓存）"
             @click="loadBalance(true)"
@@ -327,7 +327,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="p in plugins" :key="p.name" class="border-b border-dashed border-zinc-100 last:border-0 hover:bg-zinc-50/70 transition-colors">
+            <tr v-for="p in plugins" :key="p.name" class="border-b border-dashed border-zinc-100 last:border-0 hover:bg-white/55 transition-colors">
               <td class="px-3 py-3 sm:px-6 font-semibold text-zinc-800">{{ p.name }}</td>
               <td class="px-3 py-3 sm:px-6 text-zinc-600">{{ p.help_words }}</td>
               <td class="px-3 py-3 sm:px-6 text-zinc-600">{{ p.author }}</td>

@@ -51,7 +51,7 @@
         <div class="flex items-center gap-2">
           <button
             v-if="showLogin"
-            class="inline-flex items-center gap-2 text-xs bg-zinc-900 text-white px-3.5 py-2 rounded-lg hover:bg-zinc-700 font-medium shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            class="inline-flex items-center gap-2 text-xs btn-accent px-3.5 py-2 rounded-lg font-medium shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             :disabled="busy || loading || refreshing"
             @click="onOAuthStart"
           >
@@ -59,7 +59,7 @@
             {{ info.token_set ? '重新登录 GitHub' : '登录 GitHub' }}
           </button>
           <button
-            class="inline-flex items-center gap-2 text-xs bg-white text-zinc-700 px-3.5 py-2 rounded-lg border border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900 font-medium shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            class="inline-flex items-center gap-2 text-xs bg-white text-zinc-700 px-3.5 py-2 rounded-lg border border-zinc-300 hover:bg-white/55 hover:text-zinc-900 font-medium shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             :disabled="!canBrowse || loading || refreshing"
             @click="refreshList()"
           >
@@ -163,7 +163,7 @@
             <span v-if="i < phases.length - 1" class="mx-2 h-px w-5 bg-zinc-200" />
           </template>
         </div>
-        <div ref="logEl" class="bg-zinc-950 rounded-lg p-3.5 h-64 overflow-y-auto font-mono text-[11px] leading-relaxed text-zinc-300">
+        <div ref="logEl" class="bg-slate-950/85 rounded-xl p-3.5 h-64 overflow-y-auto font-mono text-[11px] leading-relaxed text-slate-300 border border-white/10 shadow-inner">
           <div v-for="(l, i) in status.logs" :key="i" :class="logLineClass(l)">{{ l }}</div>
           <div v-if="status.running" class="flex items-center gap-2 text-zinc-500 mt-1">
             <span class="w-3 h-3 border-2 border-zinc-700 border-t-zinc-300 rounded-full animate-spin" />
@@ -180,7 +180,7 @@
               <button
                 v-for="t in tabs" :key="t.key"
                 class="px-3.5 py-1.5 text-xs rounded-md transition-colors"
-                :class="tab === t.key ? 'bg-zinc-900 text-white font-medium shadow-sm' : 'text-zinc-500 hover:text-zinc-800'"
+                :class="tab === t.key ? 'btn-accent font-medium shadow-sm' : 'text-zinc-500 hover:text-zinc-800'"
                 @click="tab = t.key"
               >{{ t.label }}</button>
             </div>
@@ -199,7 +199,7 @@
         <div v-else class="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
           <div
             v-for="p in filtered" :key="p.id"
-            class="border border-slate-200/70 rounded-xl p-4 hover:border-zinc-300 hover:shadow-md hover:shadow-zinc-200/50 transition-all cursor-pointer bg-white"
+            class="border border-white/60 rounded-xl p-4 hover:border-zinc-300 hover:shadow-md hover:shadow-zinc-200/50 transition-all cursor-pointer bg-white"
             @click="openDetail(p.id)"
           >
             <div class="flex items-start justify-between gap-3">
@@ -232,7 +232,7 @@
                   class="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   :class="p.installed
                     ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
-                    : 'bg-zinc-900 text-white hover:bg-zinc-700'"
+                  : 'btn-accent '"
                   :disabled="!canOperate || busy"
                   @click="onInstall(p)"
                 >{{ p.installed ? '升级' : '安装' }}</button>
@@ -244,7 +244,7 @@
     </template>
 
     <!-- GitHub 在线登录弹窗 -->
-    <div v-if="oauthOpen" class="fixed inset-0 bg-zinc-950/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" v-backdrop-close="() => (oauthOpen = false)">
+    <div v-if="oauthOpen" class="fixed inset-0 bg-slate-900/45 backdrop-blur-md flex items-center justify-center z-50 p-4" v-backdrop-close="() => (oauthOpen = false)">
       <div class="tcard p-6 w-[26rem] max-w-full text-center space-y-4">
         <h2 class="text-sm font-semibold text-zinc-900">GitHub 登录</h2>
         <template v-if="oauth.status === 'pending'">
@@ -266,14 +266,14 @@
           <p class="text-sm text-red-600">{{ oauth.error || '登录流程已结束' }}</p>
         </template>
         <div class="flex justify-center gap-2 pt-1">
-          <button v-if="oauth.status === 'pending'" class="text-xs text-zinc-500 hover:text-zinc-900 px-4 py-2 rounded-lg hover:bg-zinc-100" @click="onOAuthCancel">取消</button>
-          <button v-else class="text-xs bg-zinc-900 text-white px-5 py-2 rounded-lg hover:bg-zinc-700" @click="oauthOpen = false">关闭</button>
+          <button v-if="oauth.status === 'pending'" class="text-xs text-zinc-500 hover:text-zinc-900 px-4 py-2 rounded-lg hover:bg-white/60" @click="onOAuthCancel">取消</button>
+        <button v-else class="text-xs btn-accent px-5 py-2 rounded-lg" @click="oauthOpen = false">关闭</button>
         </div>
       </div>
     </div>
 
     <!-- 详情弹窗 -->
-    <div v-if="showDetail" class="fixed inset-0 bg-zinc-950/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6" v-backdrop-close="closeDetail">
+    <div v-if="showDetail" class="fixed inset-0 bg-slate-900/45 backdrop-blur-md flex items-center justify-center z-50 p-4 sm:p-6" v-backdrop-close="closeDetail">
       <div class="bg-white rounded-xl shadow-2xl border border-zinc-200 w-full max-w-3xl max-h-[88vh] flex flex-col overflow-hidden">
         <!-- 头部 -->
         <div class="px-6 py-4 border-b border-zinc-100 flex items-start justify-between gap-4 shrink-0">
@@ -305,7 +305,7 @@
             <button
               v-if="!detail.installed || detail.installed_version !== detail.manifest.version"
               class="text-xs px-4 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              :class="detail.installed ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100' : 'bg-zinc-900 text-white hover:bg-zinc-700'"
+              :class="detail.installed ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100' : 'btn-accent '"
               :disabled="!canOperate || busy"
               @click="onInstallDetail"
             >{{ detail.installed ? '升级到 v' + detail.manifest.version : '安装' }}</button>
@@ -341,7 +341,7 @@
     </div>
 
     <!-- 重启中遮罩 -->
-    <div v-if="rebooting" class="fixed inset-0 bg-zinc-950/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div v-if="rebooting" class="fixed inset-0 bg-slate-900/50 backdrop-blur-md flex items-center justify-center z-50 p-4">
       <div class="tcard p-8 w-80 max-w-full text-center space-y-3">
         <span class="mx-auto block w-8 h-8 border-[3px] border-zinc-200 border-t-zinc-800 rounded-full animate-spin" />
         <div class="text-sm font-semibold text-zinc-900 tracking-[0.15em] uppercase">Rebooting</div>

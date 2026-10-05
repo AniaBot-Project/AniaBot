@@ -84,7 +84,7 @@
             v-for="r in RANGE_OPTIONS" :key="r.key"
             class="px-3 py-1.5 text-[10px] tracking-[0.15em] uppercase rounded-sm border transition-colors"
             :class="range === r.key
-              ? 'bg-zinc-900 text-zinc-50 border-zinc-900 font-medium'
+              ? 'bg-indigo-500 text-white border-indigo-400 font-medium'
               : 'border-zinc-300 text-zinc-500 hover:text-zinc-900 hover:border-zinc-500'"
             @click="range = r.key"
           >{{ r.label }}</button>
@@ -92,7 +92,7 @@
             <input v-model="customStart" type="date" :max="todayStr" class="dater" />
             <span class="text-zinc-400 text-xs">~</span>
             <input v-model="customEnd" type="date" :max="todayStr" class="dater" />
-            <button class="px-3 py-1.5 text-[10px] tracking-[0.15em] uppercase rounded-sm bg-zinc-900 text-zinc-50 font-medium hover:bg-zinc-700 transition-colors" @click="applyCustom">查询</button>
+          <button class="px-3 py-1.5 text-[10px] tracking-[0.15em] uppercase rounded-lg btn-accent" @click="applyCustom">查询</button>
           </template>
         </div>
       </div>
@@ -261,7 +261,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(t, i) in topTargets" :key="t.chat_type + ':' + t.target_id" class="border-b border-dashed border-zinc-100 last:border-0 hover:bg-zinc-50/70 transition-colors">
+              <tr v-for="(t, i) in topTargets" :key="t.chat_type + ':' + t.target_id" class="border-b border-dashed border-zinc-100 last:border-0 hover:bg-white/55 transition-colors">
                 <td class="px-3 py-3 sm:px-6 text-zinc-400">{{ i + 1 }}</td>
                 <td class="px-3 py-3 text-zinc-800 font-medium whitespace-nowrap">
                   <span class="text-[9px] tracking-[0.12em] uppercase border border-zinc-300 text-zinc-500 px-1.5 py-0.5 rounded mr-2">{{ t.chat_type === 'group' ? '群' : '私' }}</span>

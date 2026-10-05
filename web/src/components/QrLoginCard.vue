@@ -1,5 +1,5 @@
 <template>
-  <section v-if="visible" class="bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden">
+  <section v-if="visible" class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
     <div class="w-full flex items-center justify-between gap-3 px-6 py-4">
       <span class="flex items-center gap-2.5 min-w-0">
         <span class="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs shrink-0 bg-emerald-500">微</span>
@@ -9,14 +9,14 @@
       <button
         v-if="ready && (state === 'idle' || state === 'failed' || state === 'connected' || !state)"
         :disabled="starting"
-        class="shrink-0 px-3 py-1.5 text-xs rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40 transition-colors"
+        class="shrink-0 px-3 py-1.5 text-xs rounded-lg btn-accent disabled:opacity-40 transition-colors"
         @click="start"
       >
         {{ starting ? '获取二维码中…' : state === 'connected' ? '重新扫码' : '扫码登录' }}
       </button>
     </div>
 
-    <div class="px-6 pb-6 border-t border-slate-100 pt-5 space-y-4">
+    <div class="px-6 pb-6 border-t border-white/50 pt-5 space-y-4">
       <!-- 平台未生效：引导启用/重启 -->
       <div v-if="!ready" class="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-4 py-3 space-y-1">
         <p v-if="weixinEnabled">
@@ -31,7 +31,7 @@
       <template v-else>
         <!-- 等待扫码 / 已扫码 / 待配对：展示二维码 -->
         <div v-if="state === 'pending' || state === 'scaned' || state === 'need_verify'" class="flex flex-col items-center gap-3">
-          <img v-if="qr" :src="qr" alt="微信登录二维码" class="w-52 h-52 rounded-lg border border-slate-200" />
+          <img v-if="qr" :src="qr" alt="微信登录二维码" class="w-52 h-52 rounded-lg border border-white/60" />
           <p class="text-sm text-slate-600">
             {{ state === 'pending' ? '请用手机微信扫描二维码，并在手机上确认授权' : '' }}
             {{ state === 'scaned' ? '已扫码，请在手机上确认授权' : '' }}
@@ -44,12 +44,12 @@
               inputmode="numeric"
               maxlength="12"
               placeholder="手机上显示的数字"
-              class="w-40 border border-slate-300 rounded-lg px-3 py-2 text-sm text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400"
+              class="w-40 border border-slate-300/60 rounded-lg px-3 py-2 text-sm text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400"
               @keyup.enter="submitVerify"
             />
             <button
               :disabled="!verifyCode.trim() || verifying"
-              class="px-3 py-2 text-sm rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40 transition-colors"
+              class="px-3 py-2 text-sm rounded-lg btn-accent disabled:opacity-40 transition-colors"
               @click="submitVerify"
             >
               {{ verifying ? '提交中…' : '提交' }}

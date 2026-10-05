@@ -64,7 +64,7 @@
     <!-- 操作 -->
     <div class="flex items-center gap-3">
       <button
-        class="text-[10px] tracking-[0.15em] uppercase bg-zinc-900 text-white px-3 py-1.5 rounded-md hover:bg-zinc-700 font-medium transition-colors disabled:opacity-50"
+        class="text-[10px] tracking-[0.15em] uppercase btn-accent px-3 py-1.5 rounded-md font-medium transition-colors disabled:opacity-50"
         :disabled="!canUpdate"
         @click="onStart"
       >开始更新</button>
@@ -103,7 +103,7 @@
       </div>
       <div
         ref="logEl"
-        class="bg-zinc-950 rounded-md p-3 h-72 overflow-y-auto font-mono text-[11px] leading-relaxed text-zinc-300"
+        class="bg-slate-950/85 rounded-xl p-3 h-72 overflow-y-auto font-mono text-[11px] leading-relaxed text-slate-300 border border-white/10 shadow-inner"
       >
         <div v-for="(l, i) in status.logs" :key="i" :class="logLineClass(l)">{{ l }}</div>
         <div v-if="status.running" class="flex items-center gap-2 text-zinc-500 mt-1">
@@ -114,7 +114,7 @@
     </div>
 
     <!-- 重启中遮罩 -->
-    <div v-if="rebooting" class="fixed inset-0 bg-zinc-950/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div v-if="rebooting" class="fixed inset-0 bg-slate-900/50 backdrop-blur-md flex items-center justify-center z-50 p-4">
       <div class="tcard p-8 w-80 max-w-full text-center space-y-3">
         <span class="mx-auto block w-8 h-8 border-[3px] border-zinc-200 border-t-zinc-800 rounded-full animate-spin" />
         <div class="text-sm font-semibold text-zinc-900 tracking-[0.15em] uppercase">Updating</div>
