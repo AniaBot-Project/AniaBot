@@ -242,6 +242,9 @@ export const api = {
   getMarketplaceDetail: (id) => request(`/api/marketplace/plugins/${encodeURIComponent(id)}`),
   installMarketplacePlugin: (id, commit = '') => request('/api/marketplace/install', { method: 'POST', body: JSON.stringify({ id, commit }) }),
   uninstallMarketplacePlugin: (id) => request('/api/marketplace/uninstall', { method: 'POST', body: JSON.stringify({ id }) }),
+  // 批量安装/升级/卸载：一次编译、一次重启（install/uninstall 数组，可只传其一）
+  batchMarketplacePlugins: (install, uninstall) =>
+    request('/api/marketplace/batch', { method: 'POST', body: JSON.stringify({ install, uninstall }) }),
   rollbackMarketplace: () => request('/api/marketplace/rollback', { method: 'POST' }),
   getMarketplaceStatus: () => request('/api/marketplace/status'),
   startMarketplaceOAuth: () => request('/api/marketplace/oauth/start', { method: 'POST' }),

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -198,48 +197,231 @@ func (s *Service) preflight(ctx context.Context) (string, bool) {
 	return "", true
 }
 
-// ---------- 安装 ----------
+// ---------- 批量安装 / 卸载 ----------
 
-// Install 开始安装/升级插件（异步）。
+// 操作类型
+const (
+	opInstall   = "install"
+	opUninstall = "uninstall"
+)
+
+// maxBatchSize 单次批量操作允许的插件数量上限。
+const maxBatchSize = 50
+
+// operation 批量任务中的单个操作。
+type operation struct {
+	kind   string // opInstall / opUninstall
+	id     string
+	commit string // 仅 install：指定 commit（空 = 分支最新）
+}
+
+// Batch 批量安装/升级/卸载插件（可混合，异步）。
+// 所有操作共用一次生成注册代码、拉取依赖、编译与重启，比逐个操作快得多。
+func (s *Service) Batch(installIDs, uninstallIDs []string) error {
+	if !s.Enabled() {
+		return fmt.Errorf("插件市场未开启")
+	}
+	ops, err := s.buildOps(installIDs, uninstallIDs)
+	if err != nil {
+		return err
+	}
+	return s.start(ops)
+}
+
+// Install 开始安装/升级单个插件（异步）。
 func (s *Service) Install(id, commit string) error {
 	if !s.Enabled() {
 		return fmt.Errorf("插件市场未开启")
 	}
+	ops, err := s.buildOps([]string{id}, nil)
+	if err != nil {
+		return err
+	}
+	ops[0].commit = commit
+	return s.start(ops)
+}
+
+// Uninstall 开始卸载单个插件（异步）。
+func (s *Service) Uninstall(id string) error {
+	if !s.Enabled() {
+		return fmt.Errorf("插件市场未开启")
+	}
+	ops, err := s.buildOps(nil, []string{id})
+	if err != nil {
+		return err
+	}
+	return s.start(ops)
+}
+
+// buildOps 校验并归一化批量请求：去空白、去重、数量上限、安装/卸载冲突，
+// 以及卸载目标必须已安装。
+func (s *Service) buildOps(installIDs, uninstallIDs []string) ([]operation, error) {
+	installs, err := normalizeIDs(installIDs)
+	if err != nil {
+		return nil, err
+	}
+	uninstalls, err := normalizeIDs(uninstallIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(installs)+len(uninstalls) == 0 {
+		return nil, fmt.Errorf("未选择任何插件")
+	}
+	if len(installs)+len(uninstalls) > maxBatchSize {
+		return nil, fmt.Errorf("一次最多操作 %d 个插件", maxBatchSize)
+	}
+	installSet := make(map[string]struct{}, len(installs))
+	for _, id := range installs {
+		installSet[id] = struct{}{}
+	}
+	for _, id := range uninstalls {
+		if _, dup := installSet[id]; dup {
+			return nil, fmt.Errorf("插件 %s 同时出现在安装与卸载列表中", id)
+		}
+	}
+	// 卸载目标必须是市场安装过的插件（安装/升级不校验市场索引，保持原行为）
+	for _, id := range uninstalls {
+		if _, ok := s.manifest().find(id); !ok {
+			return nil, fmt.Errorf("插件 %s 未安装", id)
+		}
+	}
+	ops := make([]operation, 0, len(installs)+len(uninstalls))
+	for _, id := range installs {
+		ops = append(ops, operation{kind: opInstall, id: id})
+	}
+	for _, id := range uninstalls {
+		ops = append(ops, operation{kind: opUninstall, id: id})
+	}
+	return ops, nil
+}
+
+// normalizeIDs 去空白、去重并保持原顺序，同时校验 ID 合法性（防路径穿越）。
+func normalizeIDs(ids []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, raw := range ids {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if err := pluginmeta.ValidateID(id); err != nil {
+			return nil, err
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+// start 占用任务槽并异步执行批量操作。
+func (s *Service) start(ops []operation) error {
 	if !s.state.tryBegin() {
 		return fmt.Errorf("已有插件任务正在进行中或正在重启")
 	}
-	s.state.setTask("install", id)
-	oplog.Record(oplog.CategoryPlugin, "marketplace_install", "安装插件 "+id)
-	go s.runInstall(id, commit)
+	ids := make([]string, 0, len(ops))
+	installs, uninstalls := 0, 0
+	for _, op := range ops {
+		ids = append(ids, op.id)
+		if op.kind == opInstall {
+			installs++
+		} else {
+			uninstalls++
+		}
+	}
+	action := "batch"
+	if len(ops) == 1 {
+		action = ops[0].kind
+	}
+	// 状态里的插件标识：过长时截断，避免面板一次塞入几十个 ID
+	label := strings.Join(ids, ", ")
+	if len(ids) > 6 {
+		label = strings.Join(ids[:6], ", ") + fmt.Sprintf(" 等 %d 个", len(ids))
+	}
+	s.state.setTask(action, label)
+
+	detail := fmt.Sprintf("批量操作 %d 个插件（安装/升级 %d、卸载 %d）: %s", len(ids), installs, uninstalls, label)
+	if len(ops) == 1 && ops[0].kind == opInstall {
+		detail = "安装插件 " + ops[0].id
+	}
+	if len(ops) == 1 && ops[0].kind == opUninstall {
+		detail = "卸载插件 " + ops[0].id
+	}
+	oplog.Record(oplog.CategoryPlugin, "marketplace_"+action, detail)
+	go s.runBatch(ops)
 	return nil
 }
 
-func (s *Service) runInstall(id, commit string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+// runBatch 执行批量安装/升级/卸载流水线：先下载校验并写入全部插件，
+// 再共用一次生成注册代码、拉依赖、编译、替换二进制与重启。
+func (s *Service) runBatch(ops []operation) {
+	ctx, cancel := context.WithTimeout(context.Background(), batchTimeout(len(ops)))
 	defer cancel()
 
-	persistDir := filepath.Join(s.pluginDir(), id)
-	srcPluginDir := filepath.Join(s.sourceDir(), pluginmeta.PluginRoot, id)
-	backupDir := persistDir + ".old"
-	var hadOld, startedWrite, cleaned bool
+	var installs, uninstalls []operation
+	for _, op := range ops {
+		if op.kind == opInstall {
+			installs = append(installs, op)
+		} else {
+			uninstalls = append(uninstalls, op)
+		}
+	}
 
-	// rollbackCopy 失败时把持久目录/源码树恢复到操作前状态：
-	// 升级回旧版本，新安装则删除，并重新生成注册代码。
-	rollbackCopy := func() {
-		if !startedWrite || cleaned {
+	// 已下载校验、待写入的插件
+	type staged struct {
+		op       operation
+		manifest *pluginmeta.Manifest
+		commit   string
+		dir      string
+	}
+	// 已写盘的安装记录（失败时按此回滚；backupDir 仅在 hadOld 时有效）
+	type written struct {
+		id           string
+		persistDir   string
+		srcPluginDir string
+		backupDir    string
+		hadOld       bool
+	}
+	// 已移除源码树的卸载记录（持久副本保留至编译成功，失败可还原）
+	type removed struct {
+		id           string
+		persistDir   string
+		srcPluginDir string
+	}
+	var stagedList []staged
+	var writtenList []written
+	var removedList []removed
+	cleaned := false
+
+	// rollback 失败时把持久目录/源码树恢复到操作前状态：
+	// 升级回旧版本，新安装则删除，卸载从持久副本还原源码树，并重新生成注册代码。
+	rollback := func() {
+		if cleaned || (len(writtenList) == 0 && len(removedList) == 0) {
 			return
 		}
 		cleaned = true
-		_ = os.RemoveAll(srcPluginDir)
-		if hadOld {
-			_ = os.RemoveAll(persistDir)
-			if err := os.Rename(backupDir, persistDir); err != nil {
-				s.logger.Warn("插件安装失败后恢复旧版本失败", "plugin", id, "error", err)
-				return
+		for i := len(writtenList) - 1; i >= 0; i-- {
+			r := writtenList[i]
+			_ = os.RemoveAll(r.srcPluginDir)
+			if r.hadOld {
+				_ = os.RemoveAll(r.persistDir)
+				if err := os.Rename(r.backupDir, r.persistDir); err != nil {
+					s.logger.Warn("插件安装失败后恢复旧版本失败", "plugin", r.id, "error", err)
+					continue
+				}
+				_ = replaceDir(r.persistDir, r.srcPluginDir)
+			} else {
+				_ = os.RemoveAll(r.persistDir)
 			}
-			_ = replaceDir(persistDir, srcPluginDir)
-		} else {
-			_ = os.RemoveAll(persistDir)
+		}
+		for i := len(removedList) - 1; i >= 0; i-- {
+			r := removedList[i]
+			_ = os.RemoveAll(r.srcPluginDir)
+			if _, err := os.Stat(r.persistDir); err == nil {
+				_ = replaceDir(r.persistDir, r.srcPluginDir)
+			}
 		}
 		// 尽力把注册代码恢复为与目录一致的状态
 		_ = s.stepCmd(ctx, s.sourceDir(), "go", "run", "./tools/plugingen")
@@ -247,9 +429,9 @@ func (s *Service) runInstall(id, commit string) {
 
 	fail := func(kind string, err error) {
 		s.state.appendLog("✗ " + err.Error())
-		rollbackCopy()
+		rollback()
 		s.state.fail(kind, err)
-		s.logger.Warn("插件安装失败", "plugin", id, "kind", kind, "error", err)
+		s.logger.Warn("插件操作失败", "kind", kind, "error", err)
 	}
 
 	// 1. 环境检查
@@ -260,69 +442,130 @@ func (s *Service) runInstall(id, commit string) {
 		return
 	}
 	s.state.appendLog("  环境正常")
+	if len(ops) > 1 {
+		s.state.appendLog(fmt.Sprintf("== 批量操作：安装/升级 %d 个、卸载 %d 个 ==", len(installs), len(uninstalls)))
+	}
 
-	// 2. 下载插件源码
-	s.state.setPhase(phFetch)
-	s.state.appendLog("== 下载插件源码 ==")
-	if commit == "" {
-		c, err := s.client().latestCommit(ctx, s.branch())
-		if err != nil {
+	// 2. 统一下载全部待安装插件的源码（全部下载成功后才开始校验与写盘）
+	if len(installs) > 0 {
+		s.state.setPhase(phFetch)
+		s.state.appendLog("== 下载插件源码 ==")
+	}
+	latest, latestFetched := "", false
+	downloaded := make([]staged, 0, len(installs))
+	for i, op := range installs {
+		label := op.id
+		if len(installs) > 1 {
+			label = fmt.Sprintf("%s（%d/%d）", op.id, i+1, len(installs))
+		}
+		commit := op.commit
+		if commit == "" {
+			// 同一分支的多个插件复用一次 latestCommit 查询
+			if !latestFetched {
+				c, err := s.client().latestCommit(ctx, s.branch())
+				if err != nil {
+					fail("仓库", err)
+					return
+				}
+				latest = c
+				latestFetched = true
+			}
+			commit = latest
+		}
+		s.state.appendLog("  " + label + " @ " + commit)
+		staging := filepath.Join(s.cacheDir(), "extract", fmt.Sprintf("%s-%d", op.id, time.Now().UnixNano()))
+		if err := os.RemoveAll(staging); err != nil {
+			fail("系统", err)
+			return
+		}
+		if err := os.MkdirAll(staging, 0o755); err != nil {
+			fail("系统", err)
+			return
+		}
+		if err := s.client().downloadPlugin(ctx, commit, op.id, staging); err != nil {
 			fail("仓库", err)
 			return
 		}
-		commit = c
-	}
-	s.state.appendLog("  目标 commit: " + commit)
-	staging := filepath.Join(s.cacheDir(), "extract", id+"-"+fmt.Sprintf("%d", time.Now().Unix()))
-	if err := os.RemoveAll(staging); err != nil {
-		fail("系统", err)
-		return
-	}
-	if err := os.MkdirAll(staging, 0o755); err != nil {
-		fail("系统", err)
-		return
-	}
-	if err := s.client().downloadPlugin(ctx, commit, id, staging); err != nil {
-		fail("仓库", err)
-		return
+		downloaded = append(downloaded, staged{op: op, commit: commit, dir: staging})
 	}
 
-	// 3. 校验元信息
-	s.state.setPhase(phVerify)
-	s.state.appendLog("== 校验插件元信息 ==")
-	m, err := pluginmeta.LoadManifest(filepath.Join(staging, "plugin.json"))
-	if err != nil {
-		fail("校验", err)
-		return
+	// 3. 统一校验全部下载的插件元信息
+	if len(downloaded) > 0 {
+		s.state.setPhase(phVerify)
+		s.state.appendLog("== 校验插件元信息 ==")
 	}
-	if m.ID != id {
-		fail("校验", fmt.Errorf("插件目录与 plugin.json 的 id 不一致: %q != %q", m.ID, id))
-		return
-	}
-	s.state.appendLog(fmt.Sprintf("  %s v%s by %s", m.Name, m.Version, m.Author))
-
-	// 4. 写入插件目录（持久副本 + 源码树副本；先备份旧版本供失败回滚）
-	s.state.setPhase(phCopy)
-	s.state.appendLog("== 写入插件目录 ==")
-	startedWrite = true
-	if _, err := os.Stat(persistDir); err == nil {
-		hadOld = true
-		_ = os.RemoveAll(backupDir)
-		if err := os.Rename(persistDir, backupDir); err != nil {
-			fail("系统", fmt.Errorf("备份旧插件失败: %w", err))
+	for _, st := range downloaded {
+		m, err := pluginmeta.LoadManifest(filepath.Join(st.dir, "plugin.json"))
+		if err != nil {
+			fail("校验", err)
 			return
 		}
-	}
-	if err := replaceDir(staging, persistDir); err != nil {
-		fail("系统", fmt.Errorf("写入持久插件目录失败: %w", err))
-		return
-	}
-	if err := replaceDir(staging, srcPluginDir); err != nil {
-		fail("系统", fmt.Errorf("写入源码树失败: %w", err))
-		return
+		if m.ID != st.op.id {
+			fail("校验", fmt.Errorf("插件目录与 plugin.json 的 id 不一致: %q != %q", m.ID, st.op.id))
+			return
+		}
+		s.state.appendLog(fmt.Sprintf("  %s v%s by %s", m.Name, m.Version, m.Author))
+		st.manifest = m
+		stagedList = append(stagedList, st)
 	}
 
-	// 5. 生成注册代码
+	// 4. 写入插件目录（持久副本 + 源码树副本；已存在的先备份旧版本供失败回滚）
+	if len(stagedList) > 0 {
+		s.state.setPhase(phCopy)
+		s.state.appendLog("== 写入插件目录 ==")
+	}
+	for _, st := range stagedList {
+		persistDir := filepath.Join(s.pluginDir(), st.op.id)
+		backupDir := persistDir + ".old"
+		hadOld := false
+		if _, err := os.Stat(persistDir); err == nil {
+			_ = os.RemoveAll(backupDir)
+			if err := os.Rename(persistDir, backupDir); err != nil {
+				fail("系统", fmt.Errorf("备份旧插件 %s 失败: %w", st.op.id, err))
+				return
+			}
+			hadOld = true
+		}
+		rec := written{
+			id: st.op.id, persistDir: persistDir, backupDir: backupDir, hadOld: hadOld,
+			srcPluginDir: filepath.Join(s.sourceDir(), pluginmeta.PluginRoot, st.op.id),
+		}
+		writtenList = append(writtenList, rec)
+		if err := replaceDir(st.dir, rec.persistDir); err != nil {
+			fail("系统", fmt.Errorf("写入插件 %s 的持久目录失败: %w", st.op.id, err))
+			return
+		}
+		if err := replaceDir(st.dir, rec.srcPluginDir); err != nil {
+			fail("系统", fmt.Errorf("写入插件 %s 的源码树失败: %w", st.op.id, err))
+			return
+		}
+		verb := "安装"
+		if hadOld {
+			verb = "升级"
+		}
+		s.state.appendLog(fmt.Sprintf("  %s %s v%s", verb, st.op.id, st.manifest.Version))
+	}
+
+	// 5. 只先移除待卸载插件的源码树副本（持久副本保留到编译成功后再删，失败可恢复）
+	if len(uninstalls) > 0 {
+		s.state.setPhase(phCopy)
+		s.state.appendLog("== 移除插件源码 ==")
+	}
+	for _, op := range uninstalls {
+		rec := removed{
+			id:           op.id,
+			persistDir:   filepath.Join(s.pluginDir(), op.id),
+			srcPluginDir: filepath.Join(s.sourceDir(), pluginmeta.PluginRoot, op.id),
+		}
+		removedList = append(removedList, rec)
+		if err := os.RemoveAll(rec.srcPluginDir); err != nil {
+			fail("系统", fmt.Errorf("移除插件 %s 源码失败: %w", op.id, err))
+			return
+		}
+		s.state.appendLog("  " + op.id)
+	}
+
+	// 6. 生成注册代码
 	s.state.setPhase(phGenerate)
 	s.state.appendLog("== 生成插件注册代码 ==")
 	if err := s.stepCmd(ctx, s.sourceDir(), "go", "run", "./tools/plugingen"); err != nil {
@@ -330,7 +573,7 @@ func (s *Service) runInstall(id, commit string) {
 		return
 	}
 
-	// 6. 拉取依赖
+	// 7. 拉取依赖
 	s.state.setPhase(phDeps)
 	s.state.appendLog("== 拉取 Go 依赖 ==")
 	if err := s.stepCmd(ctx, s.sourceDir(), "go", "mod", "tidy"); err != nil {
@@ -338,7 +581,7 @@ func (s *Service) runInstall(id, commit string) {
 		return
 	}
 
-	// 7. 编译
+	// 8. 编译
 	s.state.setPhase(phBuild)
 	s.state.appendLog("== 编译 AniaBot ==")
 	ext := ""
@@ -356,7 +599,7 @@ func (s *Service) runInstall(id, commit string) {
 		return
 	}
 
-	// 8. 替换二进制
+	// 9. 替换二进制
 	s.state.setPhase(phSwap)
 	s.state.appendLog("== 替换二进制 ==")
 	if err := s.swapBinary(builtPath); err != nil {
@@ -364,130 +607,41 @@ func (s *Service) runInstall(id, commit string) {
 		return
 	}
 
-	// 9. 记录安装清单、清理旧版本备份并重启
-	if err := s.manifest().set(InstalledPlugin{
-		ID: m.ID, Name: m.Name, Version: m.Version,
-		Commit: commit, InstalledAt: nowStamp(),
-	}); err != nil {
-		s.logger.Warn("写入插件安装清单失败", "plugin", id, "error", err)
+	// 10. 记录安装清单、清理旧版本备份；卸载方先执行清理钩子再删除持久副本
+	for _, st := range stagedList {
+		if err := s.manifest().set(InstalledPlugin{
+			ID: st.manifest.ID, Name: st.manifest.Name, Version: st.manifest.Version,
+			Commit: st.commit, InstalledAt: nowStamp(),
+		}); err != nil {
+			s.logger.Warn("写入插件安装清单失败", "plugin", st.op.id, "error", err)
+		}
+		_ = os.RemoveAll(filepath.Join(s.pluginDir(), st.op.id) + ".old")
 	}
-	_ = os.RemoveAll(backupDir)
+	for _, op := range uninstalls {
+		// 编译与二进制替换均已成功，重启前调用被卸载插件的清理钩子
+		// （OnUnload，reason=uninstall），让运行中的实例在退出前清理自身数据；
+		// 钩子失败只记日志并继续卸载（与编译失败不同，此处不再有可恢复的路径）。
+		s.fireUnloadHook(ctx, op.id)
+		if err := os.RemoveAll(filepath.Join(s.pluginDir(), op.id)); err != nil {
+			s.logger.Warn("删除插件持久副本失败", "plugin", op.id, "error", err)
+		}
+		if err := s.manifest().remove(op.id); err != nil {
+			s.logger.Warn("更新插件安装清单失败", "plugin", op.id, "error", err)
+		}
+	}
 	s.finishAndRestart()
 }
 
-// ---------- 卸载 ----------
-
-// Uninstall 开始卸载插件（异步）。
-func (s *Service) Uninstall(id string) error {
-	if !s.Enabled() {
-		return fmt.Errorf("插件市场未开启")
+// batchTimeout 批量任务超时：基础 15 分钟，每个额外操作 +3 分钟，上限 30 分钟。
+func batchTimeout(n int) time.Duration {
+	if n < 1 {
+		n = 1
 	}
-	if _, ok := s.manifest().find(id); !ok {
-		return fmt.Errorf("插件 %s 未安装", id)
+	d := 15*time.Minute + time.Duration(n-1)*3*time.Minute
+	if d > 30*time.Minute {
+		d = 30 * time.Minute
 	}
-	if !s.state.tryBegin() {
-		return fmt.Errorf("已有插件任务正在进行中或正在重启")
-	}
-	s.state.setTask("uninstall", id)
-	oplog.Record(oplog.CategoryPlugin, "marketplace_uninstall", "卸载插件 "+id)
-	go s.runUninstall(id)
-	return nil
-}
-
-func (s *Service) runUninstall(id string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-	defer cancel()
-
-	persistDir := filepath.Join(s.pluginDir(), id)
-	srcPluginDir := filepath.Join(s.sourceDir(), pluginmeta.PluginRoot, id)
-	var startedRemove, cleaned bool
-
-	// restoreSource 编译失败时从持久目录恢复源码树（持久目录在编译成功前不删除）。
-	restoreSource := func() {
-		if !startedRemove || cleaned {
-			return
-		}
-		cleaned = true
-		_ = os.RemoveAll(srcPluginDir)
-		if _, err := os.Stat(persistDir); err == nil {
-			_ = replaceDir(persistDir, srcPluginDir)
-		}
-		_ = s.stepCmd(ctx, s.sourceDir(), "go", "run", "./tools/plugingen")
-	}
-
-	fail := func(kind string, err error) {
-		s.state.appendLog("✗ " + err.Error())
-		restoreSource()
-		s.state.fail(kind, err)
-		s.logger.Warn("插件卸载失败", "plugin", id, "kind", kind, "error", err)
-	}
-
-	s.state.setPhase(phEnv)
-	s.state.appendLog("== 检查运行环境 ==")
-	if msg, ok := s.preflight(ctx); !ok {
-		fail("环境", fmt.Errorf("%s", msg))
-		return
-	}
-
-	// 只先移除源码树副本（持久副本保留到编译成功后再删，失败可恢复）
-	s.state.setPhase(phCopy)
-	s.state.appendLog("== 移除插件源码 ==")
-	startedRemove = true
-	if err := os.RemoveAll(srcPluginDir); err != nil {
-		fail("系统", err)
-		return
-	}
-
-	s.state.setPhase(phGenerate)
-	s.state.appendLog("== 生成插件注册代码 ==")
-	if err := s.stepCmd(ctx, s.sourceDir(), "go", "run", "./tools/plugingen"); err != nil {
-		fail("生成", err)
-		return
-	}
-
-	s.state.setPhase(phDeps)
-	s.state.appendLog("== 拉取 Go 依赖 ==")
-	if err := s.stepCmd(ctx, s.sourceDir(), "go", "mod", "tidy"); err != nil {
-		fail("依赖", fmt.Errorf("go mod tidy 失败: %w", err))
-		return
-	}
-
-	s.state.setPhase(phBuild)
-	s.state.appendLog("== 编译 AniaBot ==")
-	ext := ""
-	if runtime.GOOS == "windows" {
-		ext = ".exe"
-	}
-	builtPath := filepath.Join(s.sourceDir(), "build", "AniaBot.update"+ext)
-	if err := os.MkdirAll(filepath.Dir(builtPath), 0o755); err != nil {
-		fail("系统", err)
-		return
-	}
-	if err := s.stepCmd(ctx, s.sourceDir(), "go", "build", "-ldflags", version.Ldflags("-s -w"), "-o", builtPath, "./cmd/"); err != nil {
-		fail("编译", err)
-		return
-	}
-
-	s.state.setPhase(phSwap)
-	s.state.appendLog("== 替换二进制 ==")
-	if err := s.swapBinary(builtPath); err != nil {
-		fail("系统", err)
-		return
-	}
-
-	// 编译与二进制替换均已成功，重启前调用被卸载插件的清理钩子
-	// （OnUnload，reason=uninstall），让运行中的实例在退出前清理自身数据；
-	// 钩子失败只记日志并继续卸载（与编译失败不同，此处不再有可恢复的路径）。
-	s.fireUnloadHook(ctx, id)
-
-	// 编译成功且已替换二进制后，再删除持久副本并更新清单
-	if err := os.RemoveAll(persistDir); err != nil {
-		s.logger.Warn("删除插件持久副本失败", "plugin", id, "error", err)
-	}
-	if err := s.manifest().remove(id); err != nil {
-		s.logger.Warn("更新插件安装清单失败", "plugin", id, "error", err)
-	}
-	s.finishAndRestart()
+	return d
 }
 
 // fireUnloadHook 调用被卸载插件的卸载钩子（core 注入的 PluginUnloader）。
@@ -656,6 +810,3 @@ func copyFile(src, dst string) error {
 	}
 	return out.Close()
 }
-
-// oplogCategory 占位：保证 oplog 依赖被编译（避免误删 import）。
-var _ = slog.LevelInfo

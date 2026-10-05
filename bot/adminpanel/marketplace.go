@@ -89,6 +89,27 @@ func (s *Server) handleMarketplaceUninstall(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// handleMarketplaceBatch 开始批量安装/升级/卸载插件（一次编译、一次重启）。
+func (s *Server) handleMarketplaceBatch(w http.ResponseWriter, r *http.Request) {
+	if s.opt.Marketplace == nil {
+		writeError(w, http.StatusBadRequest, "插件市场服务不可用")
+		return
+	}
+	var req struct {
+		Install   []string `json:"install"`
+		Uninstall []string `json:"uninstall"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (len(req.Install) == 0 && len(req.Uninstall) == 0) {
+		writeError(w, http.StatusBadRequest, "缺少待操作的插件列表")
+		return
+	}
+	if err := s.opt.Marketplace.Batch(req.Install, req.Uninstall); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 // handleMarketplaceRollback 回滚上次插件安装（恢复旧二进制）。
 func (s *Server) handleMarketplaceRollback(w http.ResponseWriter, r *http.Request) {
 	if s.opt.Marketplace == nil {

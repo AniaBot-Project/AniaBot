@@ -79,13 +79,21 @@ func ImportPath(id string) string {
 	return ModulePath + "/" + PluginRoot + "/" + id
 }
 
+// ValidateID 校验插件 ID 合法性（同时用于元信息校验与面板批量操作等外部输入防护）。
+func ValidateID(id string) error {
+	if !idRe.MatchString(id) {
+		return fmt.Errorf("插件 ID 非法（须为 2~64 位小写字母/数字/-/_）: %q", id)
+	}
+	return nil
+}
+
 // Validate 校验元信息必填字段与 ID 合法性；缺失的可选字段就地补默认值。
 func (m *Manifest) Validate() error {
 	if m == nil {
 		return fmt.Errorf("插件元信息为空")
 	}
-	if !idRe.MatchString(m.ID) {
-		return fmt.Errorf("插件 ID 非法（须为 2~64 位小写字母/数字/-/_）: %q", m.ID)
+	if err := ValidateID(m.ID); err != nil {
+		return err
 	}
 	if strings.TrimSpace(m.Name) == "" {
 		return fmt.Errorf("插件 %s: name 必填", m.ID)

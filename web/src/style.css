@@ -103,6 +103,22 @@
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
+/* 半选态（如「全选当前列表」在部分勾选时）：系统蓝底 + 白色横杠 */
+.app-shell input[type="checkbox"]:indeterminate {
+  border-color: transparent;
+  background: linear-gradient(180deg, #0a84ff, #0071e3);
+  box-shadow: 0 3px 8px -4px rgb(0 113 227 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.35);
+}
+.app-shell input[type="checkbox"]:indeterminate::after {
+  content: "";
+  position: absolute;
+  left: 2.5px;
+  top: 5.5px;
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: #fff;
+}
 .app-shell input[type="checkbox"]:disabled {
   opacity: 0.45;
   cursor: not-allowed;

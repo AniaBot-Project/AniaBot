@@ -70,6 +70,32 @@
         </div>
       </div>
 
+      <!-- 批量操作栏（有勾选时悬浮显示） -->
+      <div
+        v-if="selectedCount > 0"
+        class="batchbar px-4 py-3 flex items-center justify-between gap-3 flex-wrap"
+      >
+        <div class="flex items-center gap-2 text-xs text-zinc-600 flex-wrap">
+          <span class="tdot bg-[#0071e3]" />
+          已选 <span class="font-semibold text-zinc-900">{{ selectedCount }}</span> 个插件
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="text-xs text-zinc-500 hover:text-zinc-900 px-3 py-1.5 rounded-lg hover:bg-white/60 transition-colors" :disabled="busy" @click="clearSelection">取消</button>
+          <button
+            class="text-xs btn-accent px-3.5 py-1.5 rounded-lg font-medium shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="!canOperate || batchInstallCount === 0"
+            :title="batchInstallCount === 0 ? '选中的插件均已安装且为最新版本' : ''"
+            @click="onBatchInstall"
+          >安装/升级 {{ batchInstallCount }} 个</button>
+          <button
+            class="text-xs text-[#ff3b30] bg-red-50 border border-red-200 hover:bg-red-100 px-3.5 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="!canOperate || batchUninstallCount === 0"
+            :title="batchUninstallCount === 0 ? '选中项里没有已安装且已是最新版本的插件' : ''"
+            @click="onBatchUninstall"
+          >卸载 {{ batchUninstallCount }} 个</button>
+        </div>
+      </div>
+
       <!-- 市场信息 -->
       <section class="tcard p-5">
         <div class="flex items-center justify-between gap-3 flex-wrap mb-5">
@@ -186,7 +212,27 @@
             </div>
             <input v-model="keyword" placeholder="搜索名称 / 描述 / 作者 / 标签" class="w-full sm:w-72 text-xs bg-white border border-zinc-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow" />
           </div>
-          <p class="mt-3 text-[11px] text-zinc-400">显示 {{ filtered.length }} / {{ plugins.length }} 个插件</p>
+          <div class="mt-3 flex items-center justify-between gap-3 flex-wrap text-[11px]">
+            <div class="flex items-center gap-3 flex-wrap">
+              <p class="text-zinc-400">显示 {{ filtered.length }} / {{ plugins.length }} 个插件</p>
+              <label class="flex items-center gap-1.5 text-zinc-500 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  :checked="allFilteredSelected"
+                  :indeterminate.prop="someFilteredSelected"
+                  :disabled="busy || filtered.length === 0"
+                  @change="toggleAllFiltered($event)"
+                />
+                全选当前列表
+              </label>
+            </div>
+            <button
+              v-if="selectedCount > 0"
+              class="text-zinc-400 hover:text-zinc-700 transition-colors"
+              :disabled="busy"
+              @click="clearSelection"
+            >已选 {{ selectedCount }} 个 · 清空选择</button>
+          </div>
         </div>
 
         <div v-if="filtered.length === 0" class="py-14 text-center text-xs text-zinc-400">
@@ -203,7 +249,17 @@
             @click="openDetail(p.id)"
           >
             <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
+              <input
+                type="checkbox"
+                class="mt-0.5"
+                :checked="selected.has(p.id)"
+                :disabled="busy"
+                :aria-label="'选择 ' + p.name"
+                title="选中以批量操作"
+                @click.stop
+                @change="toggleSelect(p.id)"
+              />
+              <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-2 flex-wrap">
                   <span class="text-sm font-semibold text-zinc-900 truncate">{{ p.name }}</span>
                   <span v-if="p.installed" class="text-[10px] px-2 py-0.5 rounded-full bg-[#34c759]/10 text-[#248a3d] border border-[#34c759]/40 font-medium">已安装 {{ p.installed_version }}</span>
@@ -385,6 +441,8 @@ const tabs = [
   { key: 'updatable', label: '可更新' },
 ]
 const syncedAt = ref(0)
+// 批量操作选中项（跨筛选/tab 保留，刷新列表时清掉已不存在的项）
+const selected = ref(new Set())
 
 const showDetail = ref(false)
 const detail = ref(null)
@@ -435,6 +493,42 @@ const filtered = computed(() => {
   })
 })
 
+// ---------- 批量多选 ----------
+const selectedPlugins = computed(() => plugins.value.filter((p) => selected.value.has(p.id)))
+const selectedCount = computed(() => selectedPlugins.value.length)
+// 未安装的选中项执行安装，已安装的执行升级（版本相同则跳过，与单插件行为一致）
+const batchInstallOps = computed(() => selectedPlugins.value.filter((p) => !p.installed || p.update_available))
+const batchUninstallOps = computed(() => selectedPlugins.value.filter((p) => p.installed && !p.update_available))
+const batchInstallCount = computed(() => batchInstallOps.value.length)
+const batchUninstallCount = computed(() => batchUninstallOps.value.length)
+const allFilteredSelected = computed(() => filtered.value.length > 0 && filtered.value.every((p) => selected.value.has(p.id)))
+const someFilteredSelected = computed(() => !allFilteredSelected.value && filtered.value.some((p) => selected.value.has(p.id)))
+
+function toggleSelect(id) {
+  const next = new Set(selected.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selected.value = next
+}
+
+function toggleAllFiltered(e) {
+  const next = new Set(selected.value)
+  if (e.target.checked) filtered.value.forEach((p) => next.add(p.id))
+  else filtered.value.forEach((p) => next.delete(p.id))
+  selected.value = next
+}
+
+function clearSelection() {
+  selected.value = new Set()
+}
+
+// 列表刷新后清理已不存在的选中项（插件被下架等）
+function pruneSelection() {
+  const ids = new Set(plugins.value.map((p) => p.id))
+  const next = new Set([...selected.value].filter((id) => ids.has(id)))
+  if (next.size !== selected.value.size) selected.value = next
+}
+
 const renderedReadme = computed(() => {
   if (!detail.value?.readme) return ''
   return DOMPurify.sanitize(marked.parse(detail.value.readme, { gfm: true, breaks: true }))
@@ -481,6 +575,7 @@ async function load() {
     if (areaReady.value) {
       const data = await api.getMarketplacePlugins(false)
       plugins.value = data.plugins || []
+      pruneSelection()
       if (!syncedAt.value) syncedAt.value = Math.floor(Date.now() / 1000) // 首次拉取已写缓存
     }
   } catch (e) {
@@ -506,6 +601,7 @@ async function refreshList(manual = true) {
   try {
     const data = await api.getMarketplacePlugins(true)
     plugins.value = data.plugins || []
+    pruneSelection()
     syncedAt.value = Math.floor(Date.now() / 1000)
     detailCache.clear() // 索引已更新，旧详情缓存作废
     if (manual) await loadInfo() // 手动刷新时同步账号/配额/回滚状态
@@ -603,6 +699,53 @@ async function onUninstall(p) {
   scrollProgressIntoView()
   try {
     await api.uninstallMarketplacePlugin(p.id)
+    await pollStatus()
+  } catch (e) {
+    listError.value = e.message
+  }
+}
+
+// 批量安装/升级：未安装的选中插件安装、可更新的升级，一次编译一次重启。
+async function onBatchInstall() {
+  const items = batchInstallOps.value
+  if (items.length === 0) return
+  const fresh = items.filter((p) => !p.installed)
+  const upgradable = items.filter((p) => p.installed)
+  const parts = []
+  if (fresh.length) parts.push(`安装 ${fresh.length} 个`)
+  if (upgradable.length) parts.push(`升级 ${upgradable.length} 个`)
+  const msg = [
+    `确定要一次完成${parts.join('、')}插件吗？`,
+    '',
+    items.map((p) => `· ${p.name}（${p.installed ? '升级到' : '安装'} v${p.version}）`).join('\n'),
+    '',
+    '将下载插件源码，一起编译并只重启一次 Bot（约需几分钟）。',
+    '⚠️ 安装插件等于在本机执行插件代码，请确认来源可信。',
+  ].join('\n')
+  if (!confirm(msg)) return
+  await submitBatch(items.map((p) => p.id), [])
+}
+
+// 批量卸载：已安装且为最新版本的选中插件，一次编译一次重启。
+async function onBatchUninstall() {
+  const items = batchUninstallOps.value
+  if (items.length === 0) return
+  const msg = [
+    `确定要一次卸载 ${items.length} 个插件吗？`,
+    '',
+    items.map((p) => `· ${p.name}`).join('\n'),
+    '',
+    '将一起编译并只重启一次 Bot，比逐个卸载快得多。',
+  ].join('\n')
+  if (!confirm(msg)) return
+  await submitBatch([], items.map((p) => p.id))
+}
+
+async function submitBatch(installs, uninstalls) {
+  started.value = true
+  scrollProgressIntoView()
+  try {
+    await api.batchMarketplacePlugins(installs, uninstalls)
     await pollStatus()
   } catch (e) {
     listError.value = e.message
@@ -725,3 +868,19 @@ function logLineClass(l) {
   return ''
 }
 </script>
+
+<style scoped>
+/* 批量操作栏：吸附在顶部工具栏下方，独立玻璃样式。
+   不复用 .tcard 是因为其全局规则为无层级样式，会覆盖 sticky 定位与自定义底色 */
+.batchbar {
+  position: sticky;
+  top: 5rem;
+  z-index: 20;
+  border-radius: 16px;
+  background: rgb(255 255 255 / 0.92);
+  border: 1px solid rgb(0 0 0 / 0.06);
+  box-shadow: 0 14px 36px -26px rgb(0 0 0 / 0.30), 0 1px 2px rgb(0 0 0 / 0.04), inset 0 1px 0 rgb(255 255 255 / 0.8);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+</style>
