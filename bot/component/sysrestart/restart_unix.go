@@ -25,6 +25,7 @@ func Self(logger *slog.Logger) {
 		return
 	}
 	logger.Info("正在重启 AniaBot...")
+	runPreRestartHooks() // 重启前清理（如插件卸载钩子）
 	if err := syscall.Exec(exe, os.Args, os.Environ()); err != nil {
 		restartStarted.Store(false)
 		logger.Error("重启失败", "error", err)

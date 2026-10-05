@@ -290,6 +290,28 @@ type CronManager interface {
 }
 ```
 
+## 卸载事件（可选接口）
+
+```go
+// UnloadEvent 插件实现后，框架在插件被卸载前调用一次其清理钩子
+type UnloadEvent interface {
+    OnUnload(ctx context.Context, reason UnloadReason) error
+}
+
+type UnloadReason string
+
+const (
+    // UnloadShutdown Bot 退出或重启（/exit、/reboot、面板重启、自动更新）
+    UnloadShutdown UnloadReason = "shutdown"
+    // UnloadUninstall 插件被插件市场卸载
+    UnloadUninstall UnloadReason = "uninstall"
+)
+```
+
+- 触发时机：`UnloadShutdown` 在 Bot 退出或重启前对全部插件触发（每个插件一次，按启动逆序）；`UnloadUninstall` 仅在插件市场卸载该插件时对其单独触发
+- 用途：释放资源（连接、文件句柄）、落盘、按 `reason` 清理插件数据等；插件重启后会重新加载，`UnloadShutdown` 中不要删除持久化数据
+- 钩子执行超时 1 分钟；出错或 panic 只记日志，不影响其它插件与卸载流程；钩子可能与运行期事件并发，实现需保证并发安全
+
 ## 异常事件
 
 ```go

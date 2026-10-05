@@ -279,7 +279,16 @@ AddPlugin() → 按 Order 排序
   → Awake(ctx, bot)        启动完成 1 秒后（首次向导未完成时跳过）
   → OnGroupMsg / OnFriendMsg / OnXxxNotice / OnPlatformEvent  运行期事件
   → OnPanic(ctx, bot, name, err)  任何插件或 bot.Go 协程 panic 时
+  → OnUnload(ctx, reason)  插件卸载前一次（可选接口 UnloadEvent，逆序执行）
 ```
+
+### 卸载钩子
+
+实现 `plugin.UnloadEvent` 的插件会在卸载前收到一次清理回调（`bot/core/unload.go`）：
+
+- `UnloadShutdown`：`Stop()`（`/exit` 命令）与进程重启（`/reboot`、面板重启、自动更新、市场流水线）时对全部插件触发。重启路径由 core 在插件 Start 完成后通过 `sysrestart.OnPreRestart` 注册回调实现——所有重启入口共用 `sysrestart.Self`，无需逐个调用方接入
+- `UnloadUninstall`：插件市场卸载流水线在二进制替换成功后、重启前按插件包路径（`custom/plugins/<id>`）找到运行实例单独触发，让被卸载插件清理自身数据；插件未实现接口时跳过
+- 每个插件最多触发一次（`unloadedPlugins` 去重，市场卸载后退出清扫不重复）；按插件执行顺序（Order）逆序执行，超时 1 分钟，出错/panic 只记日志；插件 Start 之前 `Stop` 不会触发
 
 ### 依赖注入
 

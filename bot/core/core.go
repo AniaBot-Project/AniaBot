@@ -20,6 +20,7 @@ import (
 	"github.com/jeanhua/AniaBot/bot/component/msglog"
 	"github.com/jeanhua/AniaBot/bot/component/oplog"
 	"github.com/jeanhua/AniaBot/bot/component/querylog"
+	"github.com/jeanhua/AniaBot/bot/component/sysrestart"
 	"github.com/jeanhua/AniaBot/bot/component/tasklog"
 	"github.com/jeanhua/AniaBot/bot/core/configstore"
 	"github.com/jeanhua/AniaBot/bot/marketplace"
@@ -64,6 +65,13 @@ type AniaBot struct {
 
 	// 插件名称集合
 	pluginSet map[string]struct{}
+
+	// 卸载钩子调度：unloadedPlugins 记录已触发过 OnUnload 的插件名
+	// （市场卸载单独触发后，退出/重启清扫不再重复调用），
+	// pluginsStarted 保证插件 Start 之前的 Stop 不会误触发钩子。
+	unloadMu        sync.Mutex
+	unloadedPlugins map[string]struct{}
+	pluginsStarted  atomic.Bool
 
 	// goroutine数目
 	goroutineNum atomic.Int32
@@ -149,10 +157,11 @@ func WithLogger(logger *slog.Logger) Option {
 func NewAniaBot(option ...Option) *AniaBot {
 	ctx, cancel := context.WithCancel(context.Background())
 	ania := &AniaBot{
-		ctx:       ctx,
-		cancel:    cancel,
-		pluginSet: map[string]struct{}{},
-		plugins:   make([]plugin.Plugin, 0),
+		ctx:             ctx,
+		cancel:          cancel,
+		pluginSet:       map[string]struct{}{},
+		unloadedPlugins: map[string]struct{}{},
+		plugins:         make([]plugin.Plugin, 0),
 	}
 	for _, op := range option {
 		op(ania)
@@ -388,6 +397,12 @@ func (ania *AniaBot) Run() {
 		})
 	}
 
+	// 插件已完成 Start（含设置向导未完成、跳过 Awake 的场景），此后 Stop
+	// 或进程重启才会触发插件卸载钩子；注册重启前回调，让 /reboot、面板重启、
+	// 自动更新与插件市场流水线的进程重启同样先执行卸载清理。
+	ania.pluginsStarted.Store(true)
+	sysrestart.OnPreRestart(func() { ania.unloadPlugins(plugin.UnloadShutdown) })
+
 	// 收集实现了 agenthook.Handler 的插件（AI 代理生命周期 Go 钩子），注入给实现
 	// agenthook.HandlerRegistry 的插件（AI 对话插件）——与 startAdminPanel 的
 	// 「可选接口 + 类型断言」source 收集同款惯例
@@ -593,7 +608,7 @@ func (ania *AniaBot) startAdminPanel() {
 		QueryLogs:       queryLogFn,
 		ConsoleLogs:     consollog.Page,
 		QRLogins:        qrLogins,
-		Marketplace:     marketplace.New(ania.configStore, Logger().WithGroup("Marketplace")),
+		Marketplace:     marketplace.New(ania.configStore, Logger().WithGroup("Marketplace"), marketplace.WithUnloader(ania)),
 		Logger:          Logger().WithGroup("AdminPanel"),
 	})
 	go srv.Run()
@@ -756,7 +771,11 @@ func (ania *AniaBot) AddPlugin(plugins ...plugin.Plugin) {
 	}
 }
 
+// Stop 停止 Bot：先调用插件的卸载钩子（reason=UnloadShutdown），
+// 再取消运行上下文使 Run() 返回。进程重启路径（sysrestart）由注册的
+// 重启前回调触发同样的清理。
 func (ania *AniaBot) Stop() {
+	ania.unloadPlugins(plugin.UnloadShutdown)
 	ania.cancel()
 }
 

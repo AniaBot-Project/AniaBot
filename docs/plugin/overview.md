@@ -89,7 +89,27 @@ OnGroupMsg / OnFriendMsg / OnXxxNotice ...   ← 运行期事件
     │
     ▼
 OnPanic(ctx, bot, name, err)  ← 任何插件 panic 时触发
+    │
+    ▼
+OnUnload(ctx, reason)  ← 插件被卸载前触发一次（可选接口 UnloadEvent）
 ```
+
+## 卸载钩子（可选）
+
+插件可以实现 `plugin.UnloadEvent` 接口，在**被卸载前**执行清理（关闭连接、落盘数据、删除自身数据等）：
+
+```go
+type UnloadEvent interface {
+    OnUnload(ctx context.Context, reason plugin.UnloadReason) error
+}
+```
+
+`reason` 区分两种场景：
+
+- `plugin.UnloadShutdown` —— Bot 退出或重启（`/exit`、`/reboot`、面板重启、自动更新），全部插件都会收到。适合落盘、释放资源；插件重启后会重新加载，**不要**在这里删除持久化数据
+- `plugin.UnloadUninstall` —— 插件被插件市场卸载，仅被卸载的插件收到。适合清理插件自身的数据
+
+钩子按插件**执行顺序（Order）的逆序**执行（后执行的先清理），每个插件最多触发一次；执行超时 1 分钟，出错或 panic 只记日志、不阻断其它插件。钩子可能与运行期事件并发，实现需保证并发安全。
 
 ## 依赖注入（DI）
 
@@ -110,7 +130,9 @@ OnPanic(ctx, bot, name, err)  ← 任何插件 panic 时触发
 | 消息 | `OnGroupMsg` / `OnFriendMsg` | 群聊 / 私聊消息，中间件链 |
 | 通知 | `OnGroupUpload` `OnGroupAdmin` `OnGroupDecrease` `OnGroupIncrease` `OnGroupBan` `OnFriendAdd` `OnGroupRecall` `OnFriendRecall` `OnPoke` `OnLuckyKing` `OnHonor` `OnGroupMsgEmojiLike` `OnEssence` `OnGroupCard` | 14 种通知，广播制；戳一戳/运气王/荣誉/精华/名片/禁言/上传等为 QQ 专属，非 QQ 平台不触发 |
 | 平台特定 | `OnPlatformEvent`（可选接口 `plugin.PlatformEventHandler`） | 无法映射为公共事件/通知的平台自有事件（如飞书卡片回调、机器人入群），广播制 |
+| 交互 | `OnInteraction`（可选接口 `plugin.InteractionHandler`） | 内联按钮点击回调 |
 | 启动 | `Start` / `StartCron` / `Awake` | 生命周期钩子 |
+| 卸载 | `OnUnload`（可选接口 `plugin.UnloadEvent`） | 退出/重启或市场卸载前的清理钩子 |
 | 异常 | `OnPanic` | panic 通知 |
 
 事件字段详见 [API · 事件接口](/api/events)。

@@ -107,6 +107,29 @@ type PanicEvent interface {
 	OnPanic(ctx context.Context, bot bot.Bot, name string, err any)
 }
 
+// UnloadReason 插件卸载原因，作为 UnloadEvent.OnUnload 的参数，
+// 让插件区分「重启后的正常退出」与「被彻底卸载」两种清理场景。
+type UnloadReason string
+
+const (
+	// UnloadShutdown Bot 退出或重启（/exit、/reboot、面板重启、自动更新，
+	// 以及插件市场流水线完成后的重启）：全部插件都会收到，适合落盘、
+	// 释放资源等收尾操作；插件重启后会重新加载，不要在此删除持久化数据。
+	UnloadShutdown UnloadReason = "shutdown"
+	// UnloadUninstall 插件被插件市场卸载：仅被卸载的插件收到，
+	// 适合清理插件自身的数据等只应在卸载时执行的操作。
+	UnloadUninstall UnloadReason = "uninstall"
+)
+
+// UnloadEvent 可选接口：插件实现后，框架在插件被卸载前调用一次其清理钩子
+// （每个插件最多触发一次），用于释放资源、清理数据等收尾操作。
+// 触发时机见 UnloadReason；钩子可能与运行期事件并发执行，实现需自行保证
+// 并发安全，并在超时时间内返回（超时后框架继续卸载流程）。
+type UnloadEvent interface {
+	// OnUnload 插件卸载事件
+	OnUnload(ctx context.Context, reason UnloadReason) error
+}
+
 // PlatformEventHandler 可选接口：插件实现后可接收平台特定事件——
 // 无法映射为公共事件（消息/通知）的平台自有事件，如飞书卡片回调、
 // 机器人被拉进群等。事件经 core 按 Meta.Platforms 过滤后广播（不中断），

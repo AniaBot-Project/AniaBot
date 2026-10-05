@@ -28,29 +28,49 @@ type Config interface {
 	Set(key string, val any) error
 }
 
+// PluginUnloader 卸载插件运行实例的清理能力（core.AniaBot 实现）。
+// 卸载流水线在二进制替换成功、重启之前调用，让插件有机会清理自身数据；
+// 返回 called=false 表示插件未实现卸载钩子（无需清理）。
+type PluginUnloader interface {
+	UnloadPlugin(ctx context.Context, id string) (called bool, err error)
+}
+
+// Option 可选配置项。
+type Option func(*Service)
+
+// WithUnloader 注入插件卸载清理能力（插件市场由 core 创建时传入）。
+func WithUnloader(u PluginUnloader) Option {
+	return func(s *Service) { s.unloader = u }
+}
+
 // Service 插件市场服务。
 type Service struct {
-	cfg    Config
-	logger *slog.Logger
-	state  *taskState
-	oauth  *oauthFlow
-	mu     sync.Mutex
-	gh     *githubClient // 按最新配置懒重建
-	man    *manifestStore
+	cfg      Config
+	logger   *slog.Logger
+	state    *taskState
+	oauth    *oauthFlow
+	unloader PluginUnloader
+	mu       sync.Mutex
+	gh       *githubClient // 按最新配置懒重建
+	man      *manifestStore
 }
 
 // New 创建插件市场服务。
-func New(cfg Config, logger *slog.Logger) *Service {
+func New(cfg Config, logger *slog.Logger, opts ...Option) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Service{
+	s := &Service{
 		cfg:    cfg,
 		logger: logger,
 		state:  newTaskState(),
 		oauth:  newOAuthFlow(),
 		man:    nil, // 首次使用时按 pluginDir 创建
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // ---------- 配置读取 ----------

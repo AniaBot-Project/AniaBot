@@ -475,6 +475,11 @@ func (s *Service) runUninstall(id string) {
 		return
 	}
 
+	// 编译与二进制替换均已成功，重启前调用被卸载插件的清理钩子
+	// （OnUnload，reason=uninstall），让运行中的实例在退出前清理自身数据；
+	// 钩子失败只记日志并继续卸载（与编译失败不同，此处不再有可恢复的路径）。
+	s.fireUnloadHook(ctx, id)
+
 	// 编译成功且已替换二进制后，再删除持久副本并更新清单
 	if err := os.RemoveAll(persistDir); err != nil {
 		s.logger.Warn("删除插件持久副本失败", "plugin", id, "error", err)
@@ -483,6 +488,23 @@ func (s *Service) runUninstall(id string) {
 		s.logger.Warn("更新插件安装清单失败", "plugin", id, "error", err)
 	}
 	s.finishAndRestart()
+}
+
+// fireUnloadHook 调用被卸载插件的卸载钩子（core 注入的 PluginUnloader）。
+// 未注入或插件未实现钩子时跳过；钩子失败只记日志，不阻断卸载流程。
+func (s *Service) fireUnloadHook(ctx context.Context, id string) {
+	if s.unloader == nil {
+		return
+	}
+	called, err := s.unloader.UnloadPlugin(ctx, id)
+	if err != nil {
+		s.state.appendLog("! 插件卸载钩子执行失败（继续卸载）: " + err.Error())
+		s.logger.Warn("插件卸载钩子执行失败", "plugin", id, "error", err)
+		return
+	}
+	if called {
+		s.state.appendLog("== 已执行插件卸载钩子（数据清理） ==")
+	}
 }
 
 // ---------- 回滚 ----------

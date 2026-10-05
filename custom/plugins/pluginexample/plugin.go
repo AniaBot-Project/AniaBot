@@ -36,3 +36,11 @@ func (p *ExamplePlugin) Start(cfg *viper.Viper) {
 
 }
 */
+
+/* 如果插件需要在被卸载前清理（关闭连接、落盘、按原因清理数据），需解开此注释。
+reason 为 plugin.UnloadShutdown（Bot 退出/重启，全部插件都会收到）或
+plugin.UnloadUninstall（插件市场卸载，仅被卸载的插件收到）
+func (p *ExamplePlugin) OnUnload(ctx context.Context, reason plugin.UnloadReason) error {
+	return nil
+}
+*/
