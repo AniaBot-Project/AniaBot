@@ -12,19 +12,19 @@
 
 /* ============ 玻璃拟态设计令牌 ============ */
 :root {
-  --accent: #6366f1;
-  --accent-strong: #4f46e5;
-  --accent-soft: rgb(99 102 241 / 0.16);
-  --ink: #1e2433;
-  --ink-soft: #5b6478;
+  --accent: #0071e3;                             /* Apple 系统蓝 */
+  --accent-strong: #0066cc;
+  --accent-soft: rgb(0 113 227 / 0.14);
+  --ink: #1d1d1f;                                /* Apple 主文字 */
+  --ink-soft: #6e6e73;                           /* Apple 次级文字 */
 
   /* 玻璃面板：底色 / 描边 / 模糊 / 投影 */
-  --glass-fill: rgb(255 255 255 / 0.55);
-  --glass-fill-strong: rgb(255 255 255 / 0.74);
-  --glass-border: rgb(255 255 255 / 0.7);
+  --glass-fill: rgb(255 255 255 / 0.72);
+  --glass-fill-strong: rgb(255 255 255 / 0.88);
+  --glass-border: rgb(0 0 0 / 0.06);
   --glass-blur: blur(20px) saturate(180%);
-  --glass-shadow: 0 18px 44px -26px rgb(30 41 90 / 0.55), 0 2px 8px -4px rgb(30 41 90 / 0.12);
-  --glass-sheen: inset 0 1px 0 rgb(255 255 255 / 0.65);
+  --glass-shadow: 0 14px 36px -26px rgb(0 0 0 / 0.30), 0 1px 2px rgb(0 0 0 / 0.04);
+  --glass-sheen: inset 0 1px 0 rgb(255 255 255 / 0.8);
 }
 
 @layer base {
@@ -35,20 +35,17 @@
     scroll-behavior: smooth;
   }
 
-  /* 极光底：柔和彩斑 + 细点阵网格，所有玻璃面板的底色来源 */
+  /* 页面底色：Apple 官网式浅灰白 + 极淡的蓝色光晕，作为玻璃面板的底 */
   body {
     font-family: var(--font-sans);
     color: var(--ink);
     min-height: 100vh;
-    background-color: #edf0f9;
+    background-color: #f5f5f7;
     background-image:
-      radial-gradient(rgb(30 41 90 / 0.05) 1px, transparent 1.4px),
-      radial-gradient(56rem 38rem at 4% -10%, rgb(129 140 248 / 0.40), transparent 62%),
-      radial-gradient(48rem 34rem at 102% 0%, rgb(56 189 248 / 0.32), transparent 60%),
-      radial-gradient(52rem 40rem at 90% 94%, rgb(244 114 182 / 0.24), transparent 62%),
-      radial-gradient(46rem 34rem at 2% 98%, rgb(45 212 191 / 0.24), transparent 62%),
-      linear-gradient(155deg, #f9fafd 0%, #eef2fb 46%, #f7f2fc 100%);
-    background-size: 24px 24px, auto, auto, auto, auto, auto;
+      radial-gradient(70rem 46rem at 4% -12%, rgb(0 113 227 / 0.10), transparent 60%),
+      radial-gradient(58rem 40rem at 102% -6%, rgb(10 132 255 / 0.07), transparent 58%),
+      radial-gradient(64rem 46rem at 92% 106%, rgb(90 200 250 / 0.12), transparent 62%),
+      linear-gradient(180deg, #fbfbfd 0%, #f5f5f7 52%, #eceef2 100%);
     background-attachment: fixed;
   }
 
@@ -61,7 +58,7 @@
   .app-shell button:focus-visible,
   .app-shell a:focus-visible,
   .app-shell [role="button"]:focus-visible {
-    outline: 2px solid rgb(99 102 241 / 0.55);
+    outline: 2px solid rgb(0 113 227 / 0.5);
     outline-offset: 2px;
   }
 
@@ -72,7 +69,7 @@
   }
 }
 
-/* 复选框：原生外观替换为方形玻璃勾选框，选中态为靛蓝渐变 + 白色对勾 */
+/* 复选框：原生外观替换为方形玻璃勾选框，选中态为系统蓝渐变 + 白色对勾 */
 .app-shell input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;
@@ -88,12 +85,12 @@
   transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 .app-shell input[type="checkbox"]:hover {
-  border-color: rgb(99 102 241 / 0.55);
+  border-color: rgb(0 113 227 / 0.6);
 }
 .app-shell input[type="checkbox"]:checked {
   border-color: transparent;
-  background: linear-gradient(180deg, #818cf8, #6366f1);
-  box-shadow: 0 4px 10px -5px rgb(79 70 229 / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.4);
+  background: linear-gradient(180deg, #0a84ff, #0071e3);
+  box-shadow: 0 3px 8px -4px rgb(0 113 227 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.35);
 }
 .app-shell input[type="checkbox"]:checked::after {
   content: "";
@@ -126,7 +123,7 @@
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(99 102 241 / 0.55);
+  background: rgb(0 113 227 / 0.5);
   background-clip: content-box;
 }
 
@@ -176,16 +173,16 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid rgb(255 255 255 / 0.75);
+  border: 1px solid rgb(0 0 0 / 0.06);
   border-radius: 999px;
   padding: 3px 10px;
   font-size: 9px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #46506a;
+  color: var(--ink-soft);
   white-space: nowrap;
-  background: rgb(255 255 255 / 0.5);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.6), 0 2px 6px -3px rgb(30 41 90 / 0.25);
+  background: rgb(255 255 255 / 0.6);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.8), 0 1px 3px rgb(0 0 0 / 0.06);
   backdrop-filter: blur(8px) saturate(160%);
   -webkit-backdrop-filter: blur(8px) saturate(160%);
 }
@@ -200,7 +197,7 @@
 /* 点阵分隔线 */
 .dotline {
   height: 5px;
-  background-image: radial-gradient(circle, rgb(100 116 139 / 0.45) 1px, transparent 1px);
+  background-image: radial-gradient(circle, rgb(60 60 67 / 0.25) 1px, transparent 1px);
   background-size: 6px 5px;
   background-repeat: repeat-x;
   background-position: center;
@@ -208,7 +205,7 @@
 
 /* 点阵装饰块 */
 .dotgrid {
-  background-image: radial-gradient(circle, rgb(100 116 139 / 0.35) 1.5px, transparent 1.5px);
+  background-image: radial-gradient(circle, rgb(60 60 67 / 0.2) 1.5px, transparent 1.5px);
   background-size: 9px 9px;
 }
 
@@ -217,16 +214,16 @@
   height: 14px;
   flex: 1;
   border-radius: 3px;
-  background: rgb(100 116 139 / 0.22);
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.5);
+  background: rgb(15 23 42 / 0.12);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.55);
 }
 .seg.on {
-  background: linear-gradient(180deg, #818cf8, #6366f1);
-  box-shadow: 0 2px 8px -4px rgb(79 70 229 / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.4);
+  background: linear-gradient(180deg, #0a84ff, #0071e3);
+  box-shadow: 0 2px 8px -4px rgb(0 113 227 / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.35);
 }
 .seg.on-ok {
-  background: linear-gradient(180deg, #34d399, #10b981);
-  box-shadow: 0 2px 8px -4px rgb(16 185 129 / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.4);
+  background: linear-gradient(180deg, #4cd964, #34c759);
+  box-shadow: 0 2px 8px -4px rgb(52 199 89 / 0.5), inset 0 1px 0 rgb(255 255 255 / 0.35);
 }
 
 /* 时钟冒号闪烁 */
@@ -240,8 +237,8 @@
 
 /* 状态点呼吸 */
 @keyframes glass-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgb(16 185 129 / 0.55); }
-  70% { box-shadow: 0 0 0 6px rgb(16 185 129 / 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgb(52 199 89 / 0.5); }
+  70% { box-shadow: 0 0 0 6px rgb(52 199 89 / 0); }
 }
 .pulse-dot {
   animation: glass-pulse 2.2s ease-out infinite;
@@ -301,9 +298,9 @@
   gap: 7px;
   padding: 6px 12px 6px 8px;
   border-radius: 10px;
-  border: 1px solid rgb(100 116 139 / 0.22);
-  background: rgb(255 255 255 / 0.5);
-  color: #46506a;
+  border: 1px solid rgb(0 0 0 / 0.08);
+  background: rgb(255 255 255 / 0.6);
+  color: #3a3a3c;
   font-size: 12.5px;
   line-height: 1;
   cursor: pointer;
@@ -314,15 +311,15 @@
   transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
 }
 .opt-chip:hover {
-  border-color: rgb(99 102 241 / 0.45);
-  background: rgb(255 255 255 / 0.72);
-  color: #2b3550;
+  border-color: rgb(0 113 227 / 0.4);
+  background: rgb(255 255 255 / 0.82);
+  color: #1d1d1f;
 }
 .opt-chip-on {
-  border-color: rgb(99 102 241 / 0.55);
-  background: linear-gradient(180deg, rgb(99 102 241 / 0.18), rgb(99 102 241 / 0.1));
-  color: #3730a3;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.5), 0 6px 16px -12px rgb(79 70 229 / 0.9);
+  border-color: rgb(0 113 227 / 0.5);
+  background: linear-gradient(180deg, rgb(0 113 227 / 0.14), rgb(0 113 227 / 0.08));
+  color: #0066cc;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.6), 0 4px 12px -10px rgb(0 113 227 / 0.7);
 }
 .opt-box {
   position: relative;
@@ -338,12 +335,12 @@
   transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 .opt-chip:hover .opt-box {
-  border-color: rgb(99 102 241 / 0.6);
+  border-color: rgb(0 113 227 / 0.55);
 }
 .opt-chip-on .opt-box {
   border-color: transparent;
-  background: linear-gradient(180deg, #818cf8, #6366f1);
-  box-shadow: 0 3px 8px -4px rgb(79 70 229 / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.45);
+  background: linear-gradient(180deg, #0a84ff, #0071e3);
+  box-shadow: 0 3px 8px -4px rgb(0 113 227 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.35);
 }
 .opt-chip-on .opt-box::after {
   content: "";
@@ -360,14 +357,14 @@
 /* 主操作按钮（强调色玻璃渐变） */
 .btn-accent {  color: #fff;
   font-weight: 500;
-  background: linear-gradient(135deg, #6d6ff5, #4f46e5);
-  border: 1px solid rgb(255 255 255 / 0.28);
-  box-shadow: 0 12px 26px -14px rgb(79 70 229 / 0.95), inset 0 1px 0 rgb(255 255 255 / 0.3);
+  background: linear-gradient(180deg, #0a84ff, #0071e3);
+  border: 1px solid rgb(0 0 0 / 0.04);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 6px 16px -12px rgb(0 113 227 / 0.8), inset 0 1px 0 rgb(255 255 255 / 0.22);
   transition: filter 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 .btn-accent:hover {
-  filter: brightness(1.07);
-  box-shadow: 0 16px 30px -14px rgb(79 70 229 / 1), inset 0 1px 0 rgb(255 255 255 / 0.35);
+  filter: brightness(1.05);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 8px 20px -12px rgb(0 113 227 / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.24);
 }
 .btn-accent:active {
   transform: translateY(1px);
@@ -383,10 +380,10 @@
    未分层（unlayered）规则天然优先于 Tailwind 的 utilities 层，
    因此无需改动各个页面模板。 */
 .app-shell [class~="bg-white"] {
-  background-color: rgb(255 255 255 / 0.56);
+  background-color: rgb(255 255 255 / 0.72);
 }
 .app-shell [class~="bg-white/85"] {
-  background-color: rgb(255 255 255 / 0.55);
+  background-color: rgb(255 255 255 / 0.72);
 }
 .app-shell [class~="bg-slate-50"],
 .app-shell [class~="bg-slate-50/60"],
@@ -395,37 +392,37 @@
 .app-shell [class~="bg-zinc-50"],
 .app-shell [class~="bg-zinc-50/60"],
 .app-shell [class~="bg-zinc-50/70"] {
-  background-color: rgb(255 255 255 / 0.42);
+  background-color: rgb(255 255 255 / 0.6);
 }
 .app-shell [class~="bg-slate-100"],
 .app-shell [class~="bg-zinc-100"] {
-  background-color: rgb(255 255 255 / 0.5);
+  background-color: rgb(255 255 255 / 0.65);
 }
 .app-shell [class~="bg-slate-200/60"],
 .app-shell [class~="bg-zinc-200"] {
-  background-color: rgb(255 255 255 / 0.55);
+  background-color: rgb(255 255 255 / 0.7);
 }
-/* 图表 / 进度条中性色：半透明化，避免在玻璃上出现"实心灰块" */
+/* 图表 / 进度条：主数据用系统蓝，次级用浅蓝，底衬用中性灰 */
 .app-shell [class~="bg-zinc-300"] {
-  background-color: rgb(148 163 184 / 0.45);
+  background-color: rgb(142 142 147 / 0.5);
 }
 .app-shell [class~="bg-zinc-400"] {
-  background-color: rgb(129 140 248 / 0.55);
+  background-color: rgb(10 132 255 / 0.4);
 }
 .app-shell [class~="bg-zinc-700"],
 .app-shell [class~="bg-zinc-800"] {
-  background-color: rgb(45 55 85 / 0.88);
+  background-color: #0071e3;
 }
 .app-shell [class~="bg-zinc-900"] {
   background-color: rgb(26 30 46 / 0.92);
 }
 
-/* 悬停态：统一为"提亮玻璃"而非不透明灰 */
+/* 悬停态：Apple 式极淡灰，而非提亮玻璃 */
 .app-shell [class~="hover:bg-zinc-100"]:hover,
 .app-shell [class~="hover:bg-slate-100"]:hover,
 .app-shell [class~="hover:bg-zinc-200"]:hover,
 .app-shell [class~="hover:bg-slate-200/60"]:hover {
-  background-color: rgb(255 255 255 / 0.62);
+  background-color: rgb(0 0 0 / 0.05);
 }
 .app-shell [class~="hover:bg-slate-50"]:hover,
 .app-shell [class~="hover:bg-zinc-50"]:hover,
@@ -433,11 +430,17 @@
 .app-shell [class~="hover:bg-slate-50/60"]:hover,
 .app-shell [class~="hover:bg-slate-50/70"]:hover,
 .app-shell [class~="hover:bg-slate-50/80"]:hover {
-  background-color: rgb(255 255 255 / 0.55);
+  background-color: rgb(0 0 0 / 0.035);
 }
 .app-shell [class~="hover:bg-zinc-700"]:hover,
 .app-shell [class~="hover:bg-zinc-800"]:hover {
-  background-color: rgb(38 46 72 / 0.95);
+  background-color: #0066cc;
+}
+/* 模板里大量 white 系悬停（玻璃时代的写法）：统一改为极淡灰底 */
+.app-shell [class~="hover:bg-white/55"]:hover,
+.app-shell [class~="hover:bg-white/60"]:hover,
+.app-shell [class~="hover:bg-white/70"]:hover {
+  background-color: rgb(0 0 0 / 0.04);
 }
 .app-shell [class~="hover:bg-red-50"]:hover,
 .app-shell [class~="hover:bg-red-100"]:hover {
@@ -447,26 +450,26 @@
   background-color: rgb(254 243 199 / 0.75);
 }
 
-/* 语义浅色底：改为半透明色雾，保留语义又透出玻璃光 */
+/* 语义浅色底：Apple 系统色淡底 */
 .app-shell [class~="bg-red-50"],
 .app-shell [class~="bg-red-50!"] {
-  background-color: rgb(254 226 226 / 0.62);
+  background-color: rgb(255 59 48 / 0.1);
 }
 .app-shell [class~="bg-red-100"] {
-  background-color: rgb(254 202 202 / 0.6);
+  background-color: rgb(255 59 48 / 0.16);
 }
 .app-shell [class~="bg-amber-50"],
 .app-shell [class~="bg-amber-50!"] {
-  background-color: rgb(254 243 199 / 0.62);
+  background-color: rgb(255 159 10 / 0.12);
 }
 .app-shell [class~="bg-amber-100"] {
-  background-color: rgb(253 230 138 / 0.55);
+  background-color: rgb(255 159 10 / 0.18);
 }
 .app-shell [class~="bg-emerald-50"] {
-  background-color: rgb(209 250 229 / 0.6);
+  background-color: rgb(52 199 89 / 0.1);
 }
 .app-shell [class~="bg-emerald-100"] {
-  background-color: rgb(167 243 208 / 0.55);
+  background-color: rgb(52 199 89 / 0.16);
 }
 
 /* 描边：浅色描边 → 白色玻璃棱线；强描边（输入框/开关）→ 中性半透明 */
@@ -476,11 +479,21 @@
 .app-shell [class~="border-slate-200/70"],
 .app-shell [class~="border-zinc-100"],
 .app-shell [class~="border-zinc-200"] {
-  border-color: rgb(255 255 255 / 0.7);
+  border-color: rgb(0 0 0 / 0.06);
+}
+.app-shell [class~="border-white/50"],
+.app-shell [class~="border-white/60"],
+.app-shell [class~="border-slate-50"],
+.app-shell [class~="border-zinc-200/60"] {
+  border-color: rgb(0 0 0 / 0.06);
+}
+.app-shell [class~="divide-slate-100"] > * + * {
+  border-color: rgb(0 0 0 / 0.05);
 }
 .app-shell [class~="border-slate-300"],
-.app-shell [class~="border-zinc-300"] {
-  border-color: rgb(100 116 139 / 0.3);
+.app-shell [class~="border-zinc-300"],
+.app-shell [class~="border-slate-300/60"] {
+  border-color: rgb(0 0 0 / 0.14);
 }
 
 /* 输入类控件：更实的玻璃底 + 中性描边，与卡片区分开；
@@ -489,8 +502,8 @@
 .app-shell select:not([class*="bg-"]),
 .app-shell textarea:not([class*="bg-"]) {
   background-color: rgb(255 255 255 / 0.68);
-  border-color: rgb(100 116 139 / 0.28);
-  box-shadow: inset 0 1px 2px rgb(15 23 42 / 0.04);
+  border-color: rgb(0 0 0 / 0.12);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.03);
 }
 .app-shell input::placeholder,
 .app-shell textarea::placeholder {
@@ -499,10 +512,10 @@
 
 /* 焦点环：统一主题色 */
 .app-shell [class*="focus:ring-"]:focus {
-  --tw-ring-color: rgb(99 102 241 / 0.5);
+  --tw-ring-color: rgb(0 113 227 / 0.45);
 }
 .app-shell [class*="focus:border-"]:focus {
-  border-color: rgb(99 102 241 / 0.55);
+  border-color: rgb(0 113 227 / 0.5);
 }
 
 /* 大块浅色容器（卡片 / 弹窗 / 侧栏列表）升级为真正的磨砂玻璃 */
@@ -573,7 +586,7 @@
 .markdown-body blockquote {
   margin: 0.8em 0;
   padding: 0.25em 1em;
-  border-left: 3px solid rgb(99 102 241 / 0.45);
+  border-left: 3px solid rgb(0 113 227 / 0.4);
   color: #5b6478;
   background: rgb(255 255 255 / 0.45);
   border-radius: 0 8px 8px 0;
@@ -585,7 +598,7 @@
   padding: 0.15em 0.4em;
   font-family: var(--font-mono);
   font-size: 0.9em;
-  color: #b02a67;
+  color: #1d1d1f;
 }
 .markdown-body pre {
   background: rgb(24 28 44 / 0.9);

@@ -27,7 +27,7 @@
         <section class="tcard p-4 sm:p-6 flex flex-col">
           <div class="flex items-center justify-between">
             <span class="tlabel">Today</span>
-            <span class="tpill"><span class="tdot bg-emerald-500" />{{ oToday.requests ?? 0 }} Runs</span>
+            <span class="tpill"><span class="tdot bg-[#34c759]" />{{ oToday.requests ?? 0 }} Runs</span>
           </div>
           <div class="flex-1 py-4">
             <div class="text-4xl font-semibold tracking-tight text-zinc-900">{{ fmtTokens(oToday.total_tokens) }}</div>
@@ -44,7 +44,7 @@
           <div class="flex items-center justify-between">
             <span class="tlabel">Cache Hit</span>
             <span class="tpill">
-              <span class="tdot" :class="oSummary.cache_hit_rate > 0 ? 'bg-emerald-500' : 'bg-zinc-300'" />
+              <span class="tdot" :class="oSummary.cache_hit_rate > 0 ? 'bg-[#34c759]' : 'bg-zinc-300'" />
               {{ oSummary.cache_hit_rate > 0 ? 'Active' : 'N/A' }}
             </span>
           </div>
@@ -84,7 +84,7 @@
             v-for="r in RANGE_OPTIONS" :key="r.key"
             class="px-3 py-1.5 text-[10px] tracking-[0.15em] uppercase rounded-sm border transition-colors"
             :class="range === r.key
-              ? 'bg-indigo-500 text-white border-indigo-400 font-medium'
+              ? 'bg-[#0071e3] text-white border-[#0071e3] font-medium'
               : 'border-zinc-300 text-zinc-500 hover:text-zinc-900 hover:border-zinc-500'"
             @click="range = r.key"
           >{{ r.label }}</button>
@@ -96,7 +96,7 @@
           </template>
         </div>
       </div>
-      <p v-if="customError" class="text-[10px] tracking-[0.12em] uppercase text-red-500">{{ customError }}</p>
+      <p v-if="customError" class="text-[10px] tracking-[0.12em] uppercase text-[#ff3b30]">{{ customError }}</p>
 
       <!-- 范围摘要条 -->
       <section class="tcard px-6 py-4 flex items-center gap-x-6 gap-y-2 flex-wrap">
@@ -395,10 +395,10 @@ watch(range, () => {
 // ---- 状态分布 ----
 
 const STATUS_META = [
-  { key: 'success', label: '成功', bar: 'bg-zinc-800', dot: 'bg-emerald-500' },
+  { key: 'success', label: '成功', bar: 'bg-zinc-800', dot: 'bg-[#34c759]' },
   { key: 'stopped', label: '已停止', bar: 'bg-zinc-400', dot: 'bg-zinc-400' },
-  { key: 'timeout', label: '超时', bar: 'bg-zinc-300', dot: 'bg-amber-500' },
-  { key: 'error', label: '错误', bar: 'bg-zinc-200', dot: 'bg-red-500' },
+  { key: 'timeout', label: '超时', bar: 'bg-zinc-300', dot: 'bg-[#ff9f0a]' },
+  { key: 'error', label: '错误', bar: 'bg-zinc-200', dot: 'bg-[#ff3b30]' },
   { key: 'interrupted', label: '中断', bar: 'bg-zinc-200', dot: 'bg-amber-600' },
 ]
 

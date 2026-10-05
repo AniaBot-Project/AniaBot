@@ -1,7 +1,7 @@
 <template>
   <div v-if="!auth.checked" class="app-shell min-h-screen flex items-center justify-center">
     <div class="flex items-center gap-2 text-slate-400 text-sm">
-      <span class="w-4 h-4 border-2 border-white/70 border-t-indigo-500 rounded-full animate-spin" />
+      <span class="w-4 h-4 border-2 border-black/10 border-t-[#0071e3] rounded-full animate-spin" />
       加载中...
     </div>
   </div>
@@ -13,7 +13,7 @@
   <div v-else class="app-shell min-h-screen flex">
     <!-- 移动端抽屉遮罩 -->
     <Transition name="fade">
-      <div v-if="mobileOpen" class="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-40 md:hidden" @click="mobileOpen = false" />
+      <div v-if="mobileOpen" class="fixed inset-0 bg-black/30 backdrop-blur-md z-40 md:hidden" @click="mobileOpen = false" />
     </Transition>
 
     <!-- 侧边导航：深色玻璃，移动端为抽屉，桌面端常驻 -->
@@ -22,16 +22,16 @@
       :class="mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'"
     >
       <div class="px-5 pt-6 pb-5 flex items-center gap-3">
-        <img src="/logo.webp" alt="AniaBot" class="w-9 h-9 rounded-full object-cover shadow-lg ring-1 ring-white/25" />
+        <img src="/logo.webp" alt="AniaBot" class="w-9 h-9 rounded-full object-cover shadow-md ring-1 ring-black/5" />
         <div>
-          <div class="text-white font-semibold leading-tight tracking-[0.2em]">ANIABOT</div>
-          <div class="text-[10px] text-slate-400 leading-tight tracking-[0.15em] uppercase mt-0.5">Console · 控制面板</div>
+          <div class="text-[#1d1d1f] font-semibold leading-tight tracking-[0.2em]">ANIABOT</div>
+          <div class="text-[10px] text-slate-500 leading-tight tracking-[0.15em] uppercase mt-0.5">Console · 控制面板</div>
         </div>
-        <button class="ml-auto md:hidden text-slate-400 hover:text-white p-1" aria-label="关闭菜单" @click="mobileOpen = false">
+        <button class="ml-auto md:hidden text-slate-500 hover:text-slate-900 p-1" aria-label="关闭菜单" @click="mobileOpen = false">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
         </button>
       </div>
-      <div class="mx-5 h-px bg-white/10" />
+      <div class="mx-5 h-px bg-black/5" />
 
       <nav class="flex-1 px-3 py-3 space-y-1 overflow-y-auto">
         <RouterLink
@@ -41,15 +41,15 @@
           class="group relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-[11px] tracking-[0.15em] border transition-all duration-200"
           :class="$route.path === item.to
             ? 'nav-active'
-            : 'border-transparent text-slate-400 hover:text-white hover:bg-white/10 hover:border-white/10'"
+            : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-black/5'"
         >
           <span v-html="item.icon" class="shrink-0 [&>svg]:w-4 [&>svg]:h-4" />
           {{ item.label }}
-          <span v-if="$route.path === item.to" class="ml-auto w-1.5 h-1.5 rounded-full bg-indigo-500 shadow-[0_0_8px_2px_rgba(99,102,241,0.5)]" />
+          <span v-if="$route.path === item.to" class="ml-auto w-1.5 h-1.5 rounded-full bg-[#0071e3] shadow-[0_0_8px_2px_rgba(0,113,227,0.35)]" />
         </RouterLink>
       </nav>
 
-      <div class="px-4 py-4 border-t border-white/10 flex items-center justify-between">
+      <div class="px-4 py-4 border-t border-black/5 flex items-center justify-between">
         <a class="nav-ico" href="https://github.com/jeanhua/AniaBot" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库">
           <span v-html="icons.github" class="[&>svg]:w-4 [&>svg]:h-4" />
           <span class="tip">GitHub</span>
@@ -78,10 +78,10 @@
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
           </button>
           <h1 class="text-[11px] tracking-[0.22em] uppercase text-slate-500 font-medium truncate">
-            <span class="text-indigo-400/70 mr-2">//</span>{{ $route.meta.title || '' }}
+            <span class="text-slate-300 mr-2">//</span>{{ $route.meta.title || '' }}
           </h1>
         </div>
-        <span class="tpill shrink-0"><span class="tdot bg-emerald-500 pulse-dot" />Bot Online</span>
+        <span class="tpill shrink-0"><span class="tdot bg-[#34c759] pulse-dot" />Bot Online</span>
       </header>
       <div class="px-3 sm:px-5 xl:px-7 py-4 sm:py-5 flex-1">
         <RouterView v-slot="{ Component }">
@@ -93,22 +93,22 @@
     </main>
 
     <!-- 重启中遮罩 -->
-    <div v-if="restarting" class="fixed inset-0 bg-slate-900/40 backdrop-blur-md flex items-center justify-center z-50 p-4">
+    <div v-if="restarting" class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4">
       <div class="tcard p-8 w-80 max-w-full text-center space-y-3">
-        <span class="mx-auto block w-8 h-8 border-[3px] border-white/70 border-t-indigo-500 rounded-full animate-spin" />
+        <span class="mx-auto block w-8 h-8 border-[3px] border-black/10 border-t-[#0071e3] rounded-full animate-spin" />
         <div class="text-sm font-semibold text-slate-900 tracking-[0.15em] uppercase">Rebooting</div>
         <p class="text-xs text-slate-500">配置修改将在重启后生效，恢复后页面自动刷新</p>
       </div>
     </div>
 
     <!-- 修改密码弹窗 -->
-    <div v-if="showPwd" class="fixed inset-0 bg-slate-900/40 backdrop-blur-md flex items-center justify-center z-50 p-4" v-backdrop-close="() => (showPwd = false)">
+    <div v-if="showPwd" class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4" v-backdrop-close="() => (showPwd = false)">
       <form class="tcard p-6 w-96 max-w-full space-y-4" @submit.prevent="onChangePwd">
         <h2 class="text-[11px] tracking-[0.22em] uppercase text-slate-500 font-medium">修改密码</h2>
         <input v-model="pwdForm.next" type="password" placeholder="新密码（至少 6 位）" required minlength="6" :class="inputClass" />
-        <p v-if="pwdForm.msg" class="text-xs" :class="pwdForm.ok ? 'text-emerald-600' : 'text-red-600'">{{ pwdForm.msg }}</p>
+        <p v-if="pwdForm.msg" class="text-xs" :class="pwdForm.ok ? 'text-[#34c759]' : 'text-[#ff3b30]'">{{ pwdForm.msg }}</p>
         <div class="flex justify-end gap-2 pt-1">
-          <button type="button" class="px-4 py-2 text-[11px] tracking-widest uppercase text-slate-500 hover:bg-white/60 rounded-lg transition-colors" @click="showPwd = false">取消</button>
+          <button type="button" class="px-4 py-2 text-[11px] tracking-widest uppercase text-slate-500 hover:bg-black/5 rounded-lg transition-colors" @click="showPwd = false">取消</button>
         <button type="submit" class="btn-accent px-4 py-2 text-[11px] tracking-widest uppercase rounded-lg">保存</button>
         </div>
       </form>
@@ -169,7 +169,7 @@ const navItems = [
   { to: '/update', label: '自动更新', icon: icons.update },
 ]
 
-const inputClass = 'w-full border rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400/50 focus:border-indigo-400/60 transition-shadow'
+const inputClass = 'w-full border rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 transition-shadow'
 
 const showPwd = ref(false)
 const pwdForm = reactive({ next: '', msg: '', ok: false })
@@ -220,34 +220,32 @@ async function onChangePwd() {
 </script>
 
 <style scoped>
-/* 侧边栏：深色磨砂玻璃，透出底层极光 */
+/* 侧边栏：浅色磨砂玻璃（Apple 侧栏质感） */
 .sidebar-glass {
-  background: linear-gradient(180deg, rgb(24 29 48 / 0.88) 0%, rgb(14 18 32 / 0.84) 100%);
-  border-right: 1px solid rgb(255 255 255 / 0.12);
-  box-shadow: 24px 0 60px -44px rgb(15 23 42 / 0.95);
-  backdrop-filter: blur(26px) saturate(170%);
-  -webkit-backdrop-filter: blur(26px) saturate(170%);
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.82) 0%, rgb(255 255 255 / 0.7) 100%);
+  border-right: 1px solid rgb(0 0 0 / 0.06);
+  box-shadow: 16px 0 40px -38px rgb(0 0 0 / 0.4);
+  backdrop-filter: blur(26px) saturate(180%);
+  -webkit-backdrop-filter: blur(26px) saturate(180%);
 }
 
 /* 顶部工具栏：悬浮玻璃条 */
 .topbar-glass {
   border-radius: 16px;
-  background: rgb(255 255 255 / 0.55);
-  border: 1px solid rgb(255 255 255 / 0.7);
-  box-shadow: 0 16px 36px -26px rgb(30 41 90 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.65);
+  background: rgb(255 255 255 / 0.72);
+  border: 1px solid rgb(0 0 0 / 0.06);
+  box-shadow: 0 8px 26px -24px rgb(0 0 0 / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.8);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
 }
 
-/* 当前导航项：提亮玻璃胶囊 + 内高光 */
+/* 当前导航项：淡淡一层系统蓝 + 蓝色文字（Apple 侧栏选中态） */
 .nav-active {
-  color: #fff;
+  color: #0066cc;
   font-weight: 600;
-  border-color: rgb(255 255 255 / 0.3);
-  background: linear-gradient(135deg, rgb(255 255 255 / 0.22), rgb(255 255 255 / 0.07));
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.35), 0 12px 26px -20px rgb(0 0 0 / 0.95);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  border-color: rgb(0 113 227 / 0.14);
+  background: rgb(0 113 227 / 0.1);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.7);
 }
 
 /* 侧边栏底部小按钮（图标 + hover 提示） */
@@ -259,13 +257,12 @@ async function onChangePwd() {
   width: 2rem;
   height: 2rem;
   border-radius: 0.625rem;
-  color: rgb(148 163 184);
+  color: rgb(110 110 115);
   transition: color 0.15s, background-color 0.15s, box-shadow 0.15s;
 }
 .nav-ico:hover {
-  color: rgb(241 245 249);
-  background: rgb(255 255 255 / 0.1);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.15);
+  color: rgb(29 29 31);
+  background: rgb(0 0 0 / 0.05);
 }
 .nav-ico .tip {
   position: absolute;
@@ -274,9 +271,9 @@ async function onChangePwd() {
   z-index: 20;
   padding: 0.3rem 0.55rem;
   border-radius: 0.5rem;
-  background: rgb(24 29 48 / 0.92);
+  background: rgb(29 29 31 / 0.92);
   border: 1px solid rgb(255 255 255 / 0.14);
-  color: rgb(226 232 240);
+  color: rgb(245 245 247);
   font-size: 10px;
   letter-spacing: 0.12em;
   white-space: nowrap;

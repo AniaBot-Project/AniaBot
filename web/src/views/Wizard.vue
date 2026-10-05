@@ -1,17 +1,17 @@
 <template>
   <div class="app-shell min-h-screen relative overflow-hidden flex items-center justify-center p-4">
-    <!-- 背景光斑（页面底色由全局极光背景提供） -->
-    <div class="absolute -top-40 -left-40 w-125 h-125 rounded-full bg-indigo-400/25 blur-[120px]" />
-    <div class="absolute -bottom-40 -right-40 w-125 h-125 rounded-full bg-teal-400/25 blur-[120px]" />
+    <!-- 背景光斑（页面底色由全局浅灰底提供） -->
+    <div class="absolute -top-40 -left-40 w-125 h-125 rounded-full bg-[#0071e3]/10 blur-[120px]" />
+    <div class="absolute -bottom-40 -right-40 w-125 h-125 rounded-full bg-[#5ac8fa]/12 blur-[120px]" />
 
     <div class="tcard rounded-2xl w-full max-w-lg overflow-hidden">
       <!-- 步骤指示 -->
-      <div class="flex border-b border-white/60">
+      <div class="flex border-b border-black/5">
         <div
           v-for="(label, i) in ['欢迎', '平台接入', 'AI 配置', '完成']"
           :key="i"
           class="flex-1 py-3.5 text-center text-xs transition-colors"
-          :class="i === step ? 'text-zinc-700 font-semibold border-b-2 border-indigo-500 -mb-px' : i < step ? 'text-emerald-600' : 'text-slate-400'"
+          :class="i === step ? 'text-zinc-700 font-semibold border-b-2 border-[#0071e3] -mb-px' : i < step ? 'text-[#34c759]' : 'text-slate-400'"
         >
           {{ i + 1 }}. {{ label }}
         </div>
@@ -20,7 +20,7 @@
       <div class="p-5 sm:p-8">
         <!-- 步骤 0: 欢迎 -->
         <div v-if="step === 0" class="space-y-5 text-center">
-          <div class="mx-auto w-14 h-14 rounded-2xl bg-linear-to-br from-indigo-500 to-indigo-600 flex items-center justify-center text-white font-bold text-2xl shadow-lg">
+          <div class="mx-auto w-14 h-14 rounded-2xl bg-linear-to-br from-[#0a84ff] to-[#0071e3] flex items-center justify-center text-white font-bold text-2xl shadow-lg">
             A
           </div>
           <h1 class="text-xl font-bold text-slate-800">欢迎使用 AniaBot 🎉</h1>
@@ -284,7 +284,7 @@
         <!-- 步骤 3: 完成 -->
         <div v-else class="space-y-4 text-center">
           <template v-if="!restarting">
-            <div class="mx-auto w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center [&>svg]:w-7 [&>svg]:h-7" v-html="iconCheck" />
+            <div class="mx-auto w-14 h-14 rounded-full bg-[#34c759]/15 text-[#34c759] flex items-center justify-center [&>svg]:w-7 [&>svg]:h-7" v-html="iconCheck" />
             <h1 class="text-xl font-bold text-slate-800">配置完成</h1>
             <p class="text-sm text-slate-500 leading-relaxed">
               配置已保存到数据库，<b>重启后生效</b>。<br />
@@ -298,7 +298,7 @@
           </template>
         </div>
 
-        <p v-if="error" class="text-sm text-red-600 mt-4">{{ error }}</p>
+        <p v-if="error" class="text-sm text-[#ff3b30] mt-4">{{ error }}</p>
 
         <!-- 操作按钮 -->
         <div class="flex justify-between mt-8" v-if="!restarting">
@@ -319,7 +319,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { api, auth } from '../api.js'
 
-const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/50 focus:border-indigo-400/60 transition-shadow'
+const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0071e3]/35 focus:border-[#0071e3]/50 transition-shadow'
 const iconCheck = '<svg fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>'
 
 const step = ref(0)

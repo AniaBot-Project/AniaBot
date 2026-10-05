@@ -2,7 +2,7 @@
   <section v-if="visible" class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
     <div class="w-full flex items-center justify-between gap-3 px-6 py-4">
       <span class="flex items-center gap-2.5 min-w-0">
-        <span class="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs shrink-0 bg-emerald-500">微</span>
+        <span class="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs shrink-0 bg-[#34c759]">微</span>
         <span class="text-sm font-semibold text-slate-800 truncate">微信扫码登录</span>
         <span class="text-xs font-normal text-slate-400 hidden sm:inline">iLink bot 无静态 Token，扫码即完成授权</span>
       </span>
@@ -25,7 +25,7 @@
         <p v-else>
           尚未启用微信平台：在下方「平台适配器」分类中勾选 <b>启用微信平台</b> 并保存、重启 Bot，然后回到本页扫码登录。
         </p>
-        <p class="text-xs text-amber-600/80">也可在 Bot 控制台扫码（启用并重启后控制台会打印二维码）。</p>
+        <p class="text-xs text-[#ff9f0a]/80">也可在 Bot 控制台扫码（启用并重启后控制台会打印二维码）。</p>
       </div>
 
       <template v-else>
@@ -44,7 +44,7 @@
               inputmode="numeric"
               maxlength="12"
               placeholder="手机上显示的数字"
-              class="w-40 border border-slate-300/60 rounded-lg px-3 py-2 text-sm text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400"
+              class="w-40 border border-slate-300/60 rounded-lg px-3 py-2 text-sm text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50"
               @keyup.enter="submitVerify"
             />
             <button
@@ -59,7 +59,7 @@
         </div>
 
         <!-- 成功 -->
-        <div v-else-if="state === 'connected'" class="bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm rounded-xl px-4 py-3">
+        <div v-else-if="state === 'connected'" class="bg-[#34c759]/10 border border-[#34c759]/40 text-[#248a3d] text-sm rounded-xl px-4 py-3">
           ✅ 登录成功，凭据已保存。
           <span v-if="detail"> {{ detail }}</span>
         </div>

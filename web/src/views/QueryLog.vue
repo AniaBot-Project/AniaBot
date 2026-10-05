@@ -115,7 +115,7 @@
     <!-- 详情弹窗：点遮罩 / 右上角关闭 / Esc 均可关闭 -->
     <div
       v-if="detail"
-      class="fixed inset-0 bg-slate-900/45 backdrop-blur-md flex items-center justify-center z-50 p-4"
+      class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4"
       v-backdrop-close="() => (detail = null)"
     >
       <div class="bg-white rounded-xl shadow-2xl border border-zinc-200 w-full max-w-3xl max-h-[85vh] flex flex-col">
@@ -159,7 +159,7 @@
           </div>
 
           <!-- 错误信息 -->
-          <div v-if="detail.error" class="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 whitespace-pre-wrap break-all">
+          <div v-if="detail.error" class="text-xs text-[#ff3b30] bg-red-50 border border-red-100 rounded-lg px-3 py-2 whitespace-pre-wrap break-all">
             {{ detail.error }}
           </div>
 
@@ -178,7 +178,7 @@
             >
               <div class="flex items-center gap-2 px-3 py-2 border-b border-white/50">
                 <span class="text-xs font-mono font-medium text-zinc-800">{{ tc.name }}</span>
-                <span v-if="tc.error" class="text-[11px] px-1.5 py-0.5 rounded bg-red-50 text-red-600 border border-red-100">失败</span>
+                <span v-if="tc.error" class="text-[11px] px-1.5 py-0.5 rounded bg-red-50 text-[#ff3b30] border border-red-100">失败</span>
                 <span class="ml-auto text-[11px] text-slate-400 font-mono">{{ fmtDuration(tc.duration_ms) }}</span>
               </div>
               <div class="px-3 py-2 space-y-2">
@@ -188,7 +188,7 @@
                 </div>
                 <div v-if="tc.error">
                   <div class="text-[10px] tracking-[0.15em] uppercase text-red-400 mb-1">错误</div>
-                  <pre class="text-xs text-red-600 font-mono whitespace-pre-wrap break-all leading-relaxed">{{ tc.error }}</pre>
+                  <pre class="text-xs text-[#ff3b30] font-mono whitespace-pre-wrap break-all leading-relaxed">{{ tc.error }}</pre>
                 </div>
                 <div v-else-if="tc.result">
                   <div class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 mb-1">结果</div>
@@ -219,7 +219,7 @@ const typeTabs = [
   { value: 'friend', label: '私聊' },
 ]
 
-const inputClass = 'mt-1 w-full border border-zinc-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400 transition-shadow bg-white'
+const inputClass = 'mt-1 w-full border border-zinc-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow bg-white'
 
 // filters 为编辑中的条件，applied 为实际生效（已点查询/切换类型）的条件，
 // 自动刷新沿用 applied，避免输入到一半被轮询带出去
@@ -303,8 +303,8 @@ function statusClass(s) {
     success: 'bg-white text-zinc-600 border border-zinc-300',
     stopped: 'bg-zinc-100 text-zinc-500 border border-zinc-200',
     timeout: 'bg-zinc-100 text-zinc-500 border border-zinc-200',
-    error: 'bg-red-50 text-red-600 border border-red-200',
-    interrupted: 'bg-amber-50 text-amber-600 border border-amber-200',
+    error: 'bg-red-50 text-[#ff3b30] border border-red-200',
+    interrupted: 'bg-amber-50 text-[#ff9f0a] border border-amber-200',
   }[s] || 'bg-slate-100 text-slate-600'
 }
 

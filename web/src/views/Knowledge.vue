@@ -23,7 +23,7 @@
     </div>
 
     <!-- 操作反馈 -->
-    <p v-if="msg" class="text-xs" :class="msgOk ? 'text-emerald-600' : 'text-red-600'">{{ msg }}</p>
+    <p v-if="msg" class="text-xs" :class="msgOk ? 'text-[#34c759]' : 'text-[#ff3b30]'">{{ msg }}</p>
 
     <div class="flex flex-col lg:flex-row lg:items-start gap-4">
       <!-- 左栏：作用域列表 -->
@@ -49,7 +49,7 @@
             v-for="s in filteredScopes"
             :key="s.scope"
             class="px-4 py-3 cursor-pointer transition-colors"
-            :class="current?.scope === s.scope ? 'bg-indigo-500/15' : 'hover:bg-white/55'"
+            :class="current?.scope === s.scope ? 'bg-[#0071e3]/12' : 'hover:bg-white/55'"
             @click="selectScope(s)"
           >
             <div class="flex items-center justify-between gap-2">
@@ -98,7 +98,7 @@
                 编辑
               </button>
               <button
-                class="text-xs text-red-500 hover:text-red-600 hover:bg-red-50 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
+                class="text-xs text-[#ff3b30] hover:text-[#ff3b30] hover:bg-red-50 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
                 @click="onDelete(d)"
               >
                 删除
@@ -110,7 +110,7 @@
     </div>
 
     <!-- 新增/编辑弹窗 -->
-    <div v-if="showForm" class="fixed inset-0 bg-slate-900/45 backdrop-blur-md flex items-center justify-center z-50 p-4" v-backdrop-close="() => (showForm = false)">
+    <div v-if="showForm" class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4" v-backdrop-close="() => (showForm = false)">
       <form class="bg-white rounded-2xl shadow-2xl p-6 w-136 max-w-full space-y-4" @submit.prevent="onSubmit">
         <h2 class="text-base font-semibold text-slate-800">{{ form.id ? '编辑文档' : '新增文档' }}</h2>
         <div v-if="!form.id">
@@ -136,7 +136,7 @@
           <label class="block text-xs text-slate-500 mb-1.5">来源（可空，如网页链接）</label>
           <input v-model="form.source" placeholder="如 https://example.com" :class="inputClass" />
         </div>
-        <p v-if="form.msg" class="text-sm text-red-600">{{ form.msg }}</p>
+        <p v-if="form.msg" class="text-sm text-[#ff3b30]">{{ form.msg }}</p>
         <div class="flex justify-end gap-2 pt-1">
           <button type="button" class="px-4 py-2 text-sm text-slate-600 hover:bg-white/60 rounded-lg transition-colors" @click="showForm = false">取消</button>
         <button type="submit" class="px-4 py-2 text-sm btn-accent rounded-lg transition-colors">保存</button>
@@ -145,7 +145,7 @@
     </div>
 
     <!-- 导入 URL 弹窗 -->
-    <div v-if="showImport" class="fixed inset-0 bg-slate-900/45 backdrop-blur-md flex items-center justify-center z-50 p-4" v-backdrop-close="() => (showImport = false)">
+    <div v-if="showImport" class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4" v-backdrop-close="() => (showImport = false)">
       <form class="bg-white rounded-2xl shadow-2xl p-6 w-136 max-w-full space-y-4" @submit.prevent="onImport">
         <h2 class="text-base font-semibold text-slate-800">从 URL 导入</h2>
         <div>
@@ -160,7 +160,7 @@
           <input v-model="importForm.url" placeholder="https://..." required :class="inputClass" />
           <p class="text-[11px] text-slate-400 mt-1.5">通过 Jina Reader 抓取正文入库，需要已配置 Jina AI Token</p>
         </div>
-        <p v-if="importForm.msg" class="text-sm text-red-600">{{ importForm.msg }}</p>
+        <p v-if="importForm.msg" class="text-sm text-[#ff3b30]">{{ importForm.msg }}</p>
         <div class="flex justify-end gap-2 pt-1">
           <button type="button" class="px-4 py-2 text-sm text-slate-600 hover:bg-white/60 rounded-lg transition-colors" @click="showImport = false">取消</button>
         <button type="submit" class="px-4 py-2 text-sm btn-accent rounded-lg transition-colors">导入</button>
@@ -174,7 +174,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { api } from '../api.js'
 
-const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400 transition-shadow'
+const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow'
 
 const kindTabs = [
   { value: 'all', label: '全部' },

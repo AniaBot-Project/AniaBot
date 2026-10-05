@@ -104,7 +104,7 @@ const categoryTabs = [
 
 const categoryLabels = Object.fromEntries(categoryTabs.map((t) => [t.value, t.label]))
 
-const inputClass = 'mt-1 w-full border border-zinc-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400 transition-shadow bg-white'
+const inputClass = 'mt-1 w-full border border-zinc-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow bg-white'
 
 // filters 为编辑中的条件，applied 为实际生效（已点查询/切换分类）的条件，
 // 自动刷新沿用 applied，避免输入到一半被轮询带出去
@@ -161,7 +161,7 @@ function categoryClass(c) {
   return {
     auth: 'bg-amber-50 text-amber-700 border border-amber-200',
     config: 'btn-accent',
-    ai: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+    ai: 'bg-[#34c759]/10 text-[#248a3d] border border-[#34c759]/40',
     system: 'bg-zinc-100 text-zinc-600 border border-zinc-200',
     update: 'bg-zinc-100 text-zinc-600 border border-zinc-200',
   }[c] || 'bg-white text-zinc-600 border border-zinc-300'

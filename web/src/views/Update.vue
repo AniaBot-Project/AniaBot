@@ -2,14 +2,14 @@
   <div class="space-y-5 max-w-4xl">
     <!-- 运行模式 / 配置提示 -->
     <div v-if="info && info.mode === 'dev'" class="tcard p-4 border-l-2 border-l-amber-400 flex items-start gap-3">
-      <span class="tdot bg-amber-400 mt-1.5 shrink-0" />
+      <span class="tdot bg-[#ff9f0a] mt-1.5 shrink-0" />
       <div class="text-xs text-zinc-600 leading-relaxed">
         当前为 <span class="font-semibold text-zinc-900">go run 开发模式</span>运行，自动更新已禁用。
         请以编译后的二进制方式部署后再使用此功能。
       </div>
     </div>
     <div v-else-if="info && !info.configured" class="tcard p-4 border-l-2 border-l-amber-400 flex items-start gap-3">
-      <span class="tdot bg-amber-400 mt-1.5 shrink-0" />
+      <span class="tdot bg-[#ff9f0a] mt-1.5 shrink-0" />
       <div class="text-xs text-zinc-600 leading-relaxed">
         尚未配置源码目录。请先在
         <RouterLink to="/config" class="font-semibold text-zinc-900 underline underline-offset-2">配置管理</RouterLink>
@@ -21,7 +21,7 @@
     <div class="tcard p-5">
       <div class="flex items-center justify-between mb-4">
         <span class="tlabel">Version / 版本信息</span>
-        <span v-if="info && info.updateAvailable" class="tpill"><span class="tdot bg-emerald-500" />有新版本</span>
+        <span v-if="info && info.updateAvailable" class="tpill"><span class="tdot bg-[#34c759]" />有新版本</span>
         <span v-else-if="info && info.remoteCommit" class="tpill"><span class="tdot bg-zinc-300" />已是最新</span>
       </div>
       <div v-if="info" class="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -32,7 +32,7 @@
         <div>
           <div class="tlabel mb-1">远端 Commit</div>
           <div class="font-mono text-sm text-zinc-900">{{ info.remoteCommit || '—' }}</div>
-          <div v-if="info.remoteError" class="text-[10px] text-red-500 mt-1">{{ info.remoteError }}</div>
+          <div v-if="info.remoteError" class="text-[10px] text-[#ff3b30] mt-1">{{ info.remoteError }}</div>
         </div>
         <div>
           <div class="tlabel mb-1">跟踪分支</div>
@@ -46,16 +46,16 @@
       <!-- 环境检测 -->
       <div v-if="info" class="mt-4 pt-4 border-t border-zinc-100 flex flex-wrap gap-x-5 gap-y-1.5">
         <span v-for="t in envTools" :key="t.key" class="flex items-center gap-1.5 text-[11px]">
-          <span class="tdot" :class="info.env[t.key] ? 'bg-emerald-500' : 'bg-red-400'" />
+          <span class="tdot" :class="info.env[t.key] ? 'bg-[#34c759]' : 'bg-red-400'" />
           <span class="text-zinc-500 uppercase tracking-wider">{{ t.key }}</span>
           <span class="font-mono text-zinc-700">{{ info.env[t.key] || '未安装' }}</span>
         </span>
       </div>
-      <div v-if="info && info.needClone" class="mt-4 pt-4 border-t border-zinc-100 flex items-start gap-2 text-[11px] text-amber-600">
-        <span class="tdot bg-amber-400 mt-1 shrink-0" />
+      <div v-if="info && info.needClone" class="mt-4 pt-4 border-t border-zinc-100 flex items-start gap-2 text-[11px] text-[#ff9f0a]">
+        <span class="tdot bg-[#ff9f0a] mt-1 shrink-0" />
         源码目录为空或不存在，开始更新时将自动从 git 地址克隆仓库
       </div>
-      <div v-if="info && info.dirError" class="mt-4 pt-4 border-t border-zinc-100 flex items-start gap-2 text-[11px] text-red-600">
+      <div v-if="info && info.dirError" class="mt-4 pt-4 border-t border-zinc-100 flex items-start gap-2 text-[11px] text-[#ff3b30]">
         <span class="tdot bg-red-400 mt-1 shrink-0" />
         {{ info.dirError }}
       </div>
@@ -73,7 +73,7 @@
         :disabled="infoLoading || status.running"
         @click="loadInfo"
       >{{ infoLoading ? '检查中...' : '检查更新' }}</button>
-      <span v-if="startMsg" class="text-xs text-red-600">{{ startMsg }}</span>
+      <span v-if="startMsg" class="text-xs text-[#ff3b30]">{{ startMsg }}</span>
     </div>
 
     <!-- 失败原因 -->
@@ -81,7 +81,7 @@
       <div class="flex items-center gap-2 mb-1.5">
         <span class="tpill"><span class="tdot bg-red-400" />{{ status.errKind || '更新失败' }}</span>
       </div>
-      <p class="text-xs text-red-600 font-mono break-all leading-relaxed">{{ status.error }}</p>
+      <p class="text-xs text-[#ff3b30] font-mono break-all leading-relaxed">{{ status.error }}</p>
       <p class="text-[10px] text-zinc-400 mt-2">更新已中止，当前运行的版本未受影响。修复问题后可重新点击「开始更新」。</p>
     </div>
 
@@ -114,7 +114,7 @@
     </div>
 
     <!-- 重启中遮罩 -->
-    <div v-if="rebooting" class="fixed inset-0 bg-slate-900/50 backdrop-blur-md flex items-center justify-center z-50 p-4">
+    <div v-if="rebooting" class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4">
       <div class="tcard p-8 w-80 max-w-full text-center space-y-3">
         <span class="mx-auto block w-8 h-8 border-[3px] border-zinc-200 border-t-zinc-800 rounded-full animate-spin" />
         <div class="text-sm font-semibold text-zinc-900 tracking-[0.15em] uppercase">Updating</div>
@@ -231,13 +231,13 @@ function phaseDone(key) {
   return phaseIndex(status.phase) > phaseIndex(key)
 }
 function phaseClass(key) {
-  if (status.error && status.phase === key) return 'border-red-400 text-red-500'
-  if (phaseDone(key)) return 'border-emerald-500 bg-emerald-500 text-white'
+  if (status.error && status.phase === key) return 'border-red-400 text-[#ff3b30]'
+  if (phaseDone(key)) return 'border-[#34c759]/40 bg-[#34c759] text-white'
   if (status.phase === key) return 'border-zinc-900 text-zinc-900'
   return 'border-zinc-300 text-zinc-400'
 }
 function phaseTextClass(key) {
-  if (status.error && status.phase === key) return 'text-red-600 font-semibold'
+  if (status.error && status.phase === key) return 'text-[#ff3b30] font-semibold'
   if (status.phase === key && status.running) return 'text-zinc-900 font-semibold'
   if (phaseDone(key)) return 'text-zinc-600'
   return 'text-zinc-400'

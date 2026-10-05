@@ -17,7 +17,7 @@
     </div>
 
     <!-- 操作反馈 -->
-    <p v-if="msg" class="text-xs" :class="msgOk ? 'text-emerald-600' : 'text-red-600'">{{ msg }}</p>
+    <p v-if="msg" class="text-xs" :class="msgOk ? 'text-[#34c759]' : 'text-[#ff3b30]'">{{ msg }}</p>
 
     <div class="flex flex-col lg:flex-row lg:items-start gap-4">
       <!-- 左栏：会话列表 -->
@@ -43,7 +43,7 @@
             v-for="s in filteredScopes"
             :key="s.scope"
             class="px-4 py-3 cursor-pointer transition-colors"
-            :class="current?.scope === s.scope ? 'bg-indigo-500/15' : 'hover:bg-white/55'"
+            :class="current?.scope === s.scope ? 'bg-[#0071e3]/12' : 'hover:bg-white/55'"
             @click="selectScope(s)"
           >
             <div class="flex items-center justify-between gap-2">
@@ -76,7 +76,7 @@
               <p class="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap break-words">{{ e.content }}</p>
               <div class="flex items-center gap-1.5 mt-2 flex-wrap">
                 <span class="text-[11px] font-mono text-slate-400">{{ e.id }}</span>
-                <span v-if="e.user_id" class="text-[11px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-zinc-500 border border-zinc-200/60 font-mono">{{ e.user_id }}</span>
+                <span v-if="e.user_id" class="text-[11px] px-2 py-0.5 rounded-full bg-[#0071e3]/10 text-zinc-500 border border-zinc-200/60 font-mono">{{ e.user_id }}</span>
                 <span v-for="t in e.tags" :key="t" class="text-[11px] px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-600">{{ t }}</span>
                 <span class="text-[11px] text-slate-400">记于 {{ fmtDate(e.created_at) }}</span>
               </div>
@@ -89,7 +89,7 @@
                 编辑
               </button>
               <button
-                class="text-xs text-red-500 hover:text-red-600 hover:bg-red-50 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
+                class="text-xs text-[#ff3b30] hover:text-[#ff3b30] hover:bg-red-50 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
                 @click="onDelete(e)"
               >
                 删除
@@ -101,7 +101,7 @@
     </div>
 
     <!-- 新增/编辑弹窗 -->
-    <div v-if="showForm" class="fixed inset-0 bg-slate-900/45 backdrop-blur-md flex items-center justify-center z-50 p-4" v-backdrop-close="() => (showForm = false)">
+    <div v-if="showForm" class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4" v-backdrop-close="() => (showForm = false)">
       <form class="bg-white rounded-2xl shadow-2xl p-6 w-[28rem] max-w-full space-y-4" @submit.prevent="onSubmit">
         <h2 class="text-base font-semibold text-slate-800">{{ form.id ? '编辑记忆' : '新增记忆' }}</h2>
         <div v-if="!form.id">
@@ -120,7 +120,7 @@
           <label class="block text-xs text-slate-500 mb-1.5">标签（逗号分隔，可空）</label>
           <input v-model="form.tagsText" placeholder="如：偏好, 称呼" :class="inputClass" />
         </div>
-        <p v-if="form.msg" class="text-sm text-red-600">{{ form.msg }}</p>
+        <p v-if="form.msg" class="text-sm text-[#ff3b30]">{{ form.msg }}</p>
         <div class="flex justify-end gap-2 pt-1">
           <button type="button" class="px-4 py-2 text-sm text-slate-600 hover:bg-white/60 rounded-lg transition-colors" @click="showForm = false">取消</button>
         <button type="submit" class="px-4 py-2 text-sm btn-accent rounded-lg transition-colors">保存</button>
@@ -134,7 +134,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { api } from '../api.js'
 
-const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400 transition-shadow'
+const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow'
 
 const kindTabs = [
   { value: 'all', label: '全部' },
