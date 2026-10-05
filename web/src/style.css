@@ -65,12 +65,50 @@
     outline-offset: 2px;
   }
 
-  /* 复选框 / 单选框 / 滑杆统一强调色 */
-  input[type="checkbox"],
+  /* 单选框 / 滑杆统一强调色（复选框见下方自定义勾选框样式） */
   input[type="radio"],
   input[type="range"] {
     accent-color: var(--accent);
   }
+}
+
+/* 复选框：原生外观替换为方形玻璃勾选框，选中态为靛蓝渐变 + 白色对勾 */
+.app-shell input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 5px;
+  border: 1.5px solid rgb(71 85 105 / 0.62);
+  background: rgb(255 255 255 / 0.85);
+  box-shadow: inset 0 1px 2px rgb(15 23 42 / 0.05);
+  cursor: pointer;
+  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.app-shell input[type="checkbox"]:hover {
+  border-color: rgb(99 102 241 / 0.55);
+}
+.app-shell input[type="checkbox"]:checked {
+  border-color: transparent;
+  background: linear-gradient(180deg, #818cf8, #6366f1);
+  box-shadow: 0 4px 10px -5px rgb(79 70 229 / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.4);
+}
+.app-shell input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 4.5px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.app-shell input[type="checkbox"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* 细滚动条 */
@@ -254,6 +292,69 @@
 .glass-danger::before {
   background: linear-gradient(120deg, rgb(254 242 242 / 0.85), rgb(254 226 226 / 0.6));
   border: 1px solid rgb(254 202 202 / 0.9);
+}
+
+/* 多选项 chip：方框勾选 + 文字，选中态由内到外逐层加亮 */
+.opt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px 6px 8px;
+  border-radius: 10px;
+  border: 1px solid rgb(100 116 139 / 0.22);
+  background: rgb(255 255 255 / 0.5);
+  color: #46506a;
+  font-size: 12.5px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.6);
+  backdrop-filter: blur(8px) saturate(160%);
+  -webkit-backdrop-filter: blur(8px) saturate(160%);
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+.opt-chip:hover {
+  border-color: rgb(99 102 241 / 0.45);
+  background: rgb(255 255 255 / 0.72);
+  color: #2b3550;
+}
+.opt-chip-on {
+  border-color: rgb(99 102 241 / 0.55);
+  background: linear-gradient(180deg, rgb(99 102 241 / 0.18), rgb(99 102 241 / 0.1));
+  color: #3730a3;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.5), 0 6px 16px -12px rgb(79 70 229 / 0.9);
+}
+.opt-box {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  border: 1.5px solid rgb(71 85 105 / 0.6);
+  background: rgb(255 255 255 / 0.92);
+  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.opt-chip:hover .opt-box {
+  border-color: rgb(99 102 241 / 0.6);
+}
+.opt-chip-on .opt-box {
+  border-color: transparent;
+  background: linear-gradient(180deg, #818cf8, #6366f1);
+  box-shadow: 0 3px 8px -4px rgb(79 70 229 / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.45);
+}
+.opt-chip-on .opt-box::after {
+  content: "";
+  position: absolute;
+  left: 4.5px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
 }
 
 /* 主操作按钮（强调色玻璃渐变） */

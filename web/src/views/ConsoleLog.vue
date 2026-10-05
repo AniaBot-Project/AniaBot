@@ -17,7 +17,7 @@
       </div>
       <div class="flex items-center gap-3">
         <label class="flex items-center gap-1.5 text-xs text-slate-500 select-none cursor-pointer">
-          <input v-model="autoRefresh" type="checkbox" class="accent-zinc-800" />
+          <input v-model="autoRefresh" type="checkbox" />
           自动刷新
         </label>
         <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="clearView">清空显示</button>

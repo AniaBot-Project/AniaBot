@@ -39,7 +39,7 @@
           <!-- QQ(NapCat) -->
           <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableNapcat ? 'border-slate-300/60 bg-slate-50' : 'border-white/60']">
             <label class="flex items-center gap-2.5 cursor-pointer select-none">
-              <input type="checkbox" v-model="form.enableNapcat" class="w-4 h-4 accent-zinc-900" />
+              <input type="checkbox" v-model="form.enableNapcat" class="w-4 h-4" />
               <span class="text-sm font-medium text-slate-700">
                 QQ（NapCat）
                 <span class="text-xs text-slate-400 font-normal">· OneBot v11 协议端，默认启用</span>
@@ -80,7 +80,7 @@
           <!-- QQ(Luckylilia / LLBot) -->
           <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableLuckylilia ? 'border-slate-300/60 bg-slate-50' : 'border-white/60']">
             <label class="flex items-center gap-2.5 cursor-pointer select-none">
-              <input type="checkbox" v-model="form.enableLuckylilia" class="w-4 h-4 accent-zinc-900" />
+              <input type="checkbox" v-model="form.enableLuckylilia" class="w-4 h-4" />
               <span class="text-sm font-medium text-slate-700">
                 QQ（Luckylilia / LLBot）
                 <span class="text-xs text-slate-400 font-normal">· OneBot v11 协议端，可与 NapCat 并存（第二个 QQ 账号）</span>
@@ -121,7 +121,7 @@
           <!-- QQ 官方机器人 -->
           <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableQQOfficial ? 'border-slate-300/60 bg-slate-50' : 'border-white/60']">
             <label class="flex items-center gap-2.5 cursor-pointer select-none">
-              <input type="checkbox" v-model="form.enableQQOfficial" class="w-4 h-4 accent-zinc-900" />
+              <input type="checkbox" v-model="form.enableQQOfficial" class="w-4 h-4" />
               <span class="text-sm font-medium text-slate-700">
                 QQ 官方机器人
                 <span class="text-xs text-slate-400 font-normal">· QQ 开放平台官方接口，WebSocket 收事件无需公网地址</span>
@@ -139,7 +139,7 @@
                 <p class="text-xs text-slate-400 mt-1.5">用于换取 access_token；旧版 Token 鉴权已废弃，请勿填写 Token</p>
               </div>
               <label class="flex items-center gap-2.5 cursor-pointer select-none">
-                <input type="checkbox" v-model="form.qqofficialSandbox" class="w-4 h-4 accent-zinc-900" />
+                <input type="checkbox" v-model="form.qqofficialSandbox" class="w-4 h-4" />
                 <span class="text-xs text-slate-600">沙箱环境（机器人未上架前联调使用）</span>
               </label>
               <p class="text-xs text-slate-400">还需在开放平台「功能配置」中勾选群聊/单聊场景的事件订阅（WebSocket 方式）</p>
@@ -149,7 +149,7 @@
           <!-- 飞书(Lark) -->
           <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableFeishu ? 'border-slate-300/60 bg-slate-50' : 'border-white/60']">
             <label class="flex items-center gap-2.5 cursor-pointer select-none">
-              <input type="checkbox" v-model="form.enableFeishu" class="w-4 h-4 accent-zinc-900" />
+              <input type="checkbox" v-model="form.enableFeishu" class="w-4 h-4" />
               <span class="text-sm font-medium text-slate-700">
                 飞书（Lark）
                 <span class="text-xs text-slate-400 font-normal">· 官方 SDK，默认长连接无需公网地址</span>
@@ -198,7 +198,7 @@
           <!-- Telegram -->
           <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableTelegram ? 'border-slate-300/60 bg-slate-50' : 'border-white/60']">
             <label class="flex items-center gap-2.5 cursor-pointer select-none">
-              <input type="checkbox" v-model="form.enableTelegram" class="w-4 h-4 accent-zinc-900" />
+              <input type="checkbox" v-model="form.enableTelegram" class="w-4 h-4" />
               <span class="text-sm font-medium text-slate-700">
                 Telegram
                 <span class="text-xs text-slate-400 font-normal">· Bot API 长轮询，无需公网地址</span>
@@ -224,7 +224,7 @@
           <!-- Discord -->
           <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableDiscord ? 'border-slate-300/60 bg-slate-50' : 'border-white/60']">
             <label class="flex items-center gap-2.5 cursor-pointer select-none">
-              <input type="checkbox" v-model="form.enableDiscord" class="w-4 h-4 accent-zinc-900" />
+              <input type="checkbox" v-model="form.enableDiscord" class="w-4 h-4" />
               <span class="text-sm font-medium text-slate-700">
                 Discord
                 <span class="text-xs text-slate-400 font-normal">· Gateway WebSocket 收事件，无需公网地址</span>
@@ -246,7 +246,7 @@
           <!-- 微信 -->
           <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableWeixin ? 'border-slate-300/60 bg-slate-50' : 'border-white/60']">
             <label class="flex items-center gap-2.5 cursor-pointer select-none">
-              <input type="checkbox" v-model="form.enableWeixin" class="w-4 h-4 accent-zinc-900" />
+              <input type="checkbox" v-model="form.enableWeixin" class="w-4 h-4" />
               <span class="text-sm font-medium text-slate-700">
                 微信
                 <span class="text-xs text-slate-400 font-normal">· iLink bot 长轮询，无需公网地址；一对一私聊</span>

@@ -124,7 +124,7 @@
       </div>
       <div class="flex items-center gap-3">
         <label class="flex items-center gap-1.5 text-xs text-slate-500 select-none cursor-pointer">
-          <input v-model="autoRefresh" type="checkbox" class="accent-zinc-800" />
+          <input v-model="autoRefresh" type="checkbox" />
           自动刷新
         </label>
         <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="load">刷新</button>
@@ -378,7 +378,7 @@
               <input v-model.trim="clockForm.note" type="text" class="form-input" placeholder="可选，触发时附带给 AI" />
             </div>
             <label class="flex items-center gap-2 text-xs text-zinc-700 select-none">
-              <input v-model="clockForm.run_once" type="checkbox" class="accent-zinc-900" />
+              <input v-model="clockForm.run_once" type="checkbox" />
               单次任务（触发一次后自动删除）
             </label>
             <p v-if="clockFormError" class="text-xs text-red-600">{{ clockFormError }}</p>

@@ -257,19 +257,25 @@
                   <option v-for="opt in field.options || []" :key="opt" :value="opt">{{ opt }}</option>
                 </select>
                 <div v-else-if="field.type === 'multiselect'" class="space-y-2">
-                  <div class="flex flex-wrap gap-2">
+                  <div class="flex flex-wrap gap-1.5">
                     <button
                       v-for="opt in field.options || []"
                       :key="opt"
                       type="button"
-                      class="px-3 py-1.5 text-sm rounded-lg border transition-colors"
-                      :class="isSelected(field, opt) ? 'btn-accent' : 'bg-white text-slate-600 border-slate-300/60 hover:bg-white/55'"
+                      class="opt-chip"
+                      :class="{ 'opt-chip-on': isSelected(field, opt) }"
+                      :aria-pressed="isSelected(field, opt)"
                       @click="toggleOption(field, opt)"
-                    >{{ opt }}</button>
+                    >
+                      <span class="opt-box" />
+                      {{ opt }}
+                    </button>
                   </div>
-                  <div class="flex gap-4 text-xs">
-                    <button type="button" class="text-slate-500 hover:text-zinc-800 underline underline-offset-2" @click="selectAllOptions(field)">全选</button>
-                    <button type="button" class="text-slate-500 hover:text-zinc-800 underline underline-offset-2" @click="clearOptions(field)">清空</button>
+                  <div class="flex items-center gap-2.5 text-[11px] text-slate-400">
+                    <span>已选 {{ selectedCount(field) }}/{{ (field.options || []).length }}</span>
+                    <span class="h-3 w-px bg-slate-300/70" />
+                    <button type="button" class="hover:text-indigo-600 transition-colors" @click="selectAllOptions(field)">全选</button>
+                    <button type="button" class="hover:text-indigo-600 transition-colors" @click="clearOptions(field)">清空</button>
                   </div>
                 </div>
 
@@ -601,6 +607,14 @@ function fromFormValue(field) {
 function isSelected(field, opt) {
   const v = form[field.key]
   return Array.isArray(v) && v.includes(opt)
+}
+
+// 已选项计数：只统计仍然存在的选项（历史值里可能有已下线的选项）
+function selectedCount(field) {
+  const v = form[field.key]
+  if (!Array.isArray(v)) return 0
+  const opts = field.options || []
+  return v.filter((o) => opts.includes(o)).length
 }
 
 function toggleOption(field, opt) {
