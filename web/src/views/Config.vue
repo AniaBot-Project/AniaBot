@@ -8,7 +8,7 @@
           v-model="search"
           type="text"
           placeholder="搜索配置项..."
-          class="w-full bg-white border border-white/60 rounded-lg pl-9 pr-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow"
+          class="search-field w-full bg-white border border-white/60 rounded-lg pl-9 pr-3 py-2 text-sm shadow-sm focus:outline-none transition-colors"
         />
       </div>
 
@@ -23,10 +23,48 @@
         </button>
         <nav class="space-y-0.5">
           <template v-for="node in cat.nodes" :key="node.name">
-            <!-- 插件卡片（有子分组）：插件名小标题 + 缩进的子分组 -->
-            <template v-if="hasSubs(node)">
+            <!-- 插件卡片（多个子分组）：父行可折叠，子分组缩进显示 -->
+            <template v-if="foldable(node)">
               <button
-                class="w-full flex items-center justify-between px-3 pt-1.5 text-xs font-medium text-slate-500 hover:text-zinc-700 transition-colors"
+                class="w-full flex items-center justify-between gap-2 px-3 pt-1.5 pb-1 text-[13px] font-medium transition-colors"
+                :class="navHasActive(node) ? 'text-zinc-700' : 'text-slate-500 hover:text-zinc-700'"
+                :aria-expanded="navOpen(node)"
+                :title="navOpen(node) ? '收起子分组' : '展开子分组'"
+                @click="toggleNav(node.name)"
+              >
+                <span class="flex items-center gap-1 min-w-0">
+                  <svg
+                    class="w-3 h-3 shrink-0 transition-transform duration-200"
+                    :class="[navOpen(node) ? 'rotate-90' : '', navHasActive(node) ? 'text-zinc-500' : 'text-slate-400']"
+                    fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                  </svg>
+                  <span class="truncate">{{ node.name }}</span>
+                </span>
+                <span class="text-[10px] text-slate-400 ml-2 shrink-0">{{ cardCount(node) }}</span>
+              </button>
+              <Transition name="fade">
+                <div v-show="navOpen(node)" class="space-y-0.5">
+                  <button
+                    v-for="s in node.sections"
+                    :key="s.name"
+                    class="w-full flex items-center justify-between pl-6 pr-3 py-1.5 rounded-lg text-[13px] transition-colors"
+                    :class="activeGroup === s.name
+                      ? 'bg-zinc-100 text-zinc-900 font-medium'
+                      : 'text-slate-600 hover:bg-white/70'"
+                    @click="jumpTo(s.name)"
+                  >
+                    <span class="truncate">{{ s.label }}</span>
+                    <span class="text-[11px] text-slate-400 ml-2 shrink-0">{{ s.fields.length }}</span>
+                  </button>
+                </div>
+              </Transition>
+            </template>
+            <!-- 只有一个子分组：父行直接跳到该分节 -->
+            <template v-else-if="hasSubs(node)">
+              <button
+                class="w-full flex items-center justify-between px-3 pt-1.5 text-[13px] font-medium text-slate-500 hover:text-zinc-700 transition-colors"
                 @click="jumpTo(node.sections[0].name)"
               >
                 <span class="truncate">{{ node.name }}</span>
@@ -378,6 +416,7 @@ const presetSaving = ref(false)
 const presetsOpen = ref(false) // 配置预设折叠面板（默认收起，避免抢占页面空间）
 const activeCategory = ref('框架基础') // 当前分类页签
 const openGroups = ref(new Set()) // 已展开的卡片（父分组名，默认全部展开，方便一眼看全配置）
+const navExpanded = ref(new Set()) // 侧栏已展开的二级菜单（父分组名，默认全部收起保持整洁，点父行或跳转时展开）
 
 const searching = computed(() => search.value.trim() !== '')
 
@@ -469,6 +508,34 @@ function hasSubs(node) {
   return node.sections.length > 1 || (node.sections.length === 1 && node.sections[0].label !== '')
 }
 
+// 多个子分组时才可折叠（只有一个子分组时父子等同，点父行直接跳转）
+function foldable(node) {
+  return node.sections.length > 1
+}
+
+// 侧栏二级菜单是否展开：搜索时强制展开以显示命中项
+function navOpen(node) {
+  return searching.value || navExpanded.value.has(node.name)
+}
+
+function navHasActive(node) {
+  return node.name === activeGroup.value || node.sections.some((s) => s.name === activeGroup.value)
+}
+
+function toggleNav(name) {
+  const s = new Set(navExpanded.value)
+  if (s.has(name)) s.delete(name)
+  else s.add(name)
+  navExpanded.value = s
+}
+
+function expandNav(name) {
+  if (navExpanded.value.has(name)) return
+  const s = new Set(navExpanded.value)
+  s.add(name)
+  navExpanded.value = s
+}
+
 function cardCount(node) {
   return node.sections.reduce((n, s) => n + s.fields.length, 0)
 }
@@ -537,6 +604,7 @@ async function jumpTo(name) {
   s.add(card.name)
   openGroups.value = s
   activeGroup.value = name
+  expandNav(card.name) // 子分组已收起时先展开，保证当前项可见
   await nextTick()
   document.getElementById(sectionId(name))?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }

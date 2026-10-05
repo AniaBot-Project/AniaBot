@@ -518,6 +518,11 @@
   border-color: rgb(0 113 227 / 0.5);
 }
 
+/* 例外：侧栏搜索框聚焦只加深中性描边，不显示主题色焦点环 */
+.app-shell .search-field:focus {
+  border-color: rgb(0 0 0 / 0.22);
+}
+
 /* 大块浅色容器（卡片 / 弹窗 / 侧栏列表）升级为真正的磨砂玻璃 */
 .app-shell
   :is(
