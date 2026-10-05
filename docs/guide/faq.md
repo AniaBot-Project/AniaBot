@@ -133,7 +133,7 @@ make windows
 
 ### 如何更新文档？
 
-文档源码在 `docs/`（VitePress），推送到 `main` 分支后 GitHub Actions 自动构建发布到 `https://jeanhua.github.io/AniaBot/`。本地预览：
+文档源码在 `docs/`（VitePress），推送到 `main` 分支后 GitHub Actions 自动构建发布到 `https://aniabot-project.github.io/AniaBot/`。本地预览：
 
 ```bash
 cd docs

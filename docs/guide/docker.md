@@ -21,7 +21,7 @@ flowchart LR
 
 ## 第一步：Fork 并克隆项目
 
-1. 打开 [github.com/jeanhua/AniaBot](https://github.com/jeanhua/AniaBot)，点击右上角 **Fork**，将项目复制到自己的账号下
+1. 打开 [github.com/AniaBot-Project/AniaBot](https://github.com/AniaBot-Project/AniaBot)，点击右上角 **Fork**，将项目复制到自己的账号下
 2. 克隆你 Fork 的仓库到本地：
 
 ```bash

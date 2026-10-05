@@ -50,7 +50,7 @@
       </nav>
 
       <div class="px-4 py-4 border-t border-black/5 flex items-center justify-between">
-        <a class="nav-ico" href="https://github.com/jeanhua/AniaBot" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库">
+        <a class="nav-ico" href="https://github.com/AniaBot-Project/AniaBot" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库">
           <span v-html="icons.github" class="[&>svg]:w-4 [&>svg]:h-4" />
           <span class="tip">GitHub</span>
         </a>

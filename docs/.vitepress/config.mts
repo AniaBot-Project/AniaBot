@@ -31,9 +31,9 @@ export default withMermaid(defineConfig({
       {
         text: '链接',
         items: [
-          { text: 'GitHub', link: 'https://github.com/jeanhua/AniaBot' },
-          { text: '提交 Issue', link: 'https://github.com/jeanhua/AniaBot/issues' },
-          { text: 'Releases', link: 'https://github.com/jeanhua/AniaBot/releases' },
+          { text: 'GitHub', link: 'https://github.com/AniaBot-Project/AniaBot' },
+          { text: '提交 Issue', link: 'https://github.com/AniaBot-Project/AniaBot/issues' },
+          { text: 'Releases', link: 'https://github.com/AniaBot-Project/AniaBot/releases' },
         ],
       },
     ],
@@ -111,7 +111,7 @@ export default withMermaid(defineConfig({
     },
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/jeanhua/AniaBot' },
+      { icon: 'github', link: 'https://github.com/AniaBot-Project/AniaBot' },
     ],
 
     footer: {
@@ -134,7 +134,7 @@ export default withMermaid(defineConfig({
     },
 
     editLink: {
-      pattern: 'https://github.com/jeanhua/AniaBot/edit/main/docs/:path',
+      pattern: 'https://github.com/AniaBot-Project/AniaBot/edit/main/docs/:path',
       text: '在 GitHub 上编辑此页',
     },
 

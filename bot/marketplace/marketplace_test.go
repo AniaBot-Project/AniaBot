@@ -9,11 +9,11 @@ import (
 
 func TestParseRepo(t *testing.T) {
 	cases := []struct{ in, owner, name string }{
-		{"jeanhua/AniaBot-Plugins", "jeanhua", "AniaBot-Plugins"},
-		{"https://github.com/jeanhua/AniaBot-Plugins", "jeanhua", "AniaBot-Plugins"},
-		{"https://github.com/jeanhua/AniaBot-Plugins/", "jeanhua", "AniaBot-Plugins"},
-		{"", "jeanhua", "AniaBot-Plugins"},
-		{"not-a-repo", "jeanhua", "AniaBot-Plugins"},
+		{"AniaBot-Project/AniaBot-Plugins", "AniaBot-Project", "AniaBot-Plugins"},
+		{"https://github.com/AniaBot-Project/AniaBot-Plugins", "AniaBot-Project", "AniaBot-Plugins"},
+		{"https://github.com/AniaBot-Project/AniaBot-Plugins/", "AniaBot-Project", "AniaBot-Plugins"},
+		{"", "AniaBot-Project", "AniaBot-Plugins"},
+		{"not-a-repo", "AniaBot-Project", "AniaBot-Plugins"},
 	}
 	for _, c := range cases {
 		o, n := parseRepo(c.in)

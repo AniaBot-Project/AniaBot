@@ -38,7 +38,7 @@ var frameworkConfigFields = []pluginconfig.Field{
 	{Key: "bot.balance.format", Label: "显示模板", Type: "string", Group: "API 余额查询", Help: "余额显示文本，{路径} 会被替换为响应 JSON 中对应 gjson 路径的值，如 ¥ {data.balances.0.total_balance}", Default: adminpanel.DefaultBalanceFormat},
 	// 插件市场
 	{Key: "bot.marketplace.enable", Label: "启用插件市场", Type: "bool", Group: "插件市场", Help: "开启后可在面板「插件市场」页浏览、在线安装/卸载第三方插件（安装会重新编译并重启 Bot）；安装插件等于在本机执行插件代码，请仅安装信任来源的插件", Default: false},
-	{Key: "bot.marketplace.repo", Label: "插件仓库", Type: "string", Group: "插件市场", Help: "GitHub 仓库 owner/repo，默认官方插件市场", Default: "jeanhua/AniaBot-Plugins"},
+	{Key: "bot.marketplace.repo", Label: "插件仓库", Type: "string", Group: "插件市场", Help: "GitHub 仓库 owner/repo，默认官方插件市场", Default: "AniaBot-Project/AniaBot-Plugins"},
 	{Key: "bot.marketplace.branch", Label: "仓库分支", Type: "string", Group: "插件市场", Default: "main"},
 	{Key: "bot.marketplace.source_dir", Label: "源码目录", Type: "string", Group: "插件市场", Help: "AniaBot 源码克隆路径，用于编译插件；留空时回退使用「自动更新」的源码目录（bot.update.source_dir）"},
 	{Key: "bot.marketplace.plugin_dir", Label: "插件持久目录", Type: "string", Group: "插件市场", Help: "已安装插件的持久副本目录（建议放在 data 卷，容器重建后插件不丢）", Default: "./data/plugins"},

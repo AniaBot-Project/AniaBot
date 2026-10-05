@@ -1,6 +1,6 @@
 # 插件市场
 
-AniaBot 提供插件市场：从独立的官方插件仓库（[jeanhua/AniaBot-Plugins](https://github.com/jeanhua/AniaBot-Plugins)）浏览插件介绍，并在面板上**在线安装 / 升级 / 卸载**第三方插件。安装会自动下载插件源码、生成注册代码、重新编译并重启 Bot。
+AniaBot 提供插件市场：从独立的官方插件仓库（[AniaBot-Project/AniaBot-Plugins](https://github.com/AniaBot-Project/AniaBot-Plugins)）浏览插件介绍，并在面板上**在线安装 / 升级 / 卸载**第三方插件。安装会自动下载插件源码、生成注册代码、重新编译并重启 Bot。
 
 > ⚠️ **安全提示**：安装插件等于在 Bot 所在机器上编译并执行插件代码（与 Bot 同进程）。请只安装你信任的插件。市场仓库的插件经过维护者人工审查，但无法保证第三方依赖与未来版本绝对安全。插件市场默认关闭。
 
@@ -72,7 +72,7 @@ GitHub API 未登录限流 60 次/小时，登录后可提升到 5000 次/小时
 | 配置键 | 默认值 | 说明 |
 | --- | --- | --- |
 | `bot.marketplace.enable` | `false` | 是否启用插件市场 |
-| `bot.marketplace.repo` | `jeanhua/AniaBot-Plugins` | 插件仓库 owner/repo |
+| `bot.marketplace.repo` | `AniaBot-Project/AniaBot-Plugins` | 插件仓库 owner/repo |
 | `bot.marketplace.branch` | `main` | 插件仓库分支 |
 | `bot.marketplace.source_dir` | 空 | 编译用源码目录，留空回退 `bot.update.source_dir` |
 | `bot.marketplace.plugin_dir` | `./data/plugins` | 已安装插件持久副本目录 |
@@ -81,7 +81,7 @@ GitHub API 未登录限流 60 次/小时，登录后可提升到 5000 次/小时
 
 ## 提交自己的插件
 
-插件市场是独立仓库 [jeanhua/AniaBot-Plugins](https://github.com/jeanhua/AniaBot-Plugins)，通过 Pull Request 提交：
+插件市场是独立仓库 [AniaBot-Project/AniaBot-Plugins](https://github.com/AniaBot-Project/AniaBot-Plugins)，通过 Pull Request 提交：
 
 1. Fork 仓库，在 `plugins/<id>/` 下创建插件（`plugin.json` + `README.md` + Go 源码），规范见仓库内 `docs/plugin-spec.md`
 2. 本地校验 `bash scripts/validate.sh`，或直接依赖 CI
@@ -91,8 +91,8 @@ GitHub API 未登录限流 60 次/小时，登录后可提升到 5000 次/小时
 
 ## 相关链接
 
-- [插件仓库 jeanhua/AniaBot-Plugins](https://github.com/jeanhua/AniaBot-Plugins) —— 浏览插件源码、提交 PR 发布自己的插件
-- [插件规范（plugin.json）](https://github.com/jeanhua/AniaBot-Plugins/blob/main/docs/plugin-spec.md)
-- [贡献指南（CONTRIBUTING）](https://github.com/jeanhua/AniaBot-Plugins/blob/main/CONTRIBUTING.md)
+- [插件仓库 AniaBot-Project/AniaBot-Plugins](https://github.com/AniaBot-Project/AniaBot-Plugins) —— 浏览插件源码、提交 PR 发布自己的插件
+- [插件规范（plugin.json）](https://github.com/AniaBot-Project/AniaBot-Plugins/blob/main/docs/plugin-spec.md)
+- [贡献指南（CONTRIBUTING）](https://github.com/AniaBot-Project/AniaBot-Plugins/blob/main/CONTRIBUTING.md)
 - [插件系统概览](/plugin/overview) —— 插件开发入门
 

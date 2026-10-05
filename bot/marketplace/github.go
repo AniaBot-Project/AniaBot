@@ -22,7 +22,7 @@ import (
 const (
 	ghAPIBase     = "https://api.github.com"
 	ghUserAgent   = "AniaBot-Plugin-Marketplace"
-	defaultRepo   = "jeanhua/AniaBot-Plugins"
+	defaultRepo   = "AniaBot-Project/AniaBot-Plugins"
 	defaultBranch = "main"
 )
 

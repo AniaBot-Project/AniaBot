@@ -173,7 +173,7 @@ if msg.Sender.UserId == p.SystemConfig.AdminId { /* 管理员专属 */ }
 
 ## 完整代码
 
-项目内置了一个最小示例可直接参考：[`custom/mvp/example.go`](https://github.com/jeanhua/AniaBot/blob/main/custom/mvp/example.go)，以及模板 [`custom/plugins/pluginexample/plugin.go`](https://github.com/jeanhua/AniaBot/blob/main/custom/plugins/pluginexample/plugin.go)。
+项目内置了一个最小示例可直接参考：[`custom/mvp/example.go`](https://github.com/AniaBot-Project/AniaBot/blob/main/custom/mvp/example.go)，以及模板 [`custom/plugins/pluginexample/plugin.go`](https://github.com/AniaBot-Project/AniaBot/blob/main/custom/plugins/pluginexample/plugin.go)。
 
 ## 下一步
 

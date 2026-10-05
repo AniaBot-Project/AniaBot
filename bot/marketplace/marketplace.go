@@ -3,7 +3,7 @@
 //
 // 安全模型：安装插件 = 在 Bot 所在机器上编译并执行插件代码（与 Bot 同进程）。
 // 功能默认关闭（bot.marketplace.enable=false），面板安装前会再次提示风险。
-// 插件来源是独立仓库（默认 jeanhua/AniaBot-Plugins），由维护者人工审查后合并。
+// 插件来源是独立仓库（默认 AniaBot-Project/AniaBot-Plugins），由维护者人工审查后合并。
 package marketplace
 
 import (

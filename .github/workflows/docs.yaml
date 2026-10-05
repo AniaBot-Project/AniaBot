@@ -22,7 +22,7 @@ jobs:
   build:
     name: Build Docs
     runs-on: ubuntu-latest
-    if: github.repository == 'jeanhua/AniaBot'
+    if: github.repository == 'AniaBot-Project/AniaBot'
 
     steps:
       - name: Checkout main branch

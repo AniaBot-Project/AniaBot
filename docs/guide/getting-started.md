@@ -29,7 +29,7 @@ AniaBot 不直接实现 QQ 协议，而是通过 [NapCat](https://napneko.github
 ## 第二步：获取源码
 
 ```bash
-git clone https://github.com/jeanhua/AniaBot.git
+git clone https://github.com/AniaBot-Project/AniaBot.git
 cd AniaBot
 go mod tidy
 ```

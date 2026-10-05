@@ -20,7 +20,7 @@ hero:
       link: /internals/
     - theme: alt
       text: GitHub
-      link: https://github.com/jeanhua/AniaBot
+      link: https://github.com/AniaBot-Project/AniaBot
 
 ---
 
