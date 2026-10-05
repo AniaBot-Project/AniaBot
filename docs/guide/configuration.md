@@ -251,6 +251,18 @@ bot.luckylilia.http.target_url    = http://localhost:6690 # LLBot HTTP 服务端
 | `plugin.ai_chat_bot.model` | `deepseek-chat` | 主模型名称 |
 | `plugin.ai_chat_bot.multimodal` | `false` | 主模型是否支持图片输入 |
 | `plugin.ai_chat_bot.rate_limit` | `2` | 同时处理的 AI 请求并发上限，超出后直接拒绝 |
+| `plugin.ai_chat_bot.headers` | `[]` | 自定义请求头，附加到全部 LLM 请求（主对话 / 子代理 / 定时任务 / 压缩器 / 备用识图 / 备用模型，以及启用向量检索时的 embedding 请求）；每行一个，格式 `Name: Value` 或 `Name=Value`，同名覆盖默认头（含 `User-Agent`），适合自建网关鉴权、路由标记等场景；非法行跳过并记日志 |
+
+::: tip 关于自定义请求头
+配置示例（面板「自定义请求头」文本框每行一条）：
+
+```
+Authorization: Bearer your-gateway-token
+X-Proxy-Route: team-a
+```
+
+请求头会原样下发，请只填写可信内容；值里有冒号时用 `=` 分隔（如 `X-Token=a:b`）更直观，反之亦然。修改后需重启 Bot 生效。
+:::
 
 ::: tip 关于 API 格式
 三种格式的对话能力（工具调用、流式回复、token 统计、备用模型切换）行为一致。差异说明：

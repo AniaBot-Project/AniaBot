@@ -290,7 +290,7 @@ func fakeEmbeddingsServer(t *testing.T) *httptest.Server {
 
 func newTestMemoryManagerWithEmbedder(store storage.PersistentStorage, baseURL string) *memoryManager {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	emb := newEmbedder(baseURL, "test-key", "test-embed", logger)
+	emb := newEmbedder(baseURL, "test-key", "test-embed", nil, logger)
 	return newMemoryManager(store, logger, 0, emb)
 }
 

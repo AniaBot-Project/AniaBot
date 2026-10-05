@@ -37,18 +37,19 @@ func normalizeAPIFormat(format string) (string, error) {
 }
 
 // newLLMBackend 按格式构造对应后端。cache 为上游 prompt 缓存配置，
-// 仅 anthropic 后端使用（chat_completions / responses 为自动前缀缓存）。
-func newLLMBackend(format, baseURL, apiKey, model string, cache PromptCacheConfig) (llmBackend, error) {
+// 仅 anthropic 后端使用（chat_completions / responses 为自动前缀缓存）；
+// headers 为自定义请求头，三种格式统一附加（同名覆盖默认头）。
+func newLLMBackend(format, baseURL, apiKey, model string, cache PromptCacheConfig, headers map[string]string) (llmBackend, error) {
 	f, err := normalizeAPIFormat(format)
 	if err != nil {
 		return nil, err
 	}
 	switch f {
 	case APIFormatResponses:
-		return newResponsesBackend(baseURL, apiKey, model), nil
+		return newResponsesBackend(baseURL, apiKey, model, headers), nil
 	case APIFormatAnthropic:
-		return newAnthropicBackend(baseURL, apiKey, model, cache), nil
+		return newAnthropicBackend(baseURL, apiKey, model, cache, headers), nil
 	default:
-		return newChatCompletionsBackend(baseURL, apiKey, model), nil
+		return newChatCompletionsBackend(baseURL, apiKey, model, headers), nil
 	}
 }

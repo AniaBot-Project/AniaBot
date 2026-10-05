@@ -21,15 +21,21 @@ type chatCompletionsBackend struct {
 	model  string
 }
 
-func newChatCompletionsBackend(baseURL, apiKey, model string) *chatCompletionsBackend {
+// newChatCompletionsBackend 构造后端。headers 为自定义请求头，追加在默认头之后，
+// 与默认头同名时生效者为准（可覆盖 User-Agent 等）。
+func newChatCompletionsBackend(baseURL, apiKey, model string, headers map[string]string) *chatCompletionsBackend {
+	opts := []option.RequestOption{
+		option.WithAPIKey(apiKey),
+		option.WithBaseURL(baseURL),
+		// 覆盖 SDK 默认 UA，标识请求来源与版本
+		option.WithHeader("User-Agent", version.UserAgent()),
+	}
+	for k, v := range headers {
+		opts = append(opts, option.WithHeader(k, v))
+	}
 	return &chatCompletionsBackend{
-		client: openai.NewClient(
-			option.WithAPIKey(apiKey),
-			option.WithBaseURL(baseURL),
-			// 覆盖 SDK 默认 UA，标识请求来源与版本
-			option.WithHeader("User-Agent", version.UserAgent()),
-		),
-		model: model,
+		client: openai.NewClient(opts...),
+		model:  model,
 	}
 }
 

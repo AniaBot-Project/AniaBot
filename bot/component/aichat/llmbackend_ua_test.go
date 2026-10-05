@@ -23,7 +23,7 @@ func TestUserAgentHeader(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		b := newChatCompletionsBackend(srv.URL, "test-key", "test-model")
+		b := newChatCompletionsBackend(srv.URL, "test-key", "test-model", nil)
 		if _, _, err := b.generate(context.Background(),
 			[]Message{TextMessage(RoleUser, "hello")}, ChatOptions{}); err != nil {
 			t.Fatalf("generate 失败: %v", err)
@@ -45,7 +45,7 @@ func TestUserAgentHeader(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		b := newResponsesBackend(srv.URL, "test-key", "test-model")
+		b := newResponsesBackend(srv.URL, "test-key", "test-model", nil)
 		if _, _, err := b.generate(context.Background(),
 			[]Message{TextMessage(RoleUser, "hello")}, ChatOptions{}); err != nil {
 			t.Fatalf("generate 失败: %v", err)
@@ -64,7 +64,7 @@ func TestUserAgentHeader(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		b := newAnthropicBackend(srv.URL, "test-key", "test-model", PromptCacheConfig{})
+		b := newAnthropicBackend(srv.URL, "test-key", "test-model", PromptCacheConfig{}, nil)
 		if _, _, err := b.generate(context.Background(),
 			[]Message{TextMessage(RoleUser, "hello")}, ChatOptions{}); err != nil {
 			t.Fatalf("generate 失败: %v", err)

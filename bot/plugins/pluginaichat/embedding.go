@@ -44,17 +44,23 @@ type embedder struct {
 }
 
 // newEmbedder 创建语义向量计算器；baseURL/apiKey/model 任一为空返回 nil。
-func newEmbedder(baseURL, apiKey, model string, logger *slog.Logger) *embedder {
+// headers 为自定义请求头（plugin.ai_chat_bot.headers），与 LLM 请求保持一致，
+// 走自定义网关时 embedding 请求同样需要携带。
+func newEmbedder(baseURL, apiKey, model string, headers map[string]string, logger *slog.Logger) *embedder {
 	if baseURL == "" || apiKey == "" || model == "" {
 		return nil
 	}
+	opts := []option.RequestOption{
+		option.WithAPIKey(apiKey),
+		option.WithBaseURL(baseURL),
+		// 与 LLMClient 一致，覆盖 SDK 默认 UA 标识请求来源与版本
+		option.WithHeader("User-Agent", version.UserAgent()),
+	}
+	for k, v := range headers {
+		opts = append(opts, option.WithHeader(k, v))
+	}
 	return &embedder{
-		client: openai.NewClient(
-			option.WithAPIKey(apiKey),
-			option.WithBaseURL(baseURL),
-			// 与 LLMClient 一致，覆盖 SDK 默认 UA 标识请求来源与版本
-			option.WithHeader("User-Agent", version.UserAgent()),
-		),
+		client: openai.NewClient(opts...),
 		model:  model,
 		logger: logger,
 		cache:  make(map[string][]float32),
@@ -80,7 +86,7 @@ func (p *AIChatPlugin) buildKBEmbedder() *embedder {
 	if embModel == "" {
 		embModel = "jina-embeddings-v3"
 	}
-	emb := newEmbedder(embBaseURL, embAPIKey, embModel, p.Logger.WithGroup("kb-embedding"))
+	emb := newEmbedder(embBaseURL, embAPIKey, embModel, p.customHeaders, p.Logger.WithGroup("kb-embedding"))
 	if emb == nil {
 		p.Logger.Warn("向量检索未启用：Embedding 配置不完整（base_url/api_key/model 缺项）")
 	}

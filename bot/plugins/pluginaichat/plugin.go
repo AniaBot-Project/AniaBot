@@ -33,6 +33,11 @@ type AIChatPlugin struct {
 	cfg   aiChatConfig
 	chats sync.Map
 
+	// customHeaders 自定义 LLM 请求头（plugin.ai_chat_bot.headers 的解析结果，
+	// Start 时解析一次）；nil 表示未配置。经 llmClientOptions 附加到全部 LLM
+	// 客户端（主对话/子代理/定时任务/压缩器/备用识图/备用模型）
+	customHeaders map[string]string
+
 	// historyDB 对话历史的 SQL 后端连接（Start 时探测建表成功才赋值）；
 	// nil 表示历史不持久化（仅内存窗口）
 	historyDB *sql.DB
@@ -750,6 +755,18 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	if p.cfg.Prompt == "" {
 		p.Logger.Warn("未配置 Prompt，将使用预设的默认提示词")
 		p.cfg.Prompt = defaultPrompt
+	}
+
+	// 自定义请求头：附加到全部 LLM 请求；非法行跳过（原样下发会让 net/http
+	// 拒绝请求，拖垮所有 LLM 调用），日志只记行号不记内容（可能含误填的凭据）
+	customHeaders, invalidHeaderLines := parseHeaderLines(p.cfg.Headers)
+	p.customHeaders = customHeaders
+	if len(invalidHeaderLines) > 0 {
+		p.Logger.Warn("自定义请求头存在非法行，已跳过（行号按配置文本框计数）",
+			"lines", fmt.Sprint(invalidHeaderLines))
+	}
+	if len(p.customHeaders) > 0 {
+		p.Logger.Info("已配置自定义 LLM 请求头", "headers", strings.Join(headerNames(p.customHeaders), ", "))
 	}
 
 	// 加载群聊/好友独立 prompt 覆盖配置（框架级共享键，仍走 viper）

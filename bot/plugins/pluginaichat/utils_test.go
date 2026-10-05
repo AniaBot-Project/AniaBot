@@ -2,6 +2,7 @@ package pluginaichat
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -284,5 +285,67 @@ func TestRegisterMessageImagesSkipsReplyInsideForward(t *testing.T) {
 	_, missing = reg.resolve([]string{message.ImageHash(urlReply)})
 	if len(missing) != 1 {
 		t.Fatalf("reply 目标图片不应被登记, missing=%v", missing)
+	}
+}
+
+// TestParseHeaderLines 自定义请求头解析：冒号/等号分隔、值内可含另一种分隔符、
+// 前后空白裁剪、重复名后者覆盖；非法行（缺分隔符、空名、名字含非法字符、
+// 值含换行/控制字符）被跳过并按 1 基行号报出（日志只记行号，不泄露误填的凭据）。
+func TestParseHeaderLines(t *testing.T) {
+	lines := []string{
+		"X-Token: abc",
+		"X-Route=proxy-a",
+		"  X-Space :  trimmed  ",
+		"Authorization: Bearer a=b",
+		"X-Dup: one",
+		"X-Dup: two",
+		"no-separator",
+		": empty-name",
+		"Bad Name: v",
+		"X-Bad-Value: line\nbreak",
+		"",
+	}
+	headers, invalid := parseHeaderLines(lines)
+
+	want := map[string]string{
+		"X-Token":       "abc",
+		"X-Route":       "proxy-a",
+		"X-Space":       "trimmed",
+		"Authorization": "Bearer a=b",
+		"X-Dup":         "two",
+	}
+	if len(headers) != len(want) {
+		t.Fatalf("headers = %v, want %v", headers, want)
+	}
+	for k, v := range want {
+		if headers[k] != v {
+			t.Errorf("headers[%s] = %q, want %q", k, headers[k], v)
+		}
+	}
+	wantInvalid := []int{7, 8, 9, 10}
+	if !slices.Equal(invalid, wantInvalid) {
+		t.Fatalf("invalid = %v, want %v", invalid, wantInvalid)
+	}
+}
+
+// TestParseHeaderLinesEmpty 空配置返回 nil（llmClientOptions 据此跳过 WithHeaders）。
+func TestParseHeaderLinesEmpty(t *testing.T) {
+	for _, lines := range [][]string{nil, {""}, {"  ", "\t"}} {
+		headers, invalid := parseHeaderLines(lines)
+		if headers != nil || len(invalid) != 0 {
+			t.Fatalf("lines=%q headers=%v invalid=%v，应返回 nil", lines, headers, invalid)
+		}
+	}
+}
+
+// TestParseHeaderLinesCanonical 名字规范化：大小写不同的同名头合并为一条，
+// 后出现的值生效（map 遍历顺序随机，不规范化会让生效值不确定）。
+func TestParseHeaderLinesCanonical(t *testing.T) {
+	headers, invalid := parseHeaderLines([]string{"x-token: one", "X-Token: two"})
+	if len(invalid) != 0 {
+		t.Fatalf("意外非法行: %v", invalid)
+	}
+	if len(headers) != 1 || headers["X-Token"] != "two" {
+		t.Fatalf("headers = %v, want 单条 X-Token=two", headers)
 	}
 }

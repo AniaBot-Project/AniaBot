@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/textproto"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +18,7 @@ import (
 	"github.com/jeanhua/AniaBot/common/bot"
 	"github.com/jeanhua/AniaBot/common/model/message"
 	"github.com/spf13/viper"
+	"golang.org/x/net/http/httpguts"
 )
 
 // botQQ 返回 bot 的 QQ 平台专属能力（事件来源为 QQ 适配器时可用），否则返回 nil。
@@ -33,6 +36,50 @@ func parseQID(s string) message.QID {
 		return message.FromUint64(n)
 	}
 	return message.FromString(strings.TrimSpace(s))
+}
+
+// parseHeaderLines 解析自定义请求头配置（plugin.ai_chat_bot.headers），
+// 支持 "Name: Value" 与 "Name=Value" 两种写法：按行内最先出现的分隔符切分，
+// 值中可自由包含另一种字符（如 "Authorization: Bearer a=b"）。空行忽略；
+// 缺分隔符、名字为空或名字/值含非法字符（net/http 会在发请求时拒绝，坏配置
+// 会拖垮全部 LLM 请求）的行跳过，并以 1 基行号返回给调用方记录告警（只记
+// 行号不记内容，避免把误填的凭据写进日志）。名字统一规范化
+// （X-Custom-Token），大小写不同视为同一条，重复以最后一行为准。
+func parseHeaderLines(lines []string) (headers map[string]string, invalidLines []int) {
+	for i, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		idx := strings.IndexAny(line, ":=")
+		if idx <= 0 {
+			invalidLines = append(invalidLines, i+1)
+			continue
+		}
+		name := strings.TrimSpace(line[:idx])
+		value := strings.TrimSpace(line[idx+1:])
+		if !httpguts.ValidHeaderFieldName(name) || !httpguts.ValidHeaderFieldValue(value) {
+			invalidLines = append(invalidLines, i+1)
+			continue
+		}
+		if headers == nil {
+			headers = make(map[string]string, len(lines))
+		}
+		// 规范化名字：与 net/http 的 Set 行为一致，也保证大小写不同的重复
+		// 名字合并为一条（map 遍历顺序随机，不合并会让最终生效值不确定）
+		headers[textproto.CanonicalMIMEHeaderKey(name)] = value
+	}
+	return headers, invalidLines
+}
+
+// headerNames 返回请求头名字的升序列表（日志用，避免把凭据值写进日志）。
+func headerNames(headers map[string]string) []string {
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 func (p *AIChatPlugin) extraMsg(b bot.Bot, msg message.Message) string {

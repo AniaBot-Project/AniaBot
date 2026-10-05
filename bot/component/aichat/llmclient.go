@@ -53,6 +53,7 @@ type llmClientConfig struct {
 	fallbackModel   string
 	fallbackFormat  string
 	promptCache     PromptCacheConfig
+	headers         map[string]string
 }
 
 // LLMClientOption 配置 LLMClient 的可选参数（函数选项模式）。
@@ -85,6 +86,14 @@ func WithPromptCache(cfg PromptCacheConfig) LLMClientOption {
 	}
 }
 
+// WithHeaders 附加自定义请求头，应用到全部 API 格式的主客户端与备用客户端；
+// 与默认头（User-Agent / Content-Type 等）同名时覆盖默认值。空 map 无效果。
+func WithHeaders(headers map[string]string) LLMClientOption {
+	return func(c *llmClientConfig) {
+		c.headers = headers
+	}
+}
+
 // WithFallback 配置备用模型：主模型重试耗尽或遇到不可重试错误时，改用备用模型
 // 再请求一次（备用客户端内部自带同等重试）。fallbackModel 为空表示不启用。
 // baseURL / apiKey / format 留空时回退到主模型配置。
@@ -103,7 +112,7 @@ func NewLLMClient(baseURL, apiKey, model string, opts ...LLMClientOption) (*LLMC
 		opt(&cfg)
 	}
 
-	backend, err := newLLMBackend(cfg.apiFormat, baseURL, apiKey, model, cfg.promptCache)
+	backend, err := newLLMBackend(cfg.apiFormat, baseURL, apiKey, model, cfg.promptCache, cfg.headers)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +131,8 @@ func NewLLMClient(baseURL, apiKey, model string, opts ...LLMClientOption) (*LLMC
 		fb, err := NewLLMClient(fbBaseURL, fbAPIKey, cfg.fallbackModel,
 			WithRetry(cfg.maxAttempts, cfg.baseDelay),
 			WithAPIFormat(fbFormat),
-			WithPromptCache(cfg.promptCache)) // 不传 WithFallback 防止递归
+			WithPromptCache(cfg.promptCache),
+			WithHeaders(cfg.headers)) // 不传 WithFallback 防止递归
 		if err != nil {
 			return nil, fmt.Errorf("create fallback client: %w", err)
 		}

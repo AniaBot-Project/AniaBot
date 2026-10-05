@@ -127,8 +127,8 @@ func (p *AIChatPlugin) mainMaxIterations() int {
 	return p.cfg.MaxIterations
 }
 
-// llmClientOptions 从插件配置构造 LLM 客户端可选参数（应用层重试 + 备用模型）。
-// 供主对话 / 子代理 / 定时任务 / OCR 的所有客户端统一使用。
+// llmClientOptions 从插件配置构造 LLM 客户端可选参数（应用层重试 + 备用模型 +
+// 自定义请求头）。供主对话 / 子代理 / 定时任务 / 压缩器 / OCR 的所有客户端统一使用。
 func (p *AIChatPlugin) llmClientOptions() []aichat.LLMClientOption {
 	var opts []aichat.LLMClientOption
 	if p.cfg.Retry.MaxAttempts > 1 {
@@ -144,6 +144,11 @@ func (p *AIChatPlugin) llmClientOptions() []aichat.LLMClientOption {
 		Enable: p.cfg.PromptCache.Enable,
 		TTL:    p.cfg.PromptCache.TTL,
 	}))
+	// 自定义请求头：主模型与备用模型的后端客户端都会附加（WithHeaders 在
+	// 备用客户端构造时透传），空配置不影响原有行为
+	if len(p.customHeaders) > 0 {
+		opts = append(opts, aichat.WithHeaders(p.customHeaders))
+	}
 	if p.cfg.Fallback.Model != "" {
 		opts = append(opts, aichat.WithFallback(p.cfg.Fallback.BaseURL, p.cfg.Fallback.APIKey, p.cfg.Fallback.Model, p.cfg.Fallback.APIFormat))
 	}

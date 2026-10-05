@@ -29,7 +29,9 @@ type anthropicBackend struct {
 	cache PromptCacheConfig
 }
 
-func newAnthropicBackend(baseURL, apiKey, model string, cache PromptCacheConfig) *anthropicBackend {
+// newAnthropicBackend 构造后端。headers 为自定义请求头，追加在默认头之后，
+// 与默认头同名时生效者为准（可覆盖 User-Agent 等）。
+func newAnthropicBackend(baseURL, apiKey, model string, cache PromptCacheConfig, headers map[string]string) *anthropicBackend {
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiKey),
 		// 覆盖 SDK 默认 UA，标识请求来源与版本
@@ -37,6 +39,9 @@ func newAnthropicBackend(baseURL, apiKey, model string, cache PromptCacheConfig)
 	}
 	if baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
+	}
+	for k, v := range headers {
+		opts = append(opts, option.WithHeader(k, v))
 	}
 	return &anthropicBackend{client: anthropic.NewClient(opts...), model: model, cache: cache}
 }
