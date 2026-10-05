@@ -8,7 +8,7 @@
       <div class="flex items-center gap-3">
         <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="load">刷新</button>
         <button
-          class="text-xs bg-zinc-900 text-white px-3.5 py-2 rounded-lg hover:bg-zinc-700 font-medium transition-colors shadow-sm"
+          class="text-xs btn-accent px-3.5 py-2 rounded-lg font-medium transition-colors shadow-sm"
           @click="openCreate"
         >
           新增团队
@@ -17,18 +17,18 @@
     </div>
 
     <!-- 操作反馈 -->
-    <p v-if="msg" class="text-xs" :class="msgOk ? 'text-emerald-600' : 'text-red-600'">{{ msg }}</p>
+    <p v-if="msg" class="text-xs" :class="msgOk ? 'text-[#34c759]' : 'text-[#ff3b30]'">{{ msg }}</p>
 
     <div class="flex flex-col lg:flex-row lg:items-start gap-4">
       <!-- 左栏：会话列表 -->
-      <section class="w-full lg:w-72 shrink-0 bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden">
-        <div class="p-2 border-b border-slate-100">
+      <section class="w-full lg:w-72 shrink-0 bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
+        <div class="p-2 border-b border-white/50">
           <div class="flex items-center gap-1 bg-slate-50 rounded-lg p-1">
             <button
               v-for="t in kindTabs"
               :key="t.value"
               class="flex-1 px-2 py-1.5 text-xs rounded-md transition-all"
-              :class="kindFilter === t.value ? 'bg-zinc-900 text-white font-medium shadow-sm' : 'text-slate-500 hover:text-slate-800'"
+              :class="kindFilter === t.value ? 'btn-accent font-medium shadow-sm' : 'text-slate-500 hover:text-slate-800'"
               @click="kindFilter = t.value"
             >
               {{ t.label }}
@@ -43,7 +43,7 @@
             v-for="s in filteredScopes"
             :key="s.scope"
             class="px-4 py-3 cursor-pointer transition-colors"
-            :class="current?.scope === s.scope ? 'bg-zinc-900/4' : 'hover:bg-slate-50/70'"
+            :class="current?.scope === s.scope ? 'bg-[#0071e3]/12' : 'hover:bg-white/55'"
             @click="selectScope(s)"
           >
             <div class="flex items-center justify-between gap-2">
@@ -56,8 +56,8 @@
       </section>
 
       <!-- 右栏：团队列表 -->
-      <section class="flex-1 min-w-0 bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden">
-        <div v-if="current" class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between gap-3">
+      <section class="flex-1 min-w-0 bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
+        <div v-if="current" class="px-5 py-3.5 border-b border-white/50 flex items-center justify-between gap-3">
           <div class="min-w-0">
             <span class="text-sm font-semibold text-slate-800">{{ displayName(current) }}</span>
             <span class="ml-2 text-[11px] font-mono text-slate-400">{{ current.scope }}</span>
@@ -81,20 +81,20 @@
               <p v-if="t.desc" class="text-xs text-slate-500 mt-1.5">{{ t.desc }}</p>
               <ul class="mt-2.5 space-y-1.5">
                 <li v-for="m in t.members" :key="m.name" class="flex items-start gap-2">
-                  <span class="text-[11px] px-2 py-0.5 rounded-md bg-zinc-900/5 border border-zinc-200/60 font-mono text-zinc-700 shrink-0 mt-px">{{ m.name }}</span>
+                  <span class="text-[11px] px-2 py-0.5 rounded-md bg-[#0071e3]/10 border border-zinc-200/60 font-mono text-zinc-700 shrink-0 mt-px">{{ m.name }}</span>
                   <span class="text-xs text-slate-500 leading-relaxed wrap-break-word">{{ m.role || '（无角色描述）' }}</span>
                 </li>
               </ul>
             </div>
             <div class="flex items-center gap-1 shrink-0">
               <button
-                class="text-xs text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
+                class="text-xs text-zinc-600 hover:text-zinc-900 hover:bg-white/60 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
                 @click="openEdit(t)"
               >
                 编辑
               </button>
               <button
-                class="text-xs text-red-500 hover:text-red-600 hover:bg-red-50 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
+                class="text-xs text-[#ff3b30] hover:text-[#ff3b30] hover:bg-red-50 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
                 @click="onDelete(t)"
               >
                 删除
@@ -106,7 +106,7 @@
     </div>
 
     <!-- 新增/编辑弹窗 -->
-    <div v-if="showForm" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" v-backdrop-close="() => (showForm = false)">
+    <div v-if="showForm" class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4" v-backdrop-close="() => (showForm = false)">
       <form class="bg-white rounded-2xl shadow-2xl p-6 w-lg max-w-full space-y-4" @submit.prevent="onSubmit">
         <h2 class="text-base font-semibold text-slate-800">{{ form.name ? '编辑团队' : '新增团队' }}</h2>
         <div class="grid grid-cols-2 gap-3">
@@ -129,9 +129,9 @@
         <div>
           <label class="block text-xs text-slate-500 mb-1.5">成员（1 至 10 个：可选预置角色自动填充名字，或用 name + 角色描述自定义；角色描述为空且名字命中预置角色时，该成员按预置角色执行）</label>
           <div class="space-y-2">
-            <div v-for="(m, i) in form.members" :key="i" class="border border-slate-200 rounded-lg p-2.5 space-y-2">
+            <div v-for="(m, i) in form.members" :key="i" class="border border-white/60 rounded-lg p-2.5 space-y-2">
               <div class="flex flex-wrap items-center gap-2">
-                <select :value="presetOf(m)" class="w-44 shrink-0 border border-slate-300 rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-zinc-400" @change="onPresetChange(m, $event)">
+                <select :value="presetOf(m)" class="w-44 shrink-0 border border-slate-300/60 rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30" @change="onPresetChange(m, $event)">
                   <option value="">自定义</option>
                   <option v-for="r in roles" :key="r.name" :value="r.name" :title="r.summary">
                     {{ r.name }} · {{ r.summary }}
@@ -140,7 +140,7 @@
                 <input v-model="m.name" placeholder="成员名（选预置角色后自动填充）" required :class="inputClass" />
                 <button
                   type="button"
-                  class="text-xs text-red-400 hover:text-red-600 px-2 py-1.5 rounded-lg hover:bg-red-50 font-medium shrink-0 transition-colors"
+                  class="text-xs text-red-400 hover:text-[#ff3b30] px-2 py-1.5 rounded-lg hover:bg-red-50 font-medium shrink-0 transition-colors"
                   :disabled="form.members.length <= 1"
                   @click="form.members.splice(i, 1)"
                 >
@@ -152,17 +152,17 @@
           </div>
           <button
             type="button"
-            class="mt-2 text-xs text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
+            class="mt-2 text-xs text-zinc-600 hover:text-zinc-900 hover:bg-white/60 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
             :disabled="form.members.length >= 10"
             @click="form.members.push({ name: '', role: '' })"
           >
             + 添加成员
           </button>
         </div>
-        <p v-if="form.msg" class="text-sm text-red-600">{{ form.msg }}</p>
+        <p v-if="form.msg" class="text-sm text-[#ff3b30]">{{ form.msg }}</p>
         <div class="flex justify-end gap-2 pt-1">
-          <button type="button" class="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" @click="showForm = false">取消</button>
-          <button type="submit" class="px-4 py-2 text-sm bg-zinc-900 text-white rounded-lg hover:bg-zinc-800 transition-colors">保存</button>
+          <button type="button" class="px-4 py-2 text-sm text-slate-600 hover:bg-white/60 rounded-lg transition-colors" @click="showForm = false">取消</button>
+        <button type="submit" class="px-4 py-2 text-sm btn-accent rounded-lg transition-colors">保存</button>
         </div>
       </form>
     </div>
@@ -173,7 +173,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { api } from '../api.js'
 
-const inputClass = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400 transition-shadow'
+const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow'
 
 const kindTabs = [
   { value: 'all', label: '全部' },

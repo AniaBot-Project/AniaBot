@@ -3,7 +3,7 @@
     <!-- 适配器未连接提示 -->
     <div
       v-if="status.adapter_status && status.adapter_status !== 'connected'"
-      class="tcard border-amber-300! bg-amber-50! px-5 py-3.5 flex items-center justify-between gap-4"
+      class="glass-warn px-5 py-3.5 flex items-center justify-between gap-4"
     >
       <span class="flex items-center gap-3 text-xs text-amber-800">
         <span class="[&>svg]:w-4 [&>svg]:h-4 text-amber-500 shrink-0" v-html="icons.warn" />
@@ -22,7 +22,7 @@
       <section class="tcard xl:col-span-5 p-4 sm:p-6 flex flex-col">
         <div class="flex items-center justify-between">
           <span class="tlabel">Device Clock</span>
-          <span class="tpill"><span class="tdot bg-emerald-500" />Sync OK</span>
+          <span class="tpill"><span class="tdot bg-[#34c759]" />Sync OK</span>
         </div>
 
         <div class="flex-1 flex items-center justify-between gap-4 py-5">
@@ -64,13 +64,13 @@
         <div class="flex items-center justify-between">
           <span class="tlabel">Adapter Link</span>
           <span class="tpill">
-            <span class="tdot" :class="linked ? 'bg-emerald-500' : 'bg-amber-500'" />
+            <span class="tdot" :class="linked ? 'bg-[#34c759]' : 'bg-[#ff9f0a]'" />
             {{ linked ? 'Link Live' : 'Link Down' }}
           </span>
         </div>
 
         <div class="flex-1 py-5">
-          <div class="text-4xl font-semibold tracking-tight" :class="linked ? 'text-zinc-900' : 'text-amber-600'">{{ adapterText }}</div>
+          <div class="text-4xl font-semibold tracking-tight" :class="linked ? 'text-zinc-900' : 'text-[#ff9f0a]'">{{ adapterText }}</div>
           <div class="tlabel mt-2">{{ adapterPlatforms }}</div>
         </div>
 
@@ -163,7 +163,7 @@
       <section class="tcard xl:col-span-4 p-4 sm:p-6 flex flex-col">
         <div class="flex items-center justify-between">
           <span class="tlabel">Memory</span>
-          <span class="tpill"><span class="tdot" :class="host.mem_percent >= 90 ? 'bg-red-500' : host.mem_percent >= 75 ? 'bg-amber-500' : 'bg-emerald-500'" />{{ memPctText }}</span>
+          <span class="tpill"><span class="tdot" :class="host.mem_percent >= 90 ? 'bg-[#ff3b30]' : host.mem_percent >= 75 ? 'bg-[#ff9f0a]' : 'bg-[#34c759]'" />{{ memPctText }}</span>
         </div>
 
         <div class="flex-1 flex items-end justify-between gap-4 pt-4 pb-3">
@@ -218,7 +218,7 @@
         <div class="flex items-center justify-between">
           <span class="tlabel">Token Usage</span>
           <span class="tpill">
-            <span class="tdot" :class="tokenSummary.cache_hit_rate > 0 ? 'bg-emerald-500' : 'bg-zinc-300'" />
+            <span class="tdot" :class="tokenSummary.cache_hit_rate > 0 ? 'bg-[#34c759]' : 'bg-zinc-300'" />
             Cache Hit {{ cacheHitText }}
           </span>
         </div>
@@ -284,12 +284,12 @@
         <div class="flex items-center justify-between">
           <span class="tlabel">API Balance</span>
           <button
-            class="tpill cursor-pointer hover:bg-zinc-100 transition-colors"
+            class="tpill cursor-pointer hover:bg-white/60 transition-colors"
             :class="{ 'opacity-50 pointer-events-none': balanceLoading }"
             title="强制刷新（绕过服务端缓存）"
             @click="loadBalance(true)"
           >
-            <span class="tdot" :class="balance?.error ? 'bg-amber-500' : 'bg-emerald-500'" />
+            <span class="tdot" :class="balance?.error ? 'bg-[#ff9f0a]' : 'bg-[#34c759]'" />
             {{ balanceLoading ? '查询中' : '刷新' }}
           </button>
         </div>
@@ -300,7 +300,7 @@
         </div>
 
         <div class="border-t border-dotted border-zinc-300 pt-3">
-          <div v-if="balance?.error" class="text-[11px] text-amber-600 truncate" :title="balance.error">查询失败：{{ balance.error }}</div>
+          <div v-if="balance?.error" class="text-[11px] text-[#ff9f0a] truncate" :title="balance.error">查询失败：{{ balance.error }}</div>
           <div class="flex items-center justify-between mt-1 text-[10px] tracking-[0.12em] uppercase text-zinc-400">
             <span>Updated {{ balanceUpdatedText }}</span>
             <span class="shrink-0 ml-2">{{ balance?.cached ? 'Cached' : 'Live' }} · {{ balance?.ttl ?? 0 }}s</span>
@@ -327,13 +327,13 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="p in plugins" :key="p.name" class="border-b border-dashed border-zinc-100 last:border-0 hover:bg-zinc-50/70 transition-colors">
+            <tr v-for="p in plugins" :key="p.name" class="border-b border-dashed border-zinc-100 last:border-0 hover:bg-white/55 transition-colors">
               <td class="px-3 py-3 sm:px-6 font-semibold text-zinc-800">{{ p.name }}</td>
               <td class="px-3 py-3 sm:px-6 text-zinc-600">{{ p.help_words }}</td>
               <td class="px-3 py-3 sm:px-6 text-zinc-600">{{ p.author }}</td>
               <td class="px-3 py-3 sm:px-6 text-zinc-500">{{ p.version }}</td>
               <td class="px-3 py-3 sm:px-6">
-                <span v-if="p.admin_only" class="tpill py-0.5!"><span class="tdot bg-amber-500" />Admin</span>
+                <span v-if="p.admin_only" class="tpill py-0.5!"><span class="tdot bg-[#ff9f0a]" />Admin</span>
                 <span v-else class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">All</span>
               </td>
             </tr>

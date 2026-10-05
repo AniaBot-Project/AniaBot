@@ -2,14 +2,14 @@
   <div class="space-y-5 max-w-6xl">
     <!-- 环境提示 -->
     <div v-if="info && info.mode === 'dev'" class="tcard p-4 border-l-2 border-l-amber-400 flex items-start gap-3">
-      <span class="tdot bg-amber-400 mt-1.5 shrink-0" />
+      <span class="tdot bg-[#ff9f0a] mt-1.5 shrink-0" />
       <div class="text-xs text-zinc-600 leading-relaxed">
         当前为 <span class="font-semibold text-zinc-900">go run 开发模式</span>运行，插件市场不可用。
         请以编译后的二进制方式部署（容器内可直接使用）。
       </div>
     </div>
     <div v-else-if="info && !info.enabled" class="tcard p-4 border-l-2 border-l-amber-400 flex items-start gap-3">
-      <span class="tdot bg-amber-400 mt-1.5 shrink-0" />
+      <span class="tdot bg-[#ff9f0a] mt-1.5 shrink-0" />
       <div class="text-xs text-zinc-600 leading-relaxed">
         插件市场未开启。请先在
         <RouterLink to="/config" class="font-semibold text-zinc-900 underline underline-offset-2">配置管理</RouterLink>
@@ -17,7 +17,7 @@
       </div>
     </div>
     <div v-else-if="info && !info.configured" class="tcard p-4 border-l-2 border-l-amber-400 flex items-start gap-3">
-      <span class="tdot bg-amber-400 mt-1.5 shrink-0" />
+      <span class="tdot bg-[#ff9f0a] mt-1.5 shrink-0" />
       <div class="text-xs text-zinc-600 leading-relaxed">
         尚未配置源码目录。请先在
         <RouterLink to="/config" class="font-semibold text-zinc-900 underline underline-offset-2">配置管理</RouterLink>
@@ -33,7 +33,7 @@
 
     <!-- 错误提示 -->
     <div v-if="listError" class="tcard p-4 border-l-2 border-l-red-400">
-      <p class="text-xs text-red-600 font-mono break-all leading-relaxed">{{ listError }}</p>
+      <p class="text-xs text-[#ff3b30] font-mono break-all leading-relaxed">{{ listError }}</p>
       <p class="text-[11px] text-zinc-400 mt-2">可能是网络不通或触发 GitHub API 限流，可稍后重试或登录 GitHub 后再试。</p>
     </div>
 
@@ -51,7 +51,7 @@
         <div class="flex items-center gap-2">
           <button
             v-if="showLogin"
-            class="inline-flex items-center gap-2 text-xs bg-zinc-900 text-white px-3.5 py-2 rounded-lg hover:bg-zinc-700 font-medium shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            class="inline-flex items-center gap-2 text-xs btn-accent px-3.5 py-2 rounded-lg font-medium shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             :disabled="busy || loading || refreshing"
             @click="onOAuthStart"
           >
@@ -59,7 +59,7 @@
             {{ info.token_set ? '重新登录 GitHub' : '登录 GitHub' }}
           </button>
           <button
-            class="inline-flex items-center gap-2 text-xs bg-white text-zinc-700 px-3.5 py-2 rounded-lg border border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900 font-medium shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            class="inline-flex items-center gap-2 text-xs bg-white text-zinc-700 px-3.5 py-2 rounded-lg border border-zinc-300 hover:bg-white/55 hover:text-zinc-900 font-medium shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             :disabled="!canBrowse || loading || refreshing"
             @click="refreshList()"
           >
@@ -75,7 +75,7 @@
         <div class="flex items-center justify-between gap-3 flex-wrap mb-5">
           <span class="tlabel">Marketplace / 仓库信息</span>
           <div class="flex items-center gap-2 flex-wrap">
-            <span v-if="info.token_valid" class="tpill"><span class="tdot bg-emerald-500" />已登录 GitHub</span>
+            <span v-if="info.token_valid" class="tpill"><span class="tdot bg-[#34c759]" />已登录 GitHub</span>
             <span v-else-if="info.token_set" class="tpill"><span class="tdot bg-red-400" />登录已失效</span>
             <span v-else class="tpill"><span class="tdot bg-zinc-300" />未登录</span>
             <span v-if="info.rate_remaining >= 0" class="tpill"><span class="tdot bg-zinc-300" />配额 {{ info.rate_remaining }}</span>
@@ -99,7 +99,7 @@
             <dt class="tlabel mb-1.5">运行环境</dt>
             <dd class="flex flex-col gap-1.5">
               <span v-for="t in ['git', 'go']" :key="t" class="flex items-center gap-2 text-xs min-w-0">
-                <span class="tdot" :class="info.env?.[t] ? 'bg-emerald-500' : 'bg-red-400'" />
+                <span class="tdot" :class="info.env?.[t] ? 'bg-[#34c759]' : 'bg-red-400'" />
                 <span class="uppercase tracking-wider text-zinc-400 w-8 shrink-0">{{ t }}</span>
                 <span class="font-mono text-zinc-700 truncate" :title="info.env?.[t]">{{ info.env?.[t] || '未安装' }}</span>
               </span>
@@ -137,7 +137,7 @@
         <div v-if="info.rollback_available" class="mt-4 pt-4 border-t border-zinc-100 flex items-center justify-between gap-3 flex-wrap">
           <p class="text-xs text-zinc-500 leading-relaxed">上次安装保留了旧版本备份；如安装后出现异常，可回滚到操作前的状态（将重启 Bot）。</p>
           <button
-            class="inline-flex items-center gap-1.5 text-xs text-red-600 bg-red-50 border border-red-200 hover:bg-red-100 px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            class="inline-flex items-center gap-1.5 text-xs text-[#ff3b30] bg-red-50 border border-red-200 hover:bg-red-100 px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             :disabled="busy"
             @click="onRollback"
           >
@@ -163,7 +163,7 @@
             <span v-if="i < phases.length - 1" class="mx-2 h-px w-5 bg-zinc-200" />
           </template>
         </div>
-        <div ref="logEl" class="bg-zinc-950 rounded-lg p-3.5 h-64 overflow-y-auto font-mono text-[11px] leading-relaxed text-zinc-300">
+        <div ref="logEl" class="bg-slate-950/85 rounded-xl p-3.5 h-64 overflow-y-auto font-mono text-[11px] leading-relaxed text-slate-300 border border-white/10 shadow-inner">
           <div v-for="(l, i) in status.logs" :key="i" :class="logLineClass(l)">{{ l }}</div>
           <div v-if="status.running" class="flex items-center gap-2 text-zinc-500 mt-1">
             <span class="w-3 h-3 border-2 border-zinc-700 border-t-zinc-300 rounded-full animate-spin" />
@@ -180,11 +180,11 @@
               <button
                 v-for="t in tabs" :key="t.key"
                 class="px-3.5 py-1.5 text-xs rounded-md transition-colors"
-                :class="tab === t.key ? 'bg-zinc-900 text-white font-medium shadow-sm' : 'text-zinc-500 hover:text-zinc-800'"
+                :class="tab === t.key ? 'btn-accent font-medium shadow-sm' : 'text-zinc-500 hover:text-zinc-800'"
                 @click="tab = t.key"
               >{{ t.label }}</button>
             </div>
-            <input v-model="keyword" placeholder="搜索名称 / 描述 / 作者 / 标签" class="w-full sm:w-72 text-xs bg-white border border-zinc-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400 transition-shadow" />
+            <input v-model="keyword" placeholder="搜索名称 / 描述 / 作者 / 标签" class="w-full sm:w-72 text-xs bg-white border border-zinc-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow" />
           </div>
           <p class="mt-3 text-[11px] text-zinc-400">显示 {{ filtered.length }} / {{ plugins.length }} 个插件</p>
         </div>
@@ -199,14 +199,14 @@
         <div v-else class="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
           <div
             v-for="p in filtered" :key="p.id"
-            class="border border-slate-200/70 rounded-xl p-4 hover:border-zinc-300 hover:shadow-md hover:shadow-zinc-200/50 transition-all cursor-pointer bg-white"
+            class="border border-white/60 rounded-xl p-4 hover:border-zinc-300 hover:shadow-md hover:shadow-zinc-200/50 transition-all cursor-pointer bg-white"
             @click="openDetail(p.id)"
           >
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
                   <span class="text-sm font-semibold text-zinc-900 truncate">{{ p.name }}</span>
-                  <span v-if="p.installed" class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium">已安装 {{ p.installed_version }}</span>
+                  <span v-if="p.installed" class="text-[10px] px-2 py-0.5 rounded-full bg-[#34c759]/10 text-[#248a3d] border border-[#34c759]/40 font-medium">已安装 {{ p.installed_version }}</span>
                   <span v-else-if="p.update_available" class="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 font-medium">可更新</span>
                 </div>
                 <p class="text-xs text-zinc-500 mt-1.5 line-clamp-2 leading-relaxed">{{ p.description }}</p>
@@ -223,7 +223,7 @@
               <div class="flex items-center gap-1.5 shrink-0" @click.stop>
                 <button
                   v-if="p.installed && !p.update_available"
-                  class="text-xs text-zinc-500 hover:text-red-600 hover:bg-red-50 px-2.5 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
+                  class="text-xs text-zinc-500 hover:text-[#ff3b30] hover:bg-red-50 px-2.5 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
                   :disabled="busy"
                   @click="onUninstall(p)"
                 >卸载</button>
@@ -232,7 +232,7 @@
                   class="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   :class="p.installed
                     ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
-                    : 'bg-zinc-900 text-white hover:bg-zinc-700'"
+                  : 'btn-accent '"
                   :disabled="!canOperate || busy"
                   @click="onInstall(p)"
                 >{{ p.installed ? '升级' : '安装' }}</button>
@@ -244,7 +244,7 @@
     </template>
 
     <!-- GitHub 在线登录弹窗 -->
-    <div v-if="oauthOpen" class="fixed inset-0 bg-zinc-950/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" v-backdrop-close="() => (oauthOpen = false)">
+    <div v-if="oauthOpen" class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4" v-backdrop-close="() => (oauthOpen = false)">
       <div class="tcard p-6 w-[26rem] max-w-full text-center space-y-4">
         <h2 class="text-sm font-semibold text-zinc-900">GitHub 登录</h2>
         <template v-if="oauth.status === 'pending'">
@@ -260,20 +260,20 @@
           </p>
         </template>
         <template v-else-if="oauth.status === 'authorized'">
-          <p class="text-sm text-emerald-600 font-semibold">登录成功{{ oauth.user ? '：' + oauth.user : '' }}</p>
+          <p class="text-sm text-[#34c759] font-semibold">登录成功{{ oauth.user ? '：' + oauth.user : '' }}</p>
         </template>
         <template v-else>
-          <p class="text-sm text-red-600">{{ oauth.error || '登录流程已结束' }}</p>
+          <p class="text-sm text-[#ff3b30]">{{ oauth.error || '登录流程已结束' }}</p>
         </template>
         <div class="flex justify-center gap-2 pt-1">
-          <button v-if="oauth.status === 'pending'" class="text-xs text-zinc-500 hover:text-zinc-900 px-4 py-2 rounded-lg hover:bg-zinc-100" @click="onOAuthCancel">取消</button>
-          <button v-else class="text-xs bg-zinc-900 text-white px-5 py-2 rounded-lg hover:bg-zinc-700" @click="oauthOpen = false">关闭</button>
+          <button v-if="oauth.status === 'pending'" class="text-xs text-zinc-500 hover:text-zinc-900 px-4 py-2 rounded-lg hover:bg-white/60" @click="onOAuthCancel">取消</button>
+        <button v-else class="text-xs btn-accent px-5 py-2 rounded-lg" @click="oauthOpen = false">关闭</button>
         </div>
       </div>
     </div>
 
     <!-- 详情弹窗 -->
-    <div v-if="showDetail" class="fixed inset-0 bg-zinc-950/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6" v-backdrop-close="closeDetail">
+    <div v-if="showDetail" class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4 sm:p-6" v-backdrop-close="closeDetail">
       <div class="bg-white rounded-xl shadow-2xl border border-zinc-200 w-full max-w-3xl max-h-[88vh] flex flex-col overflow-hidden">
         <!-- 头部 -->
         <div class="px-6 py-4 border-b border-zinc-100 flex items-start justify-between gap-4 shrink-0">
@@ -285,7 +285,7 @@
             <template v-else-if="detail">
               <div class="flex items-center gap-2 flex-wrap">
                 <h2 class="text-lg font-semibold text-zinc-900 truncate">{{ detail.manifest.name }}</h2>
-                <span v-if="detail.installed" class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium">已安装 {{ detail.installed_version }}</span>
+                <span v-if="detail.installed" class="text-[10px] px-2 py-0.5 rounded-full bg-[#34c759]/10 text-[#248a3d] border border-[#34c759]/40 font-medium">已安装 {{ detail.installed_version }}</span>
               </div>
               <p class="text-xs text-zinc-500 mt-1 leading-relaxed">{{ detail.manifest.description }}</p>
             </template>
@@ -305,13 +305,13 @@
             <button
               v-if="!detail.installed || detail.installed_version !== detail.manifest.version"
               class="text-xs px-4 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              :class="detail.installed ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100' : 'bg-zinc-900 text-white hover:bg-zinc-700'"
+              :class="detail.installed ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100' : 'btn-accent '"
               :disabled="!canOperate || busy"
               @click="onInstallDetail"
             >{{ detail.installed ? '升级到 v' + detail.manifest.version : '安装' }}</button>
             <button
               v-if="detail.installed"
-              class="text-xs text-zinc-500 hover:text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
+              class="text-xs text-zinc-500 hover:text-[#ff3b30] hover:bg-red-50 px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
               :disabled="busy"
               @click="onUninstallDetail"
             >卸载</button>
@@ -330,7 +330,7 @@
             </div>
           </template>
           <template v-else-if="detail && detail.readme_error">
-            <p class="text-xs text-red-500">README 加载失败：{{ detail.readme_error }}</p>
+            <p class="text-xs text-[#ff3b30]">README 加载失败：{{ detail.readme_error }}</p>
           </template>
           <template v-else-if="detail && !detail.readme">
             <p class="text-xs text-zinc-400 py-6 text-center">该插件未提供 README。</p>
@@ -341,7 +341,7 @@
     </div>
 
     <!-- 重启中遮罩 -->
-    <div v-if="rebooting" class="fixed inset-0 bg-zinc-950/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div v-if="rebooting" class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4">
       <div class="tcard p-8 w-80 max-w-full text-center space-y-3">
         <span class="mx-auto block w-8 h-8 border-[3px] border-zinc-200 border-t-zinc-800 rounded-full animate-spin" />
         <div class="text-sm font-semibold text-zinc-900 tracking-[0.15em] uppercase">Rebooting</div>
@@ -408,13 +408,13 @@ const canOperate = computed(() => areaReady.value && !busy.value)
 const showLogin = computed(() => info.value?.oauth_configured && !info.value?.token_valid && areaReady.value)
 
 const accountDotClass = computed(() => {
-  if (info.value?.token_valid) return 'bg-emerald-500'
+  if (info.value?.token_valid) return 'bg-[#34c759]'
   if (info.value?.token_set) return 'bg-red-400'
   return 'bg-zinc-300'
 })
 const accountTextClass = computed(() => {
-  if (info.value?.token_valid) return 'text-emerald-600'
-  if (info.value?.token_set) return 'text-red-500'
+  if (info.value?.token_valid) return 'text-[#34c759]'
+  if (info.value?.token_set) return 'text-[#ff3b30]'
   return 'text-zinc-500'
 })
 const accountText = computed(() => {
@@ -707,13 +707,13 @@ function phaseDone(key) {
   return phaseIndex(status.phase) > phaseIndex(key)
 }
 function phaseClass(key) {
-  if (status.error && status.phase === key) return 'border-red-400 text-red-500'
-  if (phaseDone(key)) return 'border-emerald-500 bg-emerald-500 text-white'
+  if (status.error && status.phase === key) return 'border-red-400 text-[#ff3b30]'
+  if (phaseDone(key)) return 'border-[#34c759]/40 bg-[#34c759] text-white'
   if (status.phase === key) return 'border-zinc-900 text-zinc-900'
   return 'border-zinc-300 text-zinc-400'
 }
 function phaseTextClass(key) {
-  if (status.error && status.phase === key) return 'text-red-600 font-semibold'
+  if (status.error && status.phase === key) return 'text-[#ff3b30] font-semibold'
   if (status.phase === key && status.running) return 'text-zinc-900 font-semibold'
   if (phaseDone(key)) return 'text-zinc-600'
   return 'text-zinc-400'

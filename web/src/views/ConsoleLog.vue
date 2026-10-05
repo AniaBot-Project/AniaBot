@@ -2,14 +2,14 @@
   <div class="space-y-4">
     <!-- 筛选与操作栏 -->
     <div class="flex items-center justify-between flex-wrap gap-3">
-      <div class="flex items-center gap-1 bg-white border border-slate-200/60 rounded-lg p-1 shadow-sm">
+      <div class="flex items-center gap-1 glass rounded-xl p-1">
         <button
           v-for="t in levelTabs"
           :key="t.value"
           class="px-3 py-1.5 text-xs rounded-md transition-all"
           :class="filter === t.value
-            ? 'bg-zinc-900 text-white font-medium shadow-sm'
-            : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'"
+            ? 'btn-accent font-medium shadow-sm'
+            : 'text-slate-500 hover:text-slate-800 hover:bg-white/60'"
           @click="filter = t.value"
         >
           {{ t.label }}
@@ -17,7 +17,7 @@
       </div>
       <div class="flex items-center gap-3">
         <label class="flex items-center gap-1.5 text-xs text-slate-500 select-none cursor-pointer">
-          <input v-model="autoRefresh" type="checkbox" class="accent-zinc-800" />
+          <input v-model="autoRefresh" type="checkbox" />
           自动刷新
         </label>
         <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="clearView">清空显示</button>
@@ -26,7 +26,7 @@
     </div>
 
     <!-- 终端样式日志区（旧在上、新在下，自动滚到底部；滚动到顶部加载更早记录） -->
-    <section class="bg-zinc-950 rounded-xl shadow-sm border border-slate-200/60 overflow-hidden">
+    <section class="bg-slate-950/85 rounded-2xl border border-white/10 overflow-hidden shadow-[0_24px_50px_-30px_rgb(15,23,42,0.9)] backdrop-blur-xl">
       <ul ref="listEl" class="h-[60vh] overflow-y-auto px-4 py-3 font-mono text-[11px] leading-relaxed" @scroll="onScroll">
         <li v-if="loadingMore" class="py-1 text-zinc-600 text-center list-none">加载更早的日志…</li>
         <li v-else-if="!hasMore && logs.length" class="py-1 text-zinc-700 text-center list-none">没有更早的日志了</li>
@@ -52,7 +52,7 @@
       <!-- 有新日志提示（用户上翻查看历史时） -->
       <div v-if="hasNew" class="border-t border-white/10 px-4 py-2 flex justify-center">
         <button
-          class="text-[11px] bg-white text-zinc-950 px-3 py-1.5 rounded-full hover:bg-zinc-200 font-medium transition-colors shadow-sm"
+          class="text-[11px] bg-white text-zinc-950 px-3 py-1.5 rounded-full hover:bg-white/70 font-medium transition-colors shadow-sm"
           @click="scrollToBottom(true)"
         >
           ↓ 有新日志，回到底部

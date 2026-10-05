@@ -8,7 +8,7 @@
       <div class="flex items-center gap-3">
         <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="load">刷新</button>
         <button
-          class="text-xs bg-zinc-900 text-white px-3.5 py-2 rounded-lg hover:bg-zinc-700 font-medium transition-colors shadow-sm"
+          class="text-xs btn-accent px-3.5 py-2 rounded-lg font-medium transition-colors shadow-sm"
           @click="resetAll"
         >
           全部清零
@@ -17,7 +17,7 @@
     </div>
 
     <!-- 操作反馈 -->
-    <p v-if="msg" class="text-xs" :class="msgOk ? 'text-emerald-600' : 'text-red-600'">{{ msg }}</p>
+    <p v-if="msg" class="text-xs" :class="msgOk ? 'text-[#34c759]' : 'text-[#ff3b30]'">{{ msg }}</p>
 
     <!-- 未启用 -->
     <section v-if="notEnabled" class="tcard p-12 text-center">
@@ -45,7 +45,7 @@
           </div>
           <div class="ml-auto">
             <span class="tpill">
-              <span class="tdot" :class="global.reached ? 'bg-red-500' : 'bg-emerald-500'" />
+              <span class="tdot" :class="global.reached ? 'bg-[#ff3b30]' : 'bg-[#34c759]'" />
               {{ global.reached ? '已用尽' : '正常' }}
             </span>
           </div>
@@ -53,7 +53,7 @@
         <div v-if="global.limit > 0" class="mt-4 h-1.5 bg-zinc-100 rounded-full overflow-hidden">
           <div
             class="h-full transition-all"
-            :class="global.reached ? 'bg-red-500' : 'bg-zinc-800'"
+            :class="global.reached ? 'bg-[#ff3b30]' : 'bg-zinc-800'"
             :style="{ width: pct(global.used, global.limit) + '%' }"
           />
         </div>
@@ -83,17 +83,17 @@
               <div v-if="s.limit > 0" class="h-1 bg-zinc-100 rounded-full overflow-hidden">
                 <div
                   class="h-full"
-                  :class="s.reached ? 'bg-red-500' : 'bg-zinc-800'"
+                  :class="s.reached ? 'bg-[#ff3b30]' : 'bg-zinc-800'"
                   :style="{ width: pct(s.used, s.limit) + '%' }"
                 />
               </div>
             </div>
             <span class="tpill shrink-0">
-              <span class="tdot" :class="s.reached ? 'bg-red-500' : 'bg-emerald-500'" />
+              <span class="tdot" :class="s.reached ? 'bg-[#ff3b30]' : 'bg-[#34c759]'" />
               {{ s.reached ? '已用尽' : '正常' }}
             </span>
             <button
-              class="text-[11px] text-zinc-500 hover:text-red-600 font-medium transition-colors shrink-0"
+              class="text-[11px] text-zinc-500 hover:text-[#ff3b30] font-medium transition-colors shrink-0"
               @click="resetOne(s.key)"
             >
               清零

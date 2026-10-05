@@ -1,17 +1,17 @@
 <template>
-  <div class="min-h-screen bg-zinc-950 relative overflow-hidden flex items-center justify-center p-4">
-    <!-- 背景光斑 -->
-    <div class="absolute -top-40 -left-40 w-125 h-125 rounded-full bg-white/5 blur-[120px]" />
-    <div class="absolute -bottom-40 -right-40 w-125 h-125 rounded-full bg-white/10 blur-[120px]" />
+  <div class="app-shell min-h-screen relative overflow-hidden flex items-center justify-center p-4">
+    <!-- 背景光斑（页面底色由全局浅灰底提供） -->
+    <div class="absolute -top-40 -left-40 w-125 h-125 rounded-full bg-[#0071e3]/10 blur-[120px]" />
+    <div class="absolute -bottom-40 -right-40 w-125 h-125 rounded-full bg-[#5ac8fa]/12 blur-[120px]" />
 
-    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+    <div class="tcard rounded-2xl w-full max-w-lg overflow-hidden">
       <!-- 步骤指示 -->
-      <div class="flex border-b border-slate-100">
+      <div class="flex border-b border-black/5">
         <div
           v-for="(label, i) in ['欢迎', '平台接入', 'AI 配置', '完成']"
           :key="i"
           class="flex-1 py-3.5 text-center text-xs transition-colors"
-          :class="i === step ? 'text-zinc-700 font-semibold border-b-2 border-zinc-900 -mb-px' : i < step ? 'text-emerald-600' : 'text-slate-400'"
+          :class="i === step ? 'text-zinc-700 font-semibold border-b-2 border-[#0071e3] -mb-px' : i < step ? 'text-[#34c759]' : 'text-slate-400'"
         >
           {{ i + 1 }}. {{ label }}
         </div>
@@ -20,7 +20,7 @@
       <div class="p-5 sm:p-8">
         <!-- 步骤 0: 欢迎 -->
         <div v-if="step === 0" class="space-y-5 text-center">
-          <div class="mx-auto w-14 h-14 rounded-2xl bg-linear-to-br from-white to-zinc-300 flex items-center justify-center text-zinc-900 font-bold text-2xl shadow-lg">
+          <div class="mx-auto w-14 h-14 rounded-2xl bg-linear-to-br from-[#0a84ff] to-[#0071e3] flex items-center justify-center text-white font-bold text-2xl shadow-lg">
             A
           </div>
           <h1 class="text-xl font-bold text-slate-800">欢迎使用 AniaBot 🎉</h1>
@@ -37,9 +37,9 @@
           <h2 class="text-base font-semibold text-slate-800">平台接入</h2>
 
           <!-- QQ(NapCat) -->
-          <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableNapcat ? 'border-slate-300 bg-slate-50' : 'border-slate-200']">
+          <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableNapcat ? 'border-slate-300/60 bg-slate-50' : 'border-white/60']">
             <label class="flex items-center gap-2.5 cursor-pointer select-none">
-              <input type="checkbox" v-model="form.enableNapcat" class="w-4 h-4 accent-zinc-900" />
+              <input type="checkbox" v-model="form.enableNapcat" class="w-4 h-4" />
               <span class="text-sm font-medium text-slate-700">
                 QQ（NapCat）
                 <span class="text-xs text-slate-400 font-normal">· OneBot v11 协议端，默认启用</span>
@@ -78,9 +78,9 @@
           </div>
 
           <!-- QQ(Luckylilia / LLBot) -->
-          <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableLuckylilia ? 'border-slate-300 bg-slate-50' : 'border-slate-200']">
+          <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableLuckylilia ? 'border-slate-300/60 bg-slate-50' : 'border-white/60']">
             <label class="flex items-center gap-2.5 cursor-pointer select-none">
-              <input type="checkbox" v-model="form.enableLuckylilia" class="w-4 h-4 accent-zinc-900" />
+              <input type="checkbox" v-model="form.enableLuckylilia" class="w-4 h-4" />
               <span class="text-sm font-medium text-slate-700">
                 QQ（Luckylilia / LLBot）
                 <span class="text-xs text-slate-400 font-normal">· OneBot v11 协议端，可与 NapCat 并存（第二个 QQ 账号）</span>
@@ -119,9 +119,9 @@
           </div>
 
           <!-- QQ 官方机器人 -->
-          <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableQQOfficial ? 'border-slate-300 bg-slate-50' : 'border-slate-200']">
+          <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableQQOfficial ? 'border-slate-300/60 bg-slate-50' : 'border-white/60']">
             <label class="flex items-center gap-2.5 cursor-pointer select-none">
-              <input type="checkbox" v-model="form.enableQQOfficial" class="w-4 h-4 accent-zinc-900" />
+              <input type="checkbox" v-model="form.enableQQOfficial" class="w-4 h-4" />
               <span class="text-sm font-medium text-slate-700">
                 QQ 官方机器人
                 <span class="text-xs text-slate-400 font-normal">· QQ 开放平台官方接口，WebSocket 收事件无需公网地址</span>
@@ -139,7 +139,7 @@
                 <p class="text-xs text-slate-400 mt-1.5">用于换取 access_token；旧版 Token 鉴权已废弃，请勿填写 Token</p>
               </div>
               <label class="flex items-center gap-2.5 cursor-pointer select-none">
-                <input type="checkbox" v-model="form.qqofficialSandbox" class="w-4 h-4 accent-zinc-900" />
+                <input type="checkbox" v-model="form.qqofficialSandbox" class="w-4 h-4" />
                 <span class="text-xs text-slate-600">沙箱环境（机器人未上架前联调使用）</span>
               </label>
               <p class="text-xs text-slate-400">还需在开放平台「功能配置」中勾选群聊/单聊场景的事件订阅（WebSocket 方式）</p>
@@ -147,9 +147,9 @@
           </div>
 
           <!-- 飞书(Lark) -->
-          <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableFeishu ? 'border-slate-300 bg-slate-50' : 'border-slate-200']">
+          <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableFeishu ? 'border-slate-300/60 bg-slate-50' : 'border-white/60']">
             <label class="flex items-center gap-2.5 cursor-pointer select-none">
-              <input type="checkbox" v-model="form.enableFeishu" class="w-4 h-4 accent-zinc-900" />
+              <input type="checkbox" v-model="form.enableFeishu" class="w-4 h-4" />
               <span class="text-sm font-medium text-slate-700">
                 飞书（Lark）
                 <span class="text-xs text-slate-400 font-normal">· 官方 SDK，默认长连接无需公网地址</span>
@@ -196,9 +196,9 @@
           </div>
 
           <!-- Telegram -->
-          <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableTelegram ? 'border-slate-300 bg-slate-50' : 'border-slate-200']">
+          <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableTelegram ? 'border-slate-300/60 bg-slate-50' : 'border-white/60']">
             <label class="flex items-center gap-2.5 cursor-pointer select-none">
-              <input type="checkbox" v-model="form.enableTelegram" class="w-4 h-4 accent-zinc-900" />
+              <input type="checkbox" v-model="form.enableTelegram" class="w-4 h-4" />
               <span class="text-sm font-medium text-slate-700">
                 Telegram
                 <span class="text-xs text-slate-400 font-normal">· Bot API 长轮询，无需公网地址</span>
@@ -222,9 +222,9 @@
           </div>
 
           <!-- Discord -->
-          <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableDiscord ? 'border-slate-300 bg-slate-50' : 'border-slate-200']">
+          <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableDiscord ? 'border-slate-300/60 bg-slate-50' : 'border-white/60']">
             <label class="flex items-center gap-2.5 cursor-pointer select-none">
-              <input type="checkbox" v-model="form.enableDiscord" class="w-4 h-4 accent-zinc-900" />
+              <input type="checkbox" v-model="form.enableDiscord" class="w-4 h-4" />
               <span class="text-sm font-medium text-slate-700">
                 Discord
                 <span class="text-xs text-slate-400 font-normal">· Gateway WebSocket 收事件，无需公网地址</span>
@@ -244,9 +244,9 @@
           </div>
 
           <!-- 微信 -->
-          <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableWeixin ? 'border-slate-300 bg-slate-50' : 'border-slate-200']">
+          <div :class="['border rounded-xl p-4 space-y-3 transition-colors', form.enableWeixin ? 'border-slate-300/60 bg-slate-50' : 'border-white/60']">
             <label class="flex items-center gap-2.5 cursor-pointer select-none">
-              <input type="checkbox" v-model="form.enableWeixin" class="w-4 h-4 accent-zinc-900" />
+              <input type="checkbox" v-model="form.enableWeixin" class="w-4 h-4" />
               <span class="text-sm font-medium text-slate-700">
                 微信
                 <span class="text-xs text-slate-400 font-normal">· iLink bot 长轮询，无需公网地址；一对一私聊</span>
@@ -284,7 +284,7 @@
         <!-- 步骤 3: 完成 -->
         <div v-else class="space-y-4 text-center">
           <template v-if="!restarting">
-            <div class="mx-auto w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center [&>svg]:w-7 [&>svg]:h-7" v-html="iconCheck" />
+            <div class="mx-auto w-14 h-14 rounded-full bg-[#34c759]/15 text-[#34c759] flex items-center justify-center [&>svg]:w-7 [&>svg]:h-7" v-html="iconCheck" />
             <h1 class="text-xl font-bold text-slate-800">配置完成</h1>
             <p class="text-sm text-slate-500 leading-relaxed">
               配置已保存到数据库，<b>重启后生效</b>。<br />
@@ -292,23 +292,23 @@
             </p>
           </template>
           <template v-else>
-            <span class="mx-auto block w-8 h-8 border-[3px] border-slate-200 border-t-zinc-500 rounded-full animate-spin" />
+            <span class="mx-auto block w-8 h-8 border-[3px] border-white/60 border-t-zinc-500 rounded-full animate-spin" />
             <h1 class="text-xl font-bold text-slate-800">正在重启 Bot...</h1>
             <p class="text-sm text-slate-500">恢复后页面自动刷新</p>
           </template>
         </div>
 
-        <p v-if="error" class="text-sm text-red-600 mt-4">{{ error }}</p>
+        <p v-if="error" class="text-sm text-[#ff3b30] mt-4">{{ error }}</p>
 
         <!-- 操作按钮 -->
         <div class="flex justify-between mt-8" v-if="!restarting">
-          <button v-if="step > 0 && step < 3" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-100 rounded-lg transition-colors" @click="step--">上一步</button>
+          <button v-if="step > 0 && step < 3" class="px-4 py-2 text-sm text-slate-500 hover:bg-white/60 rounded-xl transition-colors" @click="step--">上一步</button>
           <button v-else class="px-4 py-2 text-sm text-slate-400 hover:text-slate-600 transition-colors" @click="onSkip">跳过引导</button>
 
-          <button v-if="step === 1" class="px-5 py-2 text-sm bg-zinc-900 text-white rounded-lg hover:bg-zinc-800 transition-colors" @click="onNext">下一步</button>
-          <button v-else-if="step === 2" class="px-5 py-2 text-sm bg-zinc-900 text-white rounded-lg hover:bg-zinc-800 transition-colors" @click="onSave">保存并继续</button>
-          <button v-else-if="step === 0" class="px-5 py-2 text-sm bg-zinc-900 text-white rounded-lg hover:bg-zinc-800 transition-colors" @click="step++">下一步</button>
-          <button v-else class="px-5 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors" @click="onRestart">重启 Bot 生效</button>
+            <button v-if="step === 1" class="px-5 py-2 text-sm btn-accent rounded-xl" @click="onNext">下一步</button>
+              <button v-else-if="step === 2" class="px-5 py-2 text-sm btn-accent rounded-xl" @click="onSave">保存并继续</button>
+                <button v-else-if="step === 0" class="px-5 py-2 text-sm btn-accent rounded-xl" @click="step++">下一步</button>
+        <button v-else class="px-5 py-2 text-sm btn-accent rounded-xl" @click="onRestart">重启 Bot 生效</button>
         </div>
       </div>
     </div>
@@ -319,7 +319,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { api, auth } from '../api.js'
 
-const inputClass = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-zinc-400 transition-shadow'
+const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0071e3]/35 focus:border-[#0071e3]/50 transition-shadow'
 const iconCheck = '<svg fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>'
 
 const step = ref(0)
