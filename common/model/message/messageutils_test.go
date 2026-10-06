@@ -98,7 +98,7 @@ func TestFriendlyTextNestedForward(t *testing.T) {
 	}
 }
 
-// TestFriendlyTextForwardNodesOnOwnLines 合并转发的每个节点应独占一行：
+// TestFriendlyTextForwardNodesOnOwnLines 合并转发的每个节点应独占一行并缩进一级：
 // 上一条以图片标记等无换行内容结尾时，下一条的发送者前缀不能挤到同一行。
 func TestFriendlyTextForwardNodesOnOwnLines(t *testing.T) {
 	makeNode := func(id uint64, nickname, text string) Message {
@@ -121,13 +121,62 @@ func TestFriendlyTextForwardNodesOnOwnLines(t *testing.T) {
 		}},
 	}
 	text := root.FriendlyText(true)
-	for _, want := range []string{"\n[nickname:甲 id:qq:201]: 第一条", "\n[nickname:乙 id:qq:202]: 第二条"} {
+	for _, want := range []string{"\n  [nickname:甲 id:qq:201]: 第一条", "\n  [nickname:乙 id:qq:202]: 第二条"} {
 		if !strings.Contains(text, want) {
-			t.Fatalf("每个转发节点应独占一行, 缺少 %q, got %q", want, text)
+			t.Fatalf("每个转发节点应独占一行并缩进, 缺少 %q, got %q", want, text)
 		}
 	}
 	if !strings.Contains(text, "\n</合并转发消息>") {
 		t.Fatalf("结束标签应独占一行, got %q", text)
+	}
+}
+
+// TestFriendlyTextReplyIndent 引用内容应缩进一级，且引用内部的合并转发、
+// 图片识别结果随嵌套深度逐层累加缩进（引用的合并转发节点 = 两层）。
+func TestFriendlyTextReplyIndent(t *testing.T) {
+	forwarded := Message{
+		Sender: MessageSender{UserId: FromUint64(201), Nickname: "转发的"},
+		Message: []OB11Segment{
+			{Type: SegmentText, Data: map[string]any{"text": "转发内容"}},
+		},
+	}
+	quoted := Message{
+		Sender: MessageSender{UserId: FromUint64(202), Nickname: "被引用的"},
+		Message: []OB11Segment{
+			{Type: SegmentText, Data: map[string]any{"text": "引用正文"}},
+			{Type: SegmentImage, Data: ImageMessage{Url: "https://example.com/q.png"}.Marshal()},
+			{Type: SegmentForward, Data: map[string]any{"id": "fwd_1", "content": []Message{forwarded}}},
+		},
+	}
+	root := Message{
+		Sender: MessageSender{UserId: FromUint64(101), Nickname: "发送者"},
+		Message: []OB11Segment{
+			{Type: SegmentReply, Data: map[string]any{"id": "m_1"}},
+			{Type: SegmentText, Data: map[string]any{"text": "正文"}},
+		},
+	}
+	text := root.FriendlyText(true,
+		WithGetMsgFunc(func(id QID) (*Message, bool) { return &quoted, true }),
+		WithGetImageOCRFunc(func(url string) string { return "图片识别内容" }))
+
+	for _, want := range []string{
+		"<reply>\n",
+		"\n  [nickname:被引用的 id:qq:202]: 引用正文",
+		"\n  <图片消息 ",                           // 引用内的图片消息块整体缩进一级
+		"\n    图片识别内容",                         // 识别结果正文比块标签再深一级
+		"\n  </图片消息 ",                          // 结束标签同层
+		"\n  <合并转发消息>",                         // 引用内的合并转发块整体缩进一级
+		"\n    [nickname:转发的 id:qq:201]: 转发内容", // 转发节点 = 引用(1) + 转发(1) = 两层
+		"\n  </合并转发消息>",
+		"\n</reply>\n",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("嵌套块缩进不正确, 缺少 %q, got %q", want, text)
+		}
+	}
+	// 顶层正文不应被缩进
+	if !strings.Contains(text, "[nickname:发送者 id:qq:101]: <reply>") {
+		t.Fatalf("顶层内容不应缩进, got %q", text)
 	}
 }
 

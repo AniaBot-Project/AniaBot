@@ -46,6 +46,36 @@ func (raw Message) FriendlyText(showUrl bool, opts ...MsgOptFunc) string {
 	for _, f := range opts {
 		f(&msgFuncs)
 	}
+	return raw.friendlyText(showUrl, msgFuncs)
+}
+
+// indentUnit 嵌套内容（引用内容、合并转发节点、图片识别结果）的单层缩进。
+// 嵌套块按「每层各自缩进一级」的方式拼接，缩进随嵌套深度自然累加。
+const indentUnit = "  "
+
+// indentLines 给多行文本的每一行（空行除外）加上缩进前缀。
+func indentLines(text, indent string) string {
+	if indent == "" || text == "" {
+		return text
+	}
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = indent + line
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// IndentLines 给多行文本的每一行（空行除外）加上单层缩进（indentUnit），
+// 供其他模块生成与 FriendlyText 同风格的层级文本（如工具结果里的图片识别内容）。
+func IndentLines(text string) string {
+	return indentLines(text, indentUnit)
+}
+
+// friendlyText 生成消息的文本表示：引用内容与合并转发节点各自缩进一级嵌入，
+// 便于阅读并区分层级。
+func (raw Message) friendlyText(showUrl bool, msgFuncs msgHandleOpt) string {
 	var result strings.Builder
 	if !msgFuncs.noSenderPrefix {
 		nickname := raw.Sender.Card
@@ -78,7 +108,7 @@ func (raw Message) FriendlyText(showUrl bool, opts ...MsgOptFunc) string {
 			if ok := ParseImage(s, &msg); ok {
 				if msgFuncs.getImageOCRFunc != nil {
 					result.WriteString(fmt.Sprintf("\n<图片消息 %s>\n", msg.Hash()))
-					result.WriteString(msgFuncs.getImageOCRFunc(msg.Url))
+					result.WriteString(indentLines(strings.TrimRight(msgFuncs.getImageOCRFunc(msg.Url), "\n"), indentUnit))
 					result.WriteString(fmt.Sprintf("\n</图片消息 %s>\n", msg.Hash()))
 				} else {
 					if showUrl {
@@ -148,15 +178,14 @@ func (raw Message) FriendlyText(showUrl bool, opts ...MsgOptFunc) string {
 			if ok := ParseReply(s, &msg); ok {
 				if msgFuncs.getMsgFunc != nil {
 					if dtMsg, ok2 := msgFuncs.getMsgFunc(msg.Id); ok2 {
-						nickname := dtMsg.Sender.Card
-						if nickname == "" {
-							nickname = dtMsg.Sender.Nickname
+						// 引用内容缩进一级展示；被引用消息内的引用不再递归展开
+						// （不传 getMsgFunc），图片识别与合并转发能力透传
+						quoted := msgHandleOpt{
+							getImageOCRFunc:   msgFuncs.getImageOCRFunc,
+							getForwardMsgFunc: msgFuncs.getForwardMsgFunc,
 						}
-						_ = nickname
 						result.WriteString("<reply>\n")
-						result.WriteString(dtMsg.FriendlyText(showUrl,
-							WithGetImageOCRFunc(msgFuncs.getImageOCRFunc),
-							WithGetForwardMsgFunc(msgFuncs.getForwardMsgFunc)))
+						result.WriteString(indentLines(strings.TrimRight(dtMsg.friendlyText(showUrl, quoted), "\n"), indentUnit))
 						result.WriteString("\n</reply>\n")
 					}
 				}
@@ -215,15 +244,19 @@ func (raw Message) FriendlyText(showUrl bool, opts ...MsgOptFunc) string {
 	return result.String()
 }
 
-// writeForwardMessages 输出合并转发消息内容：逐条调用 FriendlyText 并透传
-// OCR/转发拉取回调，使内层嵌套合并转发也能继续递归展开。
+// writeForwardMessages 输出合并转发消息内容：每个节点独占一行并缩进一级，
+// 逐条渲染并透传 OCR/转发拉取回调，使内层嵌套合并转发也能继续递归展开。
 func writeForwardMessages(w *strings.Builder, msgs []Message, showUrl bool, msgFuncs msgHandleOpt) {
+	// 转发记录内的 reply 不再展开（内层消息 id 拉不到，只产生失败日志），
+	// 与 registerMessageImages 的处理保持一致
+	inner := msgHandleOpt{
+		getImageOCRFunc:   msgFuncs.getImageOCRFunc,
+		getForwardMsgFunc: msgFuncs.getForwardMsgFunc,
+	}
 	w.WriteString("\n<合并转发消息>")
 	for _, msg := range msgs {
 		w.WriteString("\n")
-		w.WriteString(msg.FriendlyText(showUrl,
-			WithGetImageOCRFunc(msgFuncs.getImageOCRFunc),
-			WithGetForwardMsgFunc(msgFuncs.getForwardMsgFunc)))
+		w.WriteString(indentLines(strings.TrimRight(msg.friendlyText(showUrl, inner), "\n"), indentUnit))
 	}
 	w.WriteString("\n</合并转发消息>\n")
 }

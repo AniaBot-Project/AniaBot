@@ -364,7 +364,9 @@ func (p *AIChatPlugin) configureImageCallbacks(ctx context.Context, bot bot.Bot,
 			if usageSink != nil {
 				usageSink(usage)
 			}
-			result.WriteString(fmt.Sprintf("\n<图片 %s>\n%s\n</图片 %s>", ref.Hash, description, ref.Hash))
+			result.WriteString(fmt.Sprintf("\n<图片 %s>\n", ref.Hash))
+			result.WriteString(message.IndentLines(strings.TrimRight(description, "\n")))
+			result.WriteString(fmt.Sprintf("\n</图片 %s>", ref.Hash))
 		}
 		if len(missing) > 0 {
 			result.WriteString("\n未找到：" + strings.Join(missing, "、"))
@@ -417,7 +419,8 @@ func (p *AIChatPlugin) loadLocalImageInto(ctx context.Context, path string, load
 	if usageSink != nil {
 		usageSink(usage)
 	}
-	return fmt.Sprintf("主模型不支持多模态，以下是备用图片识别模型返回的图片描述：\n<图片 %s>\n%s\n</图片 %s>", hash, description, hash)
+	return fmt.Sprintf("主模型不支持多模态，以下是备用图片识别模型返回的图片描述：\n<图片 %s>\n%s\n</图片 %s>",
+		hash, message.IndentLines(strings.TrimRight(description, "\n")), hash)
 }
 
 type mcpFileConfig struct {
