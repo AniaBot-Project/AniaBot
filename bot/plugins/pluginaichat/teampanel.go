@@ -33,7 +33,7 @@ func teamScopeKind(scope string) string {
 	}
 }
 
-// errTeamDisabled 团队功能未启用（plugin.ai_chat_bot.team.enable=false）时的统一错误。
+// errTeamDisabled 团队管理器未就绪（如持久化存储不可用）时的统一错误。
 var errTeamDisabled = fmt.Errorf("Agent 团队功能未启用")
 
 // TeamRoles 返回预置角色列表（供 Web 面板选择器展示）。

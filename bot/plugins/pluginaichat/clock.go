@@ -727,19 +727,15 @@ func (m *clockManager) executeTask(ctx context.Context, task *ClockTask, rec *ta
 	// extra 本次执行在主 ChatBot 循环之外派生的用量（异步子代理、备用图片识别），
 	// 收尾时并入任务总用量，使任务日志与配额反映完整成本
 	extra := &usageAcc{}
-	// 注册定时任务专用子代理工具（受 subagent.enable 门控）：子代理在后台异步
-	// 执行，任务收尾时统一等待全部完成并把结果回喂给任务 AI——只有汇总后的
-	// 最终回复才会推送给目标
-	var subagents *clockSubagentSet
-	if p.cfg.Subagent.Enable {
-		subagents = newClockSubagentSet()
-		for _, tool := range newClockSubagentTools(p, m.bot, task, subagents, extra) {
-			sessionExecutor.RegisterSession(tool)
-		}
-		// 兜底：任意路径返回前取消仍运行中的子代理（正常路径 drainClockSubagents 已处理）
-		defer subagents.cancelPending()
+	// 注册定时任务专用子代理工具：子代理在后台异步执行，任务收尾时统一等待
+	// 全部完成并把结果回喂给任务 AI——只有汇总后的最终回复才会推送给目标
+	subagents := newClockSubagentSet()
+	for _, tool := range newClockSubagentTools(p, m.bot, task, subagents, extra) {
+		sessionExecutor.RegisterSession(tool)
 	}
-	// 定时任务与子代理共用独立模型配置（留空回退主模型）
+	// 兜底：任意路径返回前取消仍运行中的子代理（正常路径 drainClockSubagents 已处理）
+	defer subagents.cancelPending()
+	// 定时任务模型与执行参数跟随主模型（subagentLLMConfig = 主模型四元组）
 	saBaseURL, saAPIKey, saModel, saFormat := p.subagentLLMConfig()
 	chat, err := aichat.NewChatBot(
 		saBaseURL, saAPIKey, saModel,
@@ -776,7 +772,7 @@ func (m *clockManager) executeTask(ctx context.Context, task *ClockTask, rec *ta
 	}
 	// 若任务 AI 委派了异步子代理：等待全部子代理返回，把结果回喂给 AI 合成
 	// 最终回复——只有这最后一轮输出才会推送，子代理返回前的中间回复不推送
-	if subagents != nil && subagents.hasPending() {
+	if subagents.hasPending() {
 		resp, usage = m.drainClockSubagents(ctx, task, chat, cbs, subagents, resp, usage)
 	}
 	// 子代理在 drain 期间完成并把用量计入 extra；此处统一并入。

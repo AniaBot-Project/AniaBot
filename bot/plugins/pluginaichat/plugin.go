@@ -97,7 +97,7 @@ type AIChatPlugin struct {
 	// 复用于知识库与记忆的自动注入。
 	embedder *embedder
 
-	// teamManager Agent 团队管理器；为 nil 表示功能未启用
+	// teamManager Agent 团队管理器（功能固定启用）；为 nil 表示持久化存储不可用
 	teamManager *teamManager
 
 	// queryLogger Query 日志记录器（面板「Query 日志」页数据源）；为 nil 表示功能未启用
@@ -998,29 +998,17 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	}
 
 	// AI 子代理：主 AI 可通过 subagent_run 工具把复杂子任务委派给一次性子代理
-	// （全新上下文 + 全部工具能力），执行结果返回给主 AI，避免污染主对话上下文
-	if p.cfg.Subagent.Enable {
-		p.Logger.Info("已启用子代理功能",
-			"timeout_sec", p.subagentTimeout().Seconds(),
-			"max_iterations", p.subagentMaxIterations(),
-			"max_result_len", p.subagentMaxResultLen())
-	} else {
-		p.Logger.Info("子代理功能未启用（plugin.ai_chat_bot.subagent.enable=false）")
-	}
+	// （全新上下文 + 全部工具能力），执行结果返回给主 AI，避免污染主对话上下文；
+	// 功能固定启用，模型与执行参数均跟随主模型配置/主请求预算，结果不截断
+	p.Logger.Info("已启用子代理功能",
+		"timeout_sec", int(p.subagentTimeout().Seconds()),
+		"max_iterations", p.mainMaxIterations())
 
 	// Agent 团队：主 AI 通过 team_run 组建多代理团队并行执行子任务。
 	// 团队成员为带角色提示词的一次性子代理，复用子代理执行引擎；
 	// 团队定义持久化到 PersistentStorage（team: 命名空间，按会话 scope 隔离）
-	if p.cfg.Team.Enable {
-		p.teamManager = newTeamManager(p.PersistentStorage, p.Logger.WithGroup("team"))
-		p.Logger.Info("已启用Agent团队功能",
-			"timeout_sec", p.teamTimeout().Seconds(),
-			"max_iterations", p.teamMaxIterations(),
-			"max_result_len", p.teamMaxResultLen(),
-			"max_members", p.teamMaxMembers())
-	} else {
-		p.Logger.Info("Agent团队功能未启用（plugin.ai_chat_bot.team.enable=false）")
-	}
+	p.teamManager = newTeamManager(p.PersistentStorage, p.Logger.WithGroup("team"))
+	p.Logger.Info("已启用Agent团队功能", "max_members", teamMaxMembers)
 
 	// Query 日志：记录每次 AI 回复的完整执行过程（面板「Query 日志」页数据源）
 	p.initQueryLogger()

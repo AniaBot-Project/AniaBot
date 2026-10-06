@@ -269,7 +269,7 @@ X-Proxy-Route: team-a
 
 - `anthropic`：深度思考（`thinking.mode`）映射为 `budget_tokens`，思考块会随历史持久化并在多轮中原样回传；`top_k` 原生支持，但开启思考时 temperature/top_p/top_k 按 API 要求不下发
 - `responses`：`top_k` 不支持会被忽略
-- 子代理（`plugin.ai_chat_bot.subagent.api_format`）、上下文压缩器（`plugin.ai_chat_bot.compressor.api_format`）、备用模型（`plugin.ai_chat_bot.fallback.api_format`）可独立选择格式，留空跟随主模型
+- 上下文压缩器（`plugin.ai_chat_bot.compressor.api_format`）、备用模型（`plugin.ai_chat_bot.fallback.api_format`）可独立选择格式，留空跟随主模型；子代理与 Agent 团队成员固定跟随主模型格式
 :::
 
 ### 会话管理
@@ -399,14 +399,9 @@ X-Proxy-Route: team-a
 
 ### AI 子代理（subagent）
 
-| 配置键 | 默认值 | 说明 |
-| --- | --- | --- |
-| `plugin.ai_chat_bot.subagent.enable` | `true` | 启用后 AI 可通过 `subagent_run` 工具委派子任务 |
-| `plugin.ai_chat_bot.subagent.timeout_sec` | `300` | 单次执行默认超时（秒），单次调用可覆盖（上限 1800；实际还会按框架单次消息处理预算自动收缩，为主请求预留收尾时间） |
-| `plugin.ai_chat_bot.subagent.max_iterations` | `10` | 子代理工具调用循环的最大轮数 |
-| `plugin.ai_chat_bot.subagent.max_result_len` | `4000` | 返回结果最大字符数，超出截断以防污染主对话上下文 |
+子代理默认启用、无独立配置项：AI 通过 `subagent_run` 工具把复杂/耗时的子任务委派给一次性子代理执行，子代理以全新一次性上下文运行、拥有与主 AI 一致的工具能力，但**不能再委派子代理**。
 
-子代理以全新一次性上下文运行、拥有与主 AI 一致的工具能力，但**不能再委派子代理**。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
+执行参数全部跟随主模型：模型与 API 格式、生成参数（Temperature / 参数 / 深度思考等）取「AI 对话 · 模型」配置；工具调用轮数取主模型的「最大工具调用轮数」；超时取框架级「消息处理超时」（`bot.msg_event_timeout_sec`，默认 5 分钟，单次调用可覆盖、上限 1800 秒，实际还会按主请求剩余预算自动收缩并预留收尾时间）。子代理结果不截断，完整回填给主 AI。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
 
 
 ### AI 知识库（knowledge）
@@ -427,17 +422,9 @@ X-Proxy-Route: team-a
 
 ### Agent 团队（team）
 
-多代理编排：主 AI 可组建团队，把子任务派发给多个带角色描述的成员代理**并行执行**：
+多代理编排，默认启用、无独立配置项：主 AI 可组建团队，把子任务派发给多个带角色描述的成员代理**并行执行**，全部完成后汇总结果；团队定义可在会话内保存复用，也可在 Web 面板「Agent 团队」页管理。
 
-| 配置键 | 默认值 | 说明 |
-| --- | --- | --- |
-| `plugin.ai_chat_bot.team.enable` | `false` | 启用后 AI 可通过 `team_run` / `team_save` 等工具组建与调用团队 |
-| `plugin.ai_chat_bot.team.timeout_sec` | `300` | 成员默认超时（秒） |
-| `plugin.ai_chat_bot.team.max_iterations` | `10` | 成员工具调用循环的最大轮数 |
-| `plugin.ai_chat_bot.team.max_result_len` | `4000` | 单成员返回结果最大字符数，超出截断防止污染汇总上下文 |
-| `plugin.ai_chat_bot.team.max_members` | `5` | 单次最多并行成员数（硬上限 10，防并发风暴） |
-
-团队成员复用子代理执行路径（独立一次性上下文、可独立配置模型），**不能递归组建团队**。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
+每个成员复用子代理执行路径（独立一次性上下文），模型与执行参数同样跟随主模型（详见上一节），**不能递归组建团队**；单次最多并行 5 个成员，成员结果完整汇总、不截断。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
 
 ### 每日 Token 配额（quota）
 

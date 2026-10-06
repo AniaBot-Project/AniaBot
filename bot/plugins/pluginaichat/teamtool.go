@@ -36,7 +36,7 @@ func newTeamTools(p *AIChatPlugin, b bot.Bot, id message.QID, isGroup bool) []ll
 		"③ name 填当前会话已保存团队（team_list 查看）或全局团队（Web 面板管理的跨会话团队）中的成员名。未识别的 name 会按普通子代理执行。" +
 		"当前会话为" + sessionDesc + "，总体任务会发给每个成员。" +
 		fmt.Sprintf("单成员默认超时 %d 秒，最多并行 %d 个成员；成员无法再组建团队或委派子代理。",
-			int(p.teamTimeout().Seconds()), p.teamMaxMembers())
+			int(p.subagentTimeout().Seconds()), teamMaxMembers)
 	return []llmtool.Tool{
 		&teamRunTool{
 			BaseTool:     llmtool.MakeBaseTool("team_run", runDesc, teamRunParams{}),
@@ -95,8 +95,8 @@ func (t *teamRunTool) Execute(ctx context.Context, params any, callbacks llmtool
 	if len(p.Members) == 0 {
 		return "", fmt.Errorf("members 不能为空（至少指定 1 个成员）")
 	}
-	if len(p.Members) > t.plugin.teamMaxMembers() {
-		return "", fmt.Errorf("成员数量 %d 超过上限 %d", len(p.Members), t.plugin.teamMaxMembers())
+	if len(p.Members) > teamMaxMembers {
+		return "", fmt.Errorf("成员数量 %d 超过上限 %d", len(p.Members), teamMaxMembers)
 	}
 
 	// 成员名去重校验（按 TrimSpace 后比较），重复会让汇总报告无法区分

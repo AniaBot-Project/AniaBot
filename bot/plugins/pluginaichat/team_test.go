@@ -12,51 +12,36 @@ import (
 	"github.com/jeanhua/AniaBot/common/plugininfo"
 )
 
-// ---- 配置兜底 ----
+// ---- 执行参数 ----
 
-func TestTeamConfigDefaults(t *testing.T) {
-	p := &AIChatPlugin{}
-	if got := p.teamTimeout(); got != 300*time.Second {
-		t.Fatalf("默认超时 = %v, want 300s", got)
+func TestTeamMaxMembers(t *testing.T) {
+	if teamMaxMembers != 5 {
+		t.Fatalf("默认并行成员数 = %d, want 5", teamMaxMembers)
 	}
-	if got := p.teamMaxIterations(); got != 10 {
-		t.Fatalf("默认最大轮数 = %d, want 10", got)
-	}
-	if got := p.teamMaxResultLen(); got != 4000 {
-		t.Fatalf("默认结果上限 = %d, want 4000", got)
-	}
-	if got := p.teamMaxMembers(); got != 5 {
-		t.Fatalf("默认并行成员数 = %d, want 5", got)
-	}
-
-	p.cfg.Team.TimeoutSec = 60
-	p.cfg.Team.MaxIterations = 5
-	p.cfg.Team.MaxResultLen = 100
-	p.cfg.Team.MaxMembers = 3
-	if got := p.teamTimeout(); got != 60*time.Second {
-		t.Fatalf("超时 = %v, want 60s", got)
-	}
-	if got := p.teamMaxIterations(); got != 5 {
-		t.Fatalf("最大轮数 = %d, want 5", got)
-	}
-	if got := p.teamMaxResultLen(); got != 100 {
-		t.Fatalf("结果上限 = %d, want 100", got)
-	}
-	if got := p.teamMaxMembers(); got != 3 {
-		t.Fatalf("并行成员数 = %d, want 3", got)
+	if teamMaxMembers > teamMaxStoredMembers {
+		t.Fatalf("并行成员数 %d 不应超过单团队存储上限 %d", teamMaxMembers, teamMaxStoredMembers)
 	}
 }
 
-// TestTeamTimeoutConfigClamp 超大配置被限幅到 subagentMaxTimeoutSec，且成员数上限封顶。
-func TestTeamTimeoutConfigClamp(t *testing.T) {
+// TestTeamTimeoutFollowsMain 团队成员超时与子代理同源（框架消息处理预算），
+// 并对超大 timeout_sec 先限幅再乘 time.Second 防 int64 溢出。
+func TestTeamTimeoutFollowsMain(t *testing.T) {
 	p := &AIChatPlugin{}
-	p.cfg.Team.TimeoutSec = 10000000000 // 直接乘会 int64 溢出为负值
-	if got := p.teamTimeout(); got != subagentMaxTimeoutSec*time.Second {
-		t.Fatalf("超大配置超时应被限幅到 %v, got %v", subagentMaxTimeoutSec*time.Second, got)
+	p.msgEventTimeout = 7 * time.Minute
+	got, err := resolveSubagentTimeout(p.subagentTimeout(), 0, context.Background())
+	if err != nil {
+		t.Fatalf("err = %v", err)
 	}
-	p.cfg.Team.MaxMembers = 1000
-	if got := p.teamMaxMembers(); got != teamMaxMembersCap {
-		t.Fatalf("超大成员数应被限幅到 %d, got %d", teamMaxMembersCap, got)
+	if got != 7*time.Minute {
+		t.Fatalf("成员超时应跟随框架消息处理预算, got %v", got)
+	}
+
+	got, err = resolveSubagentTimeout(p.subagentTimeout(), 10000000000, context.Background())
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got != subagentMaxTimeoutSec*time.Second {
+		t.Fatalf("超大 timeout_sec 应被限幅到 %v, got %v", subagentMaxTimeoutSec*time.Second, got)
 	}
 }
 
@@ -374,7 +359,7 @@ func TestTeamRunToolValidation(t *testing.T) {
 	if _, err := tool.Execute(context.Background(), &teamRunParams{Task: "任务", Members: nil}, llmtool.CallBackFuncs{}); err == nil {
 		t.Fatal("空 members 应报错")
 	}
-	tooMany := make([]teamMemberParam, p.teamMaxMembers()+1)
+	tooMany := make([]teamMemberParam, teamMaxMembers+1)
 	for i := range tooMany {
 		tooMany[i] = teamMemberParam{Name: "研究员"}
 	}

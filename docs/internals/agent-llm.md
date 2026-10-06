@@ -21,8 +21,8 @@ flowchart TB
 ```
 
 - `NewChatBot(baseURL, apiKey, model, prompt, maxContextTokens, toolExecutor, historyStore, opts...)`
-- 主对话 / 子代理 / 定时任务 / OCR 各自创建独立 ChatBot，可配置不同的模型与上下文
-- `SetMaxIterations` 控制工具循环轮数上限（主对话默认 20，子代理默认 10）
+- 主对话 / 子代理 / 定时任务 / OCR 各自创建独立 ChatBot；子代理与定时任务跟随主模型（同一个模型四元组），压缩器与备用模型可另配，OCR 独立配置
+- `SetMaxIterations` 控制工具循环轮数上限（主对话与子代理均取主模型的「最大工具调用轮数」配置）
 
 ## LLMClient：多格式统一外壳
 

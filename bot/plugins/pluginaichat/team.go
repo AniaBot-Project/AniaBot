@@ -27,8 +27,8 @@ const (
 	teamMaxPerScope = 20
 	// teamMaxStoredMembers 单个已保存团队的成员数上限
 	teamMaxStoredMembers = 10
-	// teamMaxMembersCap 并行成员数配置的硬上限（防误配引发并发风暴）
-	teamMaxMembersCap = 10
+	// teamMaxMembers 单次最多并行成员数，防止并发 LLM 请求风暴
+	teamMaxMembers = 5
 	// teamNameMaxRunes 团队名长度上限
 	teamNameMaxRunes = 20
 	// teamRoleMaxRunes 内联角色描述/成员角色描述长度上限
@@ -251,48 +251,6 @@ func validateTeamMembers(members []teamMember) ([]teamMember, error) {
 	return clean, nil
 }
 
-// ---- 配置兜底（模式同 subagentTimeout 等） ----
-
-// teamTimeout 团队成员默认超时：配置缺失/非法时兜底 300 秒；
-// 先做 int 限幅再乘 time.Second，防止超大配置值 int64 溢出为负 duration。
-func (p *AIChatPlugin) teamTimeout() time.Duration {
-	sec := p.cfg.Team.TimeoutSec
-	if sec <= 0 {
-		sec = 300
-	}
-	if sec > subagentMaxTimeoutSec {
-		sec = subagentMaxTimeoutSec
-	}
-	return time.Duration(sec) * time.Second
-}
-
-func (p *AIChatPlugin) teamMaxIterations() int {
-	if p.cfg.Team.MaxIterations <= 0 {
-		return 10
-	}
-	return p.cfg.Team.MaxIterations
-}
-
-func (p *AIChatPlugin) teamMaxResultLen() int {
-	if p.cfg.Team.MaxResultLen <= 0 {
-		return 4000
-	}
-	return p.cfg.Team.MaxResultLen
-}
-
-// teamMaxMembers 单次最多并行成员数：默认 5，超过 teamMaxMembersCap 限幅，
-// 防止误配引发并发 LLM 请求风暴。
-func (p *AIChatPlugin) teamMaxMembers() int {
-	n := p.cfg.Team.MaxMembers
-	if n <= 0 {
-		return 5
-	}
-	if n > teamMaxMembersCap {
-		return teamMaxMembersCap
-	}
-	return n
-}
-
 // ---- 成员解析与并行执行 ----
 
 // teamMemberSpec 解析后的成员执行规格。
@@ -375,7 +333,7 @@ func teamEffectiveTask(base, memberTask string) string {
 func (p *AIChatPlugin) runTeam(ctx context.Context, b bot.Bot, id message.QID, isGroup bool,
 	timeoutSec int, specs []teamMemberSpec, parentCbs llmtool.CallBackFuncs) (string, error) {
 	// 预算预检：剩余不足（父 deadline 30s 内）时直接失败，不启动任何成员
-	if _, err := resolveSubagentTimeout(p.teamTimeout(), timeoutSec, ctx); err != nil {
+	if _, err := resolveSubagentTimeout(p.subagentTimeout(), timeoutSec, ctx); err != nil {
 		return "", fmt.Errorf("无法启动 Agent 团队: %w", err)
 	}
 
@@ -394,19 +352,17 @@ func (p *AIChatPlugin) runTeam(ctx context.Context, b bot.Bot, id message.QID, i
 	return buildTeamReport(results, time.Since(start)), nil
 }
 
-// runTeamMember 单个成员的执行：带角色提示词与团队配置的一次性子代理
-// （timeout/maxIterations/maxResultLen 取自团队配置）。
+// runTeamMember 单个成员的执行：带角色提示词的一次性子代理，执行参数与主模型
+// 一致（模型/生成参数/工具轮数取主模型配置，超时取框架消息处理预算；见
+// runSubagentWithOptions）。
 func (p *AIChatPlugin) runTeamMember(ctx context.Context, b bot.Bot, id message.QID, isGroup bool,
 	timeoutSec int, spec teamMemberSpec, parentCbs llmtool.CallBackFuncs) teamMemberResult {
 	logger := p.Logger.WithGroup("team")
 	result := teamMemberResult{label: spec.label, degraded: spec.degraded}
 
 	resp, usage, err := p.runSubagentWithOptions(ctx, b, id, isGroup, spec.task, subagentRunOptions{
-		prompt:        spec.prompt,
-		timeout:       p.teamTimeout(),
-		timeoutSec:    timeoutSec,
-		maxIterations: p.teamMaxIterations(),
-		maxResultLen:  p.teamMaxResultLen(),
+		prompt:     spec.prompt,
+		timeoutSec: timeoutSec,
 	}, parentCbs)
 	// 成员消耗计入会话与全局配额（发起方已做前置检查，这里只累加不重复拒绝）
 	p.quotaManager.Add(sessionKey(id, isGroup), usage)

@@ -155,22 +155,9 @@ func (p *AIChatPlugin) llmClientOptions() []aichat.LLMClientOption {
 	return opts
 }
 
-// subagentLLMConfig 子代理模型配置：留空字段回退主模型配置。
+// subagentLLMConfig 子代理（含 Agent 团队成员、AI 定时任务）模型配置：跟随主模型。
 func (p *AIChatPlugin) subagentLLMConfig() (baseURL, apiKey, model, format string) {
-	baseURL, apiKey, model, format = p.cfg.BaseURL, p.cfg.APIKey, p.cfg.Model, p.cfg.APIFormat
-	if p.cfg.Subagent.BaseURL != "" {
-		baseURL = p.cfg.Subagent.BaseURL
-	}
-	if p.cfg.Subagent.APIKey != "" {
-		apiKey = p.cfg.Subagent.APIKey
-	}
-	if p.cfg.Subagent.Model != "" {
-		model = p.cfg.Subagent.Model
-	}
-	if p.cfg.Subagent.APIFormat != "" {
-		format = p.cfg.Subagent.APIFormat
-	}
-	return baseURL, apiKey, model, format
+	return p.cfg.BaseURL, p.cfg.APIKey, p.cfg.Model, p.cfg.APIFormat
 }
 
 // compressorLLMConfig 压缩器模型配置：留空字段回退主模型配置。
@@ -234,17 +221,13 @@ func (p *AIChatPlugin) getChat(b bot.Bot, id message.QID, isGroup bool, prompt s
 			sessionExecutor.RegisterSession(newTodoWriteTool(p.todoManager, key))
 		}
 		// 注册子代理委派工具（仅主会话；子代理的一次性会话不注册，防止递归委派）
-		if p.cfg.Subagent.Enable {
-			for _, tool := range newSubagentTools(p, b, id, isGroup) {
-				sessionExecutor.RegisterSession(tool)
-			}
+		for _, tool := range newSubagentTools(p, b, id, isGroup) {
+			sessionExecutor.RegisterSession(tool)
 		}
 		// 注册 Agent 团队工具（仅主会话；团队成员的一次性会话经 registerScopedTools
 		// 不注册团队工具，防止递归组建团队）
-		if p.teamManager != nil {
-			for _, tool := range newTeamTools(p, b, id, isGroup) {
-				sessionExecutor.RegisterSession(tool)
-			}
+		for _, tool := range newTeamTools(p, b, id, isGroup) {
+			sessionExecutor.RegisterSession(tool)
 		}
 		// 场景描述（群聊/私聊、群信息、消息 id 前缀含义）经 WithScenePrompt 注入，
 		// 组装时排在 available_skills 之后，保住「覆盖词 + skills」的跨会话共享前缀

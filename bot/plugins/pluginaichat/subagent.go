@@ -28,6 +28,18 @@ const (
 	subagentParentReserve = 30 * time.Second
 )
 
+// subagentTimeout 子代理/团队成员/定时任务的默认执行超时：跟随主请求预算——
+// 框架级消息处理超时（bot.msg_event_timeout_sec，Start 时读入 p.msgEventTimeout）。
+// 单次调用可用 timeout_sec 覆盖；实际执行还会按父请求剩余预算压缩
+// （见 resolveSubagentTimeout）。
+func (p *AIChatPlugin) subagentTimeout() time.Duration {
+	if p.msgEventTimeout > 0 {
+		return p.msgEventTimeout
+	}
+	// Start 未执行（如测试）时的兜底，与 core.MsgEventTimeout 的默认值一致
+	return 5 * time.Minute
+}
+
 // defaultSubagentPrompt 子代理的系统提示词：子代理是主 AI 委派任务的一次性工作者，
 // 无历史对话上下文，最终文本结果返回给主 AI 而非直接发给用户。
 // 可用能力不在此枚举——具体工具以会话实际注册的工具列表为准（部分功能受配置门控）。
@@ -41,33 +53,6 @@ const defaultSubagentPrompt = `你是一个子代理，由主 AI 委派执行一
 ## 注意
 - 只输出与任务相关的内容，不要寒暄
 - 你执行过程中的中间消息不会发送给任何人`
-
-// subagentTimeout 子代理默认超时：配置缺失/非法时兜底 300 秒；
-// 先做 int 限幅再乘 time.Second，防止超大配置值 int64 溢出为负 duration
-func (p *AIChatPlugin) subagentTimeout() time.Duration {
-	sec := p.cfg.Subagent.TimeoutSec
-	if sec <= 0 {
-		sec = 300
-	}
-	if sec > subagentMaxTimeoutSec {
-		sec = subagentMaxTimeoutSec
-	}
-	return time.Duration(sec) * time.Second
-}
-
-func (p *AIChatPlugin) subagentMaxIterations() int {
-	if p.cfg.Subagent.MaxIterations <= 0 {
-		return 10
-	}
-	return p.cfg.Subagent.MaxIterations
-}
-
-func (p *AIChatPlugin) subagentMaxResultLen() int {
-	if p.cfg.Subagent.MaxResultLen <= 0 {
-		return 4000
-	}
-	return p.cfg.Subagent.MaxResultLen
-}
 
 // resolveSubagentTimeout 计算子代理单次执行的实际超时：
 //  1. timeoutSec>0 时覆盖默认值（先限幅 int 再乘 time.Second，防溢出绕过上限）；
@@ -109,26 +94,20 @@ func (p *AIChatPlugin) runSubagent(ctx context.Context, b bot.Bot, id message.QI
 	return p.runSubagentWithOptions(ctx, b, id, isGroup, task, subagentRunOptions{timeoutSec: timeoutSec}, parentCbs)
 }
 
-// subagentRunOptions 子代理（含团队成员）单次执行的定制项；零值取对应默认值。
+// subagentRunOptions 子代理（含团队成员）单次执行的定制项：除提示词与单次
+// 超时覆盖外，其余执行参数（模型、生成参数、轮数）一律跟随主模型。
 type subagentRunOptions struct {
-	prompt        string        // 系统提示词，空用 defaultSubagentPrompt（团队成员传角色提示词）
-	timeout       time.Duration // 默认超时，<=0 用 p.subagentTimeout()
-	timeoutSec    int           // 本次调用覆盖的秒数（先限幅再乘 time.Second），<=0 忽略
-	maxIterations int           // 工具循环轮数上限，<=0 用 p.subagentMaxIterations()
-	maxResultLen  int           // 结果截断字符数，<=0 用 p.subagentMaxResultLen()
+	prompt     string // 系统提示词，空用 defaultSubagentPrompt（团队成员传角色提示词）
+	timeoutSec int    // 本次调用覆盖的秒数（先限幅再乘 time.Second），<=0 用默认超时
 }
 
 // runSubagentWithOptions 泛化的子代理执行：主体即原 runSubagent，差异仅在于
-// 提示词与默认参数取自 options（Agent 团队成员的并行执行复用它，传入角色提示词
-// 与团队配置的默认值）。超时预算解析完全在内部完成（按父 ctx deadline 压缩并
-// 预留 subagentParentReserve 收尾时间），调用方不应预建带超时的 context，
+// 提示词（Agent 团队成员的并行执行复用它，传入角色提示词）。执行参数跟随主模型：
+// 模型与生成参数、工具轮数取主模型配置，超时取框架消息处理预算（见
+// subagentTimeout / resolveSubagentTimeout）。调用方不应预建带超时的 context，
 // 否则会被二次压缩损失预算。
 func (p *AIChatPlugin) runSubagentWithOptions(ctx context.Context, b bot.Bot, id message.QID, isGroup bool, task string, o subagentRunOptions, parentCbs llmtool.CallBackFuncs) (string, aichat.TokenUsage, error) {
-	defaultTimeout := o.timeout
-	if defaultTimeout <= 0 {
-		defaultTimeout = p.subagentTimeout()
-	}
-	timeout, err := resolveSubagentTimeout(defaultTimeout, o.timeoutSec, ctx)
+	timeout, err := resolveSubagentTimeout(p.subagentTimeout(), o.timeoutSec, ctx)
 	if err != nil {
 		return "", aichat.TokenUsage{}, err
 	}
@@ -148,7 +127,8 @@ func (p *AIChatPlugin) runSubagentWithOptions(ctx context.Context, b bot.Bot, id
 	// 场景描述经 WithScenePrompt 注入（组装时排在 available_skills 之后，见
 	// MessageBuilder.buildSystemPrompt），与主会话/定时任务的 system 组装顺序一致
 	scene := p.buildScenePrompt(b, id, isGroup)
-	// 子代理可配置独立模型（留空回退主模型）；团队成员同样经此路径（team.go 复用本函数）
+	// 子代理模型跟随主模型（见 subagentLLMConfig）；团队成员同样经此路径
+	// （team.go 复用本函数）
 	saBaseURL, saAPIKey, saModel, saFormat := p.subagentLLMConfig()
 	chat, err := aichat.NewChatBot(
 		saBaseURL, saAPIKey, saModel,
@@ -162,11 +142,7 @@ func (p *AIChatPlugin) runSubagentWithOptions(ctx context.Context, b bot.Bot, id
 	if p.skillManager != nil {
 		chat.SetSkillManager(p.skillManager)
 	}
-	maxIterations := o.maxIterations
-	if maxIterations <= 0 {
-		maxIterations = p.subagentMaxIterations()
-	}
-	chat.SetMaxIterations(maxIterations)
+	chat.SetMaxIterations(p.mainMaxIterations())
 
 	// 钩子与工具门禁：子代理同样走 PreToolUse/PostToolUse 等钩子与计划模式/审批门禁
 	// （AgentKind=subagent 供钩子配置区分）；门禁审批路径仅管理员可批（requester=0），
@@ -214,37 +190,16 @@ func (p *AIChatPlugin) runSubagentWithOptions(ctx context.Context, b bot.Bot, id
 		}
 	}
 
-	maxResultLen := o.maxResultLen
-	if maxResultLen <= 0 {
-		maxResultLen = p.subagentMaxResultLen()
-	}
-	result, truncated := truncateSubagentResult(resp, maxResultLen)
+	// 结果不截断：子代理产出多长就回填多长，避免长结论被腰斩
 	logger.Info("子代理执行完成", "id", id, "is_group", isGroup,
-		"duration", duration, "iterations", usage.Iterations, "tokens", usage.TotalTokens, "truncated", truncated)
+		"duration", duration, "iterations", usage.Iterations, "tokens", usage.TotalTokens, "result_runes", utf8.RuneCountInString(resp))
 
 	meta := fmt.Sprintf("【子代理执行完成】耗时 %.1fs · LLM 轮数 %d · token %d",
 		duration.Seconds(), usage.Iterations, usage.TotalTokens)
-	if truncated {
-		meta += " · 结果过长已截断"
-	}
-	if result == "" {
+	if resp == "" {
 		return meta + "\n（子代理没有返回内容）", usage, nil
 	}
-	return meta + "\n" + result, usage, nil
-}
-
-// truncateSubagentResult 按字符数（rune）截断子代理结果，防止超长结果污染主对话上下文。
-// maxRunes<=0 表示不截断。返回截断后的文本与是否发生了截断。
-func truncateSubagentResult(s string, maxRunes int) (string, bool) {
-	if maxRunes <= 0 {
-		return s, false
-	}
-	total := utf8.RuneCountInString(s)
-	if total <= maxRunes {
-		return s, false
-	}
-	runes := []rune(s)
-	return string(runes[:maxRunes]) + fmt.Sprintf("\n…（结果过长已截断，原文共 %d 字符）", total), true
+	return meta + "\n" + resp, usage, nil
 }
 
 // makeSubagentCallbacks 构造子代理的工具回调。

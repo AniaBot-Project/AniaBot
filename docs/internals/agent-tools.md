@@ -165,19 +165,21 @@ flowchart TB
 
 ## 子代理（subagent）
 
-`subagent_run` 让主 AI 委派复杂/耗时子任务给**一次性子代理**：
+`subagent_run` 让主 AI 委派复杂/耗时子任务给**一次性子代理**（默认启用，无配置开关）：
 
 - 子代理是全新 `ChatBot`（nil historyStore，执行完丢弃），独立 `SessionToolExecutor`，拥有与主 AI 一致的会话级工具（clock/memory/knowledge），但**不再注册 subagent 自身**（防递归）
 - 中间轮文本丢弃；发送图片/文件、读历史仍作用于当前会话
 - 图片状态隔离：子代理有自己的图片队列，`LoadImages` 是 stub（推迟给主 AI），避免两个工具循环互踩队列
-- 只有最终回复作为工具结果返回给主 AI，前缀运行元数据（时长、LLM 轮数、token），并按 `subagent.max_result_len`（默认 4000 符文）截断保护主上下文
+- 执行参数全部跟随主模型：模型与 API 格式直取主模型四元组（`subagentLLMConfig`），生成参数经 `buildChatOptions` 复用主模型配置，工具轮数取 `mainMaxIterations()`（主模型的最大工具调用轮数），超时取框架消息处理预算
+- 只有最终回复作为工具结果返回给主 AI，前缀运行元数据（时长、LLM 轮数、token）；结果不截断，完整回填主对话
 
 ### 超时预算
 
 ```go
-func resolveSubagentTimeout(defaultTimeout, timeoutSec, parentCtx) (timeout, error) {
-    // 1. timeoutSec 先限幅 int 再乘 time.Second（防溢出为负 duration）
-    // 2. 父上下文带 deadline 时，为主请求预留 30s 收尾，压缩子代理超时
+func resolveSubagentTimeout(defaultTimeout, timeoutSec int, parentCtx) (timeout, error) {
+    // 1. 默认超时 = p.subagentTimeout()，即 bot.msg_event_timeout_sec（未配置兜底 5m），与主请求预算同源
+    // 2. timeoutSec 先限幅 int 再乘 time.Second（防溢出为负 duration），上限 1800s
+    // 3. 父上下文带 deadline 时，为主请求预留 30s 收尾，压缩子代理超时
 }
 ```
 
@@ -189,11 +191,11 @@ clock 任务里注册的是**异步**子代理变体（`clocksubagent.go`）：�
 
 ## Agent 团队（team）
 
-在子代理之上的一层编排：AI 可保存/调用「团队」——一组带角色描述的子代理成员：
+在子代理之上的一层编排：AI 可保存/调用「团队」——一组带角色描述的子代理成员（默认启用，无配置开关）：
 
 - 团队按 scope（`g:` / `f:` / 全局 `global`）隔离，`team:` 命名空间 KV 存取；团队名严格校验（中文/字母/数字/下划线/连字符）
-- `team_run` 让多个成员**并行**执行（硬上限 10 个，防并发风暴），每个成员复用 `runSubagentWithOptions`（传角色提示词 + 团队默认参数）
-- 成员结果汇总返回主 AI；团队定义可保存复用（`team_save/list/delete`），面板提供管理页
+- `team_run` 让多个成员**并行**执行（上限 `teamMaxMembers`=5，防并发风暴），每个成员复用 `runSubagentWithOptions` 并只传角色提示词——模型与执行参数（超时/轮数）全部与普通子代理一致（即跟随主模型）
+- 成员结果汇总返回主 AI；团队定义可保存复用（`team_create/list/delete`），面板提供管理页
 - 团队成员的一次性会话不注册团队工具（防递归组建团队）
 
 ## 知识库（knowledge）

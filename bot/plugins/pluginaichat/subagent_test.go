@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/jeanhua/AniaBot/bot/component/llmtool"
 	"github.com/jeanhua/AniaBot/common/model/message"
@@ -22,94 +21,40 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-// ---- truncateSubagentResult ----
+// ---- 执行参数跟随主模型 ----
 
-func TestTruncateSubagentResult(t *testing.T) {
-	tests := []struct {
-		name      string
-		s         string
-		maxRunes  int
-		wantTrunc bool
-	}{
-		{"短结果不截断", "你好", 10, false},
-		{"恰好等于上限不截断", "12345", 5, false},
-		{"超长截断", "123456789", 5, true},
-		{"中文按字符截断", "一二三四五六七八九十", 5, true},
-		{"上限为0不截断", "任意长度内容", 0, false},
-		{"上限为负不截断", "任意长度内容", -1, false},
-		{"空字符串", "", 5, false},
+// TestSubagentTimeoutFollowsMain 子代理默认超时跟随框架消息处理预算
+// （bot.msg_event_timeout_sec，Start 时读入 p.msgEventTimeout）；未配置时
+// 与 core.MsgEventTimeout 兜底一致（5 分钟）。
+func TestSubagentTimeoutFollowsMain(t *testing.T) {
+	p := &AIChatPlugin{}
+	if got := p.subagentTimeout(); got != 5*time.Minute {
+		t.Fatalf("未配置时兜底超时 = %v, want 5m", got)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, truncated := truncateSubagentResult(tt.s, tt.maxRunes)
-			if truncated != tt.wantTrunc {
-				t.Fatalf("truncated = %v, want %v", truncated, tt.wantTrunc)
-			}
-			if !tt.wantTrunc {
-				if got != tt.s {
-					t.Fatalf("未截断时结果应原样返回, got %q", got)
-				}
-				return
-			}
-			if !strings.Contains(got, "已截断") {
-				t.Fatalf("截断结果应包含截断标记, got %q", got)
-			}
-			if !utf8.ValidString(got) {
-				t.Fatalf("截断结果必须是合法 UTF-8（不能在多字节字符中间切断）")
-			}
-			// 截断正文不超过上限（标记文本除外）
-			body := strings.SplitN(got, "\n…", 2)[0]
-			if utf8.RuneCountInString(body) > tt.maxRunes {
-				t.Fatalf("截断正文长度 %d 超过上限 %d", utf8.RuneCountInString(body), tt.maxRunes)
-			}
-		})
+	p.msgEventTimeout = 10 * time.Minute
+	if got := p.subagentTimeout(); got != 10*time.Minute {
+		t.Fatalf("超时应跟随框架消息处理预算, got %v", got)
 	}
 }
 
-// ---- 配置兜底 ----
-
-func TestSubagentConfigDefaults(t *testing.T) {
+// TestSubagentMaxIterationsFollowsMain 子代理工具轮数跟随主模型的最大工具调用轮数。
+func TestSubagentMaxIterationsFollowsMain(t *testing.T) {
 	p := &AIChatPlugin{}
-	if got := p.subagentTimeout(); got != 300*time.Second {
-		t.Fatalf("默认超时 = %v, want 300s", got)
+	if got := p.mainMaxIterations(); got != 20 {
+		t.Fatalf("未配置时兜底轮数 = %d, want 20", got)
 	}
-	if got := p.subagentMaxIterations(); got != 10 {
-		t.Fatalf("默认最大轮数 = %d, want 10", got)
-	}
-	if got := p.subagentMaxResultLen(); got != 4000 {
-		t.Fatalf("默认结果上限 = %d, want 4000", got)
-	}
-
-	p.cfg.Subagent.TimeoutSec = 60
-	p.cfg.Subagent.MaxIterations = 5
-	p.cfg.Subagent.MaxResultLen = 100
-	if got := p.subagentTimeout(); got != 60*time.Second {
-		t.Fatalf("超时 = %v, want 60s", got)
-	}
-	if got := p.subagentMaxIterations(); got != 5 {
-		t.Fatalf("最大轮数 = %d, want 5", got)
-	}
-	if got := p.subagentMaxResultLen(); got != 100 {
-		t.Fatalf("结果上限 = %d, want 100", got)
-	}
-}
-
-// TestSubagentTimeoutConfigClamp 配置值先限幅再乘 time.Second：
-// 超大配置（>1800）被钳到 1800s，不会因 int64 溢出变成负 duration。
-func TestSubagentTimeoutConfigClamp(t *testing.T) {
-	p := &AIChatPlugin{}
-	p.cfg.Subagent.TimeoutSec = 10000000000 // 直接乘会 int64 溢出为负值
-	if got := p.subagentTimeout(); got != subagentMaxTimeoutSec*time.Second {
-		t.Fatalf("超大配置超时应被限幅到 %v, got %v", subagentMaxTimeoutSec*time.Second, got)
+	p.cfg.MaxIterations = 55
+	if got := p.mainMaxIterations(); got != 55 {
+		t.Fatalf("轮数应跟随主模型配置, got %d", got)
 	}
 }
 
 // ---- resolveSubagentTimeout ----
 
 func TestResolveSubagentTimeout(t *testing.T) {
-	def := 300 * time.Second
+	def := 5 * time.Minute
 
-	t.Run("无父deadline时用默认超时", func(t *testing.T) {
+	t.Run("无父deadline时用传入的默认超时", func(t *testing.T) {
 		got, err := resolveSubagentTimeout(def, 0, context.Background())
 		if err != nil || got != def {
 			t.Fatalf("got %v, err %v; want %v", got, err, def)
@@ -293,6 +238,11 @@ func TestNewSubagentTools(t *testing.T) {
 	if !strings.Contains(tool.Description(), "300 秒") {
 		t.Fatalf("描述应包含默认超时, got %q", tool.Description())
 	}
+	// 超时跟随框架消息处理预算：配置后描述同步变化
+	p.msgEventTimeout = 10 * time.Minute
+	if desc := newSubagentTools(p, nil, message.FromUint64(12345), true)[0].Description(); !strings.Contains(desc, "600 秒") {
+		t.Fatalf("超时应跟随框架消息处理预算（600 秒）, got %q", desc)
+	}
 
 	friendTools := newSubagentTools(p, nil, message.FromUint64(67890), false)
 	if !strings.Contains(friendTools[0].Description(), "私聊（对方 ID qq:67890）") {
@@ -311,49 +261,18 @@ func TestSubagentRunToolEmptyTask(t *testing.T) {
 	}
 }
 
-// ---- 子代理/压缩器独立模型配置回退 ----
+// ---- 子代理模型配置跟随主模型 ----
 
-func TestSubagentLLMConfigFallback(t *testing.T) {
+func TestSubagentLLMConfigFollowsMain(t *testing.T) {
 	p := &AIChatPlugin{}
 	p.cfg.BaseURL = "https://main.example.com"
 	p.cfg.APIKey = "main-key"
 	p.cfg.Model = "main-model"
-
-	// 全部留空：回退主模型
-	base, key, model, format := p.subagentLLMConfig()
-	if base != "https://main.example.com" || key != "main-key" || model != "main-model" {
-		t.Fatalf("全空应回退主模型, got %q/%q/%q", base, key, model)
-	}
-	if format != "" {
-		t.Fatalf("主格式为空时 format 应为空, got %q", format)
-	}
-
-	// 部分填充：只覆盖模型
-	p.cfg.Subagent.Model = "cheap-model"
-	_, _, model, _ = p.subagentLLMConfig()
-	if model != "cheap-model" {
-		t.Fatalf("model = %q, want cheap-model", model)
-	}
-	if base, _, _, _ := p.subagentLLMConfig(); base != "https://main.example.com" {
-		t.Fatalf("base_url 未填应回退主模型, got %q", base)
-	}
-
-	// 格式回退：主格式 anthropic，子代理留空应继承；显式覆盖后生效
 	p.cfg.APIFormat = "anthropic"
-	if _, _, _, format = p.subagentLLMConfig(); format != "anthropic" {
-		t.Fatalf("format 未填应回退主格式, got %q", format)
-	}
-	p.cfg.Subagent.APIFormat = "responses"
-	if _, _, _, format = p.subagentLLMConfig(); format != "responses" {
-		t.Fatalf("独立 format 未生效, got %q", format)
-	}
 
-	// 全部填充
-	p.cfg.Subagent.BaseURL = "https://sub.example.com"
-	p.cfg.Subagent.APIKey = "sub-key"
-	base, key, model, _ = p.subagentLLMConfig()
-	if base != "https://sub.example.com" || key != "sub-key" || model != "cheap-model" {
-		t.Fatalf("独立配置未生效, got %q/%q/%q", base, key, model)
+	base, key, model, format := p.subagentLLMConfig()
+	if base != "https://main.example.com" || key != "main-key" || model != "main-model" || format != "anthropic" {
+		t.Fatalf("子代理模型配置应跟随主模型, got %q/%q/%q/%q", base, key, model, format)
 	}
 }
 
