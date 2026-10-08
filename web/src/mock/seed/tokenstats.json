@@ -1,0 +1,146 @@
+{
+  "daily": [
+    {
+      "requests": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cached_tokens": 0,
+      "cache_hit_rate": 0,
+      "date": "2026-09-25"
+    },
+    {
+      "requests": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cached_tokens": 0,
+      "cache_hit_rate": 0,
+      "date": "2026-09-26"
+    },
+    {
+      "requests": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cached_tokens": 0,
+      "cache_hit_rate": 0,
+      "date": "2026-09-27"
+    },
+    {
+      "requests": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cached_tokens": 0,
+      "cache_hit_rate": 0,
+      "date": "2026-09-28"
+    },
+    {
+      "requests": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cached_tokens": 0,
+      "cache_hit_rate": 0,
+      "date": "2026-09-29"
+    },
+    {
+      "requests": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cached_tokens": 0,
+      "cache_hit_rate": 0,
+      "date": "2026-09-30"
+    },
+    {
+      "requests": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cached_tokens": 0,
+      "cache_hit_rate": 0,
+      "date": "2026-10-01"
+    },
+    {
+      "requests": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cached_tokens": 0,
+      "cache_hit_rate": 0,
+      "date": "2026-10-02"
+    },
+    {
+      "requests": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cached_tokens": 0,
+      "cache_hit_rate": 0,
+      "date": "2026-10-03"
+    },
+    {
+      "requests": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cached_tokens": 0,
+      "cache_hit_rate": 0,
+      "date": "2026-10-04"
+    },
+    {
+      "requests": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cached_tokens": 0,
+      "cache_hit_rate": 0,
+      "date": "2026-10-05"
+    },
+    {
+      "requests": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cached_tokens": 0,
+      "cache_hit_rate": 0,
+      "date": "2026-10-06"
+    },
+    {
+      "requests": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cached_tokens": 0,
+      "cache_hit_rate": 0,
+      "date": "2026-10-07"
+    },
+    {
+      "requests": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "cached_tokens": 0,
+      "cache_hit_rate": 0,
+      "date": "2026-10-08"
+    }
+  ],
+  "summary": {
+    "requests": 0,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit_rate": 0
+  },
+  "today": {
+    "requests": 0,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit_rate": 0
+  }
+}

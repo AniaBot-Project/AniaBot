@@ -22,7 +22,7 @@
       :class="mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'"
     >
       <div class="px-5 pt-6 pb-5 flex items-center gap-3">
-        <img src="/logo.webp" alt="AniaBot" class="w-9 h-9 rounded-full object-cover shadow-md ring-1 ring-black/5" />
+        <img :src="logoUrl" alt="AniaBot" class="w-9 h-9 rounded-full object-cover shadow-md ring-1 ring-black/5" />
         <div>
           <div class="text-[#1d1d1f] font-semibold leading-tight tracking-[0.2em]">ANIABOT</div>
           <div class="text-[10px] text-slate-500 leading-tight tracking-[0.15em] uppercase mt-0.5">Console · 控制面板</div>
@@ -30,6 +30,13 @@
         <button class="ml-auto md:hidden text-slate-500 hover:text-slate-900 p-1" aria-label="关闭菜单" @click="mobileOpen = false">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
         </button>
+      </div>
+      <!-- 演示模式徽章（demo 构建专属，正式构建静态为 false 不渲染） -->
+      <div v-if="isDemo" class="mx-5 mb-2">
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] tracking-wide bg-amber-50 text-amber-700 border border-amber-200">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+          演示模式
+        </span>
       </div>
       <div class="mx-5 h-px bg-black/5" />
 
@@ -124,6 +131,12 @@ import Login from './views/Login.vue'
 import Wizard from './views/Wizard.vue'
 
 const router = useRouter()
+
+// 演示模式标记：正式构建中为静态 false，徽章不渲染
+const isDemo = import.meta.env.MODE === 'demo'
+
+// logo 走运行时拼接（public 资源 + 相对 base），子路径部署（GitHub Pages）下也能正确解析
+const logoUrl = import.meta.env.BASE_URL + 'logo.webp'
 
 const icons = {
   github: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55 0-.27-.01-1.17-.02-2.12-3.2.7-3.88-1.36-3.88-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.03 1.75 2.69 1.25 3.34.95.1-.74.4-1.25.72-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.18-3.09-.12-.29-.51-1.46.11-3.05 0 0 .96-.31 3.16 1.18a11 11 0 0 1 5.76 0c2.2-1.49 3.16-1.18 3.16-1.18.62 1.59.23 2.76.11 3.05.73.81 1.18 1.83 1.18 3.09 0 4.42-2.7 5.39-5.27 5.67.41.36.78 1.06.78 2.14 0 1.54-.01 2.78-.01 3.16 0 .31.21.67.8.55A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>',

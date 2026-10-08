@@ -1,0 +1,145 @@
+{
+  "has_more": false,
+  "items": [
+    {
+      "id": "k",
+      "time": "2026-10-08T15:33:21.9423481+08:00",
+      "category": "knowledge",
+      "action": "knowledge_create",
+      "detail": "面板新增知识库文档 g:qq:123456/dc7b9335（群内置顶约定）"
+    },
+    {
+      "id": "j",
+      "time": "2026-10-08T15:33:21.9284314+08:00",
+      "category": "knowledge",
+      "action": "knowledge_create",
+      "detail": "面板新增知识库文档 g:qq:123456/52441786（AniaBot 部署要点）"
+    },
+    {
+      "id": "i",
+      "time": "2026-10-08T15:33:21.9267071+08:00",
+      "category": "team",
+      "action": "team_create",
+      "detail": "面板创建团队 f:qq:10000/research"
+    },
+    {
+      "id": "h",
+      "time": "2026-10-08T15:33:21.9054085+08:00",
+      "category": "team",
+      "action": "team_create",
+      "detail": "面板创建团队 g:qq:123456/写作组"
+    },
+    {
+      "id": "g",
+      "time": "2026-10-08T15:33:21.904031+08:00",
+      "category": "memory",
+      "action": "memory_create",
+      "detail": "面板新增记忆 f:qq:10000/dcfdf676"
+    },
+    {
+      "id": "f",
+      "time": "2026-10-08T15:33:21.902649+08:00",
+      "category": "memory",
+      "action": "memory_create",
+      "detail": "面板新增记忆 g:qq:123456/4f092634"
+    },
+    {
+      "id": "e",
+      "time": "2026-10-08T15:33:21.9011004+08:00",
+      "category": "memory",
+      "action": "memory_create",
+      "detail": "面板新增记忆 g:qq:123456/1947fa42"
+    },
+    {
+      "id": "d",
+      "time": "2026-10-08T15:33:21.8999425+08:00",
+      "category": "clock",
+      "action": "clock_create",
+      "detail": "面板创建定时任务 3（月度服务器巡检提醒）"
+    },
+    {
+      "id": "c",
+      "time": "2026-10-08T15:33:21.8981141+08:00",
+      "category": "clock",
+      "action": "clock_create",
+      "detail": "面板创建定时任务 2（周五群活跃度周报）"
+    },
+    {
+      "id": "b",
+      "time": "2026-10-08T15:33:21.8962758+08:00",
+      "category": "clock",
+      "action": "clock_create",
+      "detail": "面板创建定时任务 1（每日早报）"
+    },
+    {
+      "id": "a",
+      "time": "2026-10-08T15:33:21.8931989+08:00",
+      "category": "auth",
+      "action": "login",
+      "detail": "面板登录成功，IP: 127.0.0.1"
+    },
+    {
+      "id": "9",
+      "time": "2026-10-08T15:31:50.6742578+08:00",
+      "category": "system",
+      "action": "start",
+      "detail": "AniaBot 启动完成"
+    },
+    {
+      "id": "8",
+      "time": "2026-10-08T15:31:50.0577313+08:00",
+      "category": "system",
+      "action": "restart",
+      "detail": "面板请求重启 Bot，IP: 127.0.0.1"
+    },
+    {
+      "id": "7",
+      "time": "2026-10-08T15:31:50.0355771+08:00",
+      "category": "config",
+      "action": "preset_save",
+      "detail": "面板保存配置预设: 初始配置"
+    },
+    {
+      "id": "6",
+      "time": "2026-10-08T15:31:49.9958301+08:00",
+      "category": "config",
+      "action": "file_update",
+      "detail": "面板修改扩展配置文件: prompt"
+    },
+    {
+      "id": "5",
+      "time": "2026-10-08T15:31:49.9699991+08:00",
+      "category": "config",
+      "action": "file_update",
+      "detail": "面板修改扩展配置文件: mcp"
+    },
+    {
+      "id": "4",
+      "time": "2026-10-08T15:31:49.9680563+08:00",
+      "category": "config",
+      "action": "config_update",
+      "detail": "面板更新配置（7 项）: bot.admin_id, bot.marketplace.enable, plugin.ai_chat_bot.api_key, plugin.ai_chat_bot.multimodal, plugin.ai_chat_bot.quota.daily_tokens, plugin.ai_chat_bot.quota.enable, plugin.ai_chat_bot.quota.global_daily_tokens"
+    },
+    {
+      "id": "3",
+      "time": "2026-10-08T15:31:49.9657581+08:00",
+      "category": "system",
+      "action": "setup_complete",
+      "detail": "首次设置向导已完成"
+    },
+    {
+      "id": "2",
+      "time": "2026-10-08T15:31:49.9382336+08:00",
+      "category": "auth",
+      "action": "login",
+      "detail": "面板登录成功，IP: 127.0.0.1"
+    },
+    {
+      "id": "1",
+      "time": "2026-10-08T15:30:35.6084639+08:00",
+      "category": "system",
+      "action": "start",
+      "detail": "AniaBot 启动完成"
+    }
+  ]
+}

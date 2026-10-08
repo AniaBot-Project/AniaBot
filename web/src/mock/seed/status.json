@@ -1,0 +1,16 @@
+{
+  "adapter_detail": "qq:connected",
+  "adapter_status": "connected",
+  "adapters": [
+    {
+      "name": "napcat",
+      "platform": "qq",
+      "state": "connected",
+      "detail": "WebSocket 已连接 ws://localhost:4455"
+    }
+  ],
+  "goroutines": 0,
+  "plugin_count": 6,
+  "started_at": "2026-10-08T15:31:50+08:00",
+  "uptime_sec": 1
+}

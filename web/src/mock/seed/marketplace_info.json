@@ -1,0 +1,22 @@
+{
+  "branch": "main",
+  "cache_dir": "./data/marketplace",
+  "configured": true,
+  "enabled": true,
+  "env": {
+    "git": "git version 2.39.5",
+    "go": "go version go1.27.1 linux/amd64"
+  },
+  "index_synced_at": 1791444869,
+  "installed": 0,
+  "mode": "binary",
+  "oauth_configured": true,
+  "oauth_user": "demo-user",
+  "plugin_dir": "./data/plugins",
+  "rate_remaining": 4800,
+  "repo": "AniaBot-Project/AniaBot-Plugins",
+  "rollback_available": false,
+  "source_dir": "/opt/aniabot/src",
+  "token_set": true,
+  "token_valid": true
+}

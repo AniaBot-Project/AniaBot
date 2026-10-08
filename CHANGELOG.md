@@ -15,6 +15,10 @@
 
 - 精简AI插件配置，subagent和agent team跟随主模型配置
 
+### 新增
+
+- 文档站新增 Web 面板在线体验（GitHub Pages `/demo/` 路径）
+
 ## [v4.7.7] - 2026-10-05
 
 ### 新增

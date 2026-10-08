@@ -13,6 +13,9 @@ hero:
       text: 快速开始
       link: /guide/getting-started
     - theme: alt
+      text: 在线体验
+      link: /demo/
+    - theme: alt
       text: 项目介绍
       link: /guide/introduction
     - theme: alt

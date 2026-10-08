@@ -1,0 +1,19 @@
+{
+  "hostname": "aniabot-demo",
+  "os": "linux",
+  "os_version": "Debian GNU/Linux 12 (bookworm)",
+  "kernel": "6.1.0-18-amd64",
+  "arch": "amd64",
+  "cpu_model": "Intel(R) Xeon(R) CPU E5-2680 v4 @ 2.40GHz",
+  "cpu_cores": 8,
+  "cpu_percent": 12.5,
+  "mem_total": 17179869184,
+  "mem_used": 5368709120,
+  "mem_percent": 31.25,
+  "uptime_sec": 86400,
+  "go_version": "go1.27.1",
+  "go_mem_alloc": 2590512,
+  "cpu_history": [
+    12.5
+  ]
+}

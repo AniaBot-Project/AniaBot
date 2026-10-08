@@ -1,0 +1,17 @@
+{
+  "branch": "main",
+  "configured": true,
+  "env": {
+    "git": "git version 2.39.5",
+    "go": "go version go1.27.1 linux/amd64",
+    "node": "v22.14.0",
+    "npm": "10.9.2"
+  },
+  "exe": "build/AniaBot",
+  "gitUrl": "https://github.com/AniaBot-Project/AniaBot",
+  "mode": "binary",
+  "sourceDir": "/opt/aniabot/src",
+  "currentCommit": "e3a1c9f",
+  "remoteCommit": "b7d4f21",
+  "updateAvailable": true
+}
