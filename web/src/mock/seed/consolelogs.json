@@ -1,0 +1,533 @@
+{
+  "has_more": false,
+  "items": [
+    {
+      "id": 53,
+      "time": "2026-10-08T15:31:57.7257801+08:00",
+      "level": "info",
+      "message": "连接失败（第 4 次）: dial tcp [::1]:4455: connectex: No connection could be made because the target machine actively refused it.. 8s 后重试...（可在 Web 面板修改连接配置后重启）"
+    },
+    {
+      "id": 52,
+      "time": "2026-10-08T15:31:53.7080063+08:00",
+      "level": "info",
+      "message": "连接失败（第 3 次）: dial tcp [::1]:4455: connectex: No connection could be made because the target machine actively refused it.. 4s 后重试...（可在 Web 面板修改连接配置后重启）"
+    },
+    {
+      "id": 51,
+      "time": "2026-10-08T15:31:52.2022995+08:00",
+      "level": "info",
+      "message": "[get_friend_list] 连接未就绪（重连中），跳过发送"
+    },
+    {
+      "id": 50,
+      "time": "2026-10-08T15:31:52.1959556+08:00",
+      "level": "info",
+      "message": "[get_group_list] 连接未就绪（重连中），跳过发送"
+    },
+    {
+      "id": 49,
+      "time": "2026-10-08T15:31:51.7060705+08:00",
+      "level": "info",
+      "message": "连接失败（第 2 次）: dial tcp [::1]:4455: connectex: No connection could be made because the target machine actively refused it.. 2s 后重试...（可在 Web 面板修改连接配置后重启）"
+    },
+    {
+      "id": 48,
+      "time": "2026-10-08T15:31:51.6748669+08:00",
+      "level": "info",
+      "message": "AI定时任务调度器已启动",
+      "attrs": [
+        {
+          "key": "AI对话插件.clock.tasks",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "id": 47,
+      "time": "2026-10-08T15:31:51.6748669+08:00",
+      "level": "warn",
+      "message": "启动成功消息发送失败（管理员不在线或所在平台未启用？）"
+    },
+    {
+      "id": 46,
+      "time": "2026-10-08T15:31:51.6748669+08:00",
+      "level": "info",
+      "message": "[send_private_msg] 连接未就绪（重连中），跳过发送"
+    },
+    {
+      "id": 45,
+      "time": "2026-10-08T15:31:51.6748669+08:00",
+      "level": "info",
+      "message": "Awake..."
+    },
+    {
+      "id": 44,
+      "time": "2026-10-08T15:31:50.7029835+08:00",
+      "level": "info",
+      "message": "连接失败（第 1 次）: dial tcp [::1]:4455: connectex: No connection could be made because the target machine actively refused it.. 1s 后重试...（可在 Web 面板修改连接配置后重启）"
+    },
+    {
+      "id": 43,
+      "time": "2026-10-08T15:31:50.6748048+08:00",
+      "level": "info",
+      "message": "Web 控制面板已启动",
+      "attrs": [
+        {
+          "key": "AdminPanel.listen",
+          "value": "127.0.0.1:7700"
+        },
+        {
+          "key": "AdminPanel.url",
+          "value": "http://127.0.0.1:7700"
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "time": "2026-10-08T15:31:50.6748048+08:00",
+      "level": "info",
+      "message": "已启用 napcat websocket adapter"
+    },
+    {
+      "id": 41,
+      "time": "2026-10-08T15:31:50.6742578+08:00",
+      "level": "info",
+      "message": "Bot启动完成..."
+    },
+    {
+      "id": 40,
+      "time": "2026-10-08T15:31:50.6737287+08:00",
+      "level": "info",
+      "message": "初始化cron完成"
+    },
+    {
+      "id": 39,
+      "time": "2026-10-08T15:31:50.6737287+08:00",
+      "level": "info",
+      "message": "开始初始化cron..."
+    },
+    {
+      "id": 38,
+      "time": "2026-10-08T15:31:50.6737287+08:00",
+      "level": "info",
+      "message": "已启用会话内存回收",
+      "attrs": [
+        {
+          "key": "AI对话插件.max_idle_minutes",
+          "value": "120"
+        },
+        {
+          "key": "AI对话插件.max_sessions",
+          "value": "128"
+        }
+      ]
+    },
+    {
+      "id": 37,
+      "time": "2026-10-08T15:31:50.6737287+08:00",
+      "level": "info",
+      "message": "对话历史使用行级存储",
+      "attrs": [
+        {
+          "key": "AI对话插件.dialect",
+          "value": "sqlite"
+        }
+      ]
+    },
+    {
+      "id": 36,
+      "time": "2026-10-08T15:31:50.6731808+08:00",
+      "level": "info",
+      "message": "已启用Agent团队功能",
+      "attrs": [
+        {
+          "key": "AI对话插件.max_members",
+          "value": "5"
+        }
+      ]
+    },
+    {
+      "id": 35,
+      "time": "2026-10-08T15:31:50.6731808+08:00",
+      "level": "info",
+      "message": "已启用子代理功能",
+      "attrs": [
+        {
+          "key": "AI对话插件.timeout_sec",
+          "value": "300"
+        },
+        {
+          "key": "AI对话插件.max_iterations",
+          "value": "100"
+        }
+      ]
+    },
+    {
+      "id": 34,
+      "time": "2026-10-08T15:31:50.6731808+08:00",
+      "level": "info",
+      "message": "已启用每日配额限制",
+      "attrs": [
+        {
+          "key": "AI对话插件.daily_tokens",
+          "value": "200000"
+        },
+        {
+          "key": "AI对话插件.global_daily_tokens",
+          "value": "2000000"
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "time": "2026-10-08T15:31:50.6726289+08:00",
+      "level": "info",
+      "message": "已启用知识库功能",
+      "attrs": [
+        {
+          "key": "AI对话插件.max_docs",
+          "value": "500"
+        },
+        {
+          "key": "AI对话插件.vector",
+          "value": "false"
+        },
+        {
+          "key": "AI对话插件.auto_inject",
+          "value": "true"
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "time": "2026-10-08T15:31:50.6726289+08:00",
+      "level": "info",
+      "message": "已启用AI长期记忆功能",
+      "attrs": [
+        {
+          "key": "AI对话插件.max_entries",
+          "value": "200"
+        },
+        {
+          "key": "AI对话插件.vector",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "time": "2026-10-08T15:31:50.6726289+08:00",
+      "level": "info",
+      "message": "已启用AI定时任务功能",
+      "attrs": [
+        {
+          "key": "AI对话插件.tasks",
+          "value": "0"
+        },
+        {
+          "key": "AI对话插件.default_timeout_sec",
+          "value": "120"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "time": "2026-10-08T15:31:50.6714856+08:00",
+      "level": "info",
+      "message": "工具执行器初始化完成"
+    },
+    {
+      "id": 29,
+      "time": "2026-10-08T15:31:50.6714856+08:00",
+      "level": "info",
+      "message": "加载 skill 目录失败 [./skills]: 读取 skills 目录失败: open ./skills: The system cannot find the file specified."
+    },
+    {
+      "id": 28,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "初始化工具执行器..."
+    },
+    {
+      "id": 27,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "工具审批未启用（plugin.ai_chat_bot.approval.enable=false）"
+    },
+    {
+      "id": 26,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "AI 钩子功能未启用（plugin.ai_chat_bot.hooks.enable=false）"
+    },
+    {
+      "id": 25,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "warn",
+      "message": "加载 MCP 配置失败",
+      "attrs": [
+        {
+          "key": "AI对话插件.error",
+          "value": "解析 MCP 配置失败: json: cannot unmarshal array into Go value of type pluginaichat.mcpFileConfig"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "主对话模型已配置为支持多模态，将按需直接加载图片"
+    },
+    {
+      "id": 23,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "warn",
+      "message": "Jina AI Token 未设置，将无法使用网页浏览和搜索功能"
+    },
+    {
+      "id": 22,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "已加载 Prompt 覆盖配置",
+      "attrs": [
+        {
+          "key": "AI对话插件.groups",
+          "value": "1"
+        },
+        {
+          "key": "AI对话插件.friends",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "初始化插件: ",
+      "attrs": [
+        {
+          "key": "name",
+          "value": "AI对话插件"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "请求拦截插件已加载（未启用拦截，放行全部消息）"
+    },
+    {
+      "id": 19,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "初始化插件: ",
+      "attrs": [
+        {
+          "key": "name",
+          "value": "请求拦截插件"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "播报群聊注册",
+      "attrs": [
+        {
+          "key": "每日新闻插件.groupId",
+          "value": "qq:7891011"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "播报群聊注册",
+      "attrs": [
+        {
+          "key": "每日新闻插件.groupId",
+          "value": "qq:123456"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "初始化插件: ",
+      "attrs": [
+        {
+          "key": "name",
+          "value": "每日新闻插件"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "初始化插件: ",
+      "attrs": [
+        {
+          "key": "name",
+          "value": "复读机插件"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "日志打印插件初始化完成",
+      "attrs": [
+        {
+          "key": "日志打印插件.lastStartTime",
+          "value": "未保存"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "初始化插件: ",
+      "attrs": [
+        {
+          "key": "name",
+          "value": "日志打印插件"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "初始化插件: ",
+      "attrs": [
+        {
+          "key": "name",
+          "value": "系统插件"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "开始初始化插件..."
+    },
+    {
+      "id": 10,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "使用内存缓存存储引擎"
+    },
+    {
+      "id": 9,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "已启用平台适配器",
+      "attrs": [
+        {
+          "key": "platform",
+          "value": "napcat"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "time": "2026-10-08T15:31:50.6697253+08:00",
+      "level": "info",
+      "message": "使用 WebSocket 适配器连接 NapCat"
+    },
+    {
+      "id": 7,
+      "time": "2026-10-08T15:31:50.6513944+08:00",
+      "level": "info",
+      "message": "使用 SQLite 持久化存储引擎",
+      "attrs": [
+        {
+          "key": "Persistent.path",
+          "value": "./data/aniabot.db"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "time": "2026-10-08T15:31:50.6513944+08:00",
+      "level": "info",
+      "message": "已添加插件: ",
+      "attrs": [
+        {
+          "key": "name",
+          "value": "AI对话插件"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "time": "2026-10-08T15:31:50.6513944+08:00",
+      "level": "info",
+      "message": "已添加插件: ",
+      "attrs": [
+        {
+          "key": "name",
+          "value": "每日新闻插件"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "time": "2026-10-08T15:31:50.6513944+08:00",
+      "level": "info",
+      "message": "已添加插件: ",
+      "attrs": [
+        {
+          "key": "name",
+          "value": "复读机插件"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "time": "2026-10-08T15:31:50.6513944+08:00",
+      "level": "info",
+      "message": "已添加插件: ",
+      "attrs": [
+        {
+          "key": "name",
+          "value": "请求拦截插件"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "time": "2026-10-08T15:31:50.6513944+08:00",
+      "level": "info",
+      "message": "已添加插件: ",
+      "attrs": [
+        {
+          "key": "name",
+          "value": "日志打印插件"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "time": "2026-10-08T15:31:50.6169531+08:00",
+      "level": "info",
+      "message": "已添加插件: ",
+      "attrs": [
+        {
+          "key": "name",
+          "value": "系统插件"
+        }
+      ]
+    }
+  ]
+}

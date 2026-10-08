@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'docs/**'
+      - 'web/**'
       - '.github/workflows/docs.yaml'
   workflow_dispatch:
 
@@ -36,9 +37,11 @@ jobs:
         with:
           node-version: '20'
           cache: npm
-          cache-dependency-path: docs/package.json
+          cache-dependency-path: |
+            docs/package.json
+            web/package-lock.json
 
-      - name: Install dependencies
+      - name: Install docs dependencies
         working-directory: docs
         run: npm install
 
@@ -48,6 +51,15 @@ jobs:
       - name: Build VitePress docs
         working-directory: docs
         run: npm run docs:build
+
+      - name: Build web demo
+        working-directory: web
+        run: |
+          npm ci
+          npm run build:demo
+
+      - name: Merge demo into Pages artifact
+        run: cp -r web/dist-demo docs/.vitepress/dist/demo
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

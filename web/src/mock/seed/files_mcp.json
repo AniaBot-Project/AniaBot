@@ -1,0 +1,3 @@
+{
+  "content": "[\n  {\n    \"name\": \"fetch\",\n    \"transport\": \"stdio\",\n    \"command\": \"uvx\",\n    \"args\": [\n      \"mcp-server-fetch\"\n    ],\n    \"description\": \"抓取网页内容并转为 Markdown\"\n  },\n  {\n    \"name\": \"filesystem\",\n    \"transport\": \"stdio\",\n    \"command\": \"npx\",\n    \"args\": [\n      \"-y\",\n      \"@modelcontextprotocol/server-filesystem\",\n      \"./data\"\n    ],\n    \"description\": \"在受限目录内读写文件\"\n  }\n]"
+}

@@ -1,0 +1,1395 @@
+[
+  {
+    "key": "bot.admin_id",
+    "label": "管理员 ID",
+    "type": "string",
+    "group": "Bot 基础",
+    "help": "接收启动/异常通知的管理员 ID。QQ 为 qq:QQ号（如 qq:123456789）；其他平台为带平台前缀的 ID（如飞书 fs:ou_xxx、Telegram tg:123456、Discord dc:123456）"
+  },
+  {
+    "key": "bot.msg_event_timeout_sec",
+    "label": "消息处理超时(秒)",
+    "type": "int",
+    "group": "Bot 基础",
+    "help": "单条消息事件（如一次 AI 回复）的最大执行时长，超时强制中止；AI 执行复杂任务（多轮工具调用/子代理）被超时中断时调大，0 或负数回退默认 300 秒",
+    "default": 300
+  },
+  {
+    "key": "bot.admin_panel.enable",
+    "label": "启用面板",
+    "type": "bool",
+    "group": "Web 面板",
+    "help": "是否启用 Web 控制面板；关闭后可用环境变量 ANIA_BOT_ADMIN_PANEL_ENABLE=true 覆盖重新开启",
+    "default": true
+  },
+  {
+    "key": "bot.admin_panel.listen",
+    "label": "监听地址",
+    "type": "string",
+    "group": "Web 面板",
+    "help": "如 127.0.0.1:7700；改为 0.0.0.0:7700 可局域网访问（面板有密码保护）",
+    "default": "127.0.0.1:7700"
+  },
+  {
+    "key": "bot.store.cache.driver",
+    "label": "缓存驱动",
+    "type": "select",
+    "options": [
+      "memory",
+      "redis"
+    ],
+    "group": "缓存存储",
+    "help": "memory（进程内内存，重启清空）或 redis（重启日志不丢失，建议使用）",
+    "default": "memory"
+  },
+  {
+    "key": "bot.store.cache.redis.address",
+    "label": "Redis 地址",
+    "type": "string",
+    "group": "缓存存储",
+    "default": "localhost:6379"
+  },
+  {
+    "key": "bot.store.cache.redis.password",
+    "label": "Redis 密码",
+    "type": "password",
+    "group": "缓存存储",
+    "sensitive": true
+  },
+  {
+    "key": "bot.store.cache.redis.db",
+    "label": "Redis DB",
+    "type": "int",
+    "group": "缓存存储",
+    "default": 0
+  },
+  {
+    "key": "bot.update.source_dir",
+    "label": "源码目录",
+    "type": "string",
+    "group": "自动更新",
+    "help": "AniaBot 仓库的克隆路径（独立目录），自动更新在此拉取并编译；留空则禁用自动更新"
+  },
+  {
+    "key": "bot.update.git_url",
+    "label": "Git 地址",
+    "type": "string",
+    "group": "自动更新",
+    "help": "非空时更新前覆盖源码目录的 origin 地址"
+  },
+  {
+    "key": "bot.update.branch",
+    "label": "跟踪分支",
+    "type": "string",
+    "group": "自动更新",
+    "default": "main"
+  },
+  {
+    "key": "bot.balance.enable",
+    "label": "启用余额查询",
+    "type": "bool",
+    "group": "API 余额查询",
+    "help": "在面板概览页显示 AI API 余额；默认适配 DeepSeek 风格接口，其他厂商可按下方配置调整",
+    "default": false
+  },
+  {
+    "key": "bot.balance.cache_sec",
+    "label": "缓存时间(秒)",
+    "type": "int",
+    "group": "API 余额查询",
+    "help": "余额查询结果的缓存时长，避免频繁请求余额接口",
+    "default": 300
+  },
+  {
+    "key": "bot.balance.url",
+    "label": "请求地址",
+    "type": "string",
+    "group": "API 余额查询",
+    "help": "支持 ${base_url} ${api_key} ${model} 占位符（取自 AI 对话插件的 API 配置）",
+    "default": "${base_url}/user/balance"
+  },
+  {
+    "key": "bot.balance.method",
+    "label": "请求方法",
+    "type": "select",
+    "options": [
+      "GET",
+      "POST"
+    ],
+    "group": "API 余额查询",
+    "default": "GET"
+  },
+  {
+    "key": "bot.balance.headers",
+    "label": "请求头(JSON)",
+    "type": "text",
+    "group": "API 余额查询",
+    "help": "JSON 对象，值中支持 ${base_url} ${api_key} ${model} 占位符",
+    "default": "{\"Authorization\":\"Bearer ${api_key}\"}"
+  },
+  {
+    "key": "bot.balance.body",
+    "label": "请求体",
+    "type": "text",
+    "group": "API 余额查询",
+    "help": "可选，POST 请求时填写；支持 ${base_url} ${api_key} ${model} 占位符；留空则不发送请求体"
+  },
+  {
+    "key": "bot.balance.format",
+    "label": "显示模板",
+    "type": "string",
+    "group": "API 余额查询",
+    "help": "余额显示文本，{路径} 会被替换为响应 JSON 中对应 gjson 路径的值，如 ¥ {data.balances.0.total_balance}",
+    "default": "¥ {data.balances.0.total_balance}"
+  },
+  {
+    "key": "bot.marketplace.enable",
+    "label": "启用插件市场",
+    "type": "bool",
+    "group": "插件市场",
+    "help": "开启后可在面板「插件市场」页浏览、在线安装/卸载第三方插件（安装会重新编译并重启 Bot）；安装插件等于在本机执行插件代码，请仅安装信任来源的插件",
+    "default": false
+  },
+  {
+    "key": "bot.marketplace.repo",
+    "label": "插件仓库",
+    "type": "string",
+    "group": "插件市场",
+    "help": "GitHub 仓库 owner/repo，默认官方插件市场",
+    "default": "AniaBot-Project/AniaBot-Plugins"
+  },
+  {
+    "key": "bot.marketplace.branch",
+    "label": "仓库分支",
+    "type": "string",
+    "group": "插件市场",
+    "default": "main"
+  },
+  {
+    "key": "bot.marketplace.source_dir",
+    "label": "源码目录",
+    "type": "string",
+    "group": "插件市场",
+    "help": "AniaBot 源码克隆路径，用于编译插件；留空时回退使用「自动更新」的源码目录（bot.update.source_dir）"
+  },
+  {
+    "key": "bot.marketplace.plugin_dir",
+    "label": "插件持久目录",
+    "type": "string",
+    "group": "插件市场",
+    "help": "已安装插件的持久副本目录（建议放在 data 卷，容器重建后插件不丢）",
+    "default": "./data/plugins"
+  },
+  {
+    "key": "bot.marketplace.cache_dir",
+    "label": "索引缓存目录",
+    "type": "string",
+    "group": "插件市场",
+    "help": "插件市场索引/下载缓存的存放目录",
+    "default": "./data/marketplace"
+  },
+  {
+    "key": "bot.marketplace.oauth_client_id",
+    "label": "GitHub OAuth Client ID",
+    "type": "string",
+    "group": "插件市场",
+    "help": "在线登录用；默认使用 AniaBot 官方 OAuth App，开箱即用。如需独立配额，可在 GitHub 创建 OAuth App 并启用 Device flow 后覆盖为自己的 Client ID（可不填 Client Secret）",
+    "default": "Ov23li6fHYmQOGOmliT4"
+  },
+  {
+    "key": "bot.platform.discord.enable",
+    "label": "启用 Discord 平台",
+    "type": "bool",
+    "group": "平台适配器",
+    "help": "是否启用 Discord 平台；关闭后 Bot 不连接 Discord",
+    "default": false
+  },
+  {
+    "key": "bot.discord.token",
+    "label": "Bot Token",
+    "type": "password",
+    "group": "Discord 适配器",
+    "help": "Discord Developer Portal → Applications → Bot 页面的 Token（重置后旧 Token 立即失效）；必须在该页面开启 Message Content Intent，否则网关拒绝连接",
+    "sensitive": true
+  },
+  {
+    "key": "bot.discord.proxy",
+    "label": "HTTP/SOCKS5 代理",
+    "type": "string",
+    "group": "Discord 适配器",
+    "help": "格式 http://host:port 或 socks5://host:port；留空直连（REST 与 WebSocket 网关都走代理）"
+  },
+  {
+    "key": "bot.discord.member_events",
+    "label": "接收成员进出事件",
+    "type": "bool",
+    "group": "Discord 适配器",
+    "help": "开启后订阅 Server Members 特权意图（需在 Developer Portal 同步开启 Server Members Intent），成员进出以平台事件（discord.guild_member_add/remove）投递",
+    "default": false
+  },
+  {
+    "key": "bot.platform.feishu.enable",
+    "label": "启用飞书平台",
+    "type": "bool",
+    "group": "平台适配器",
+    "help": "是否启用飞书平台；关闭后 Bot 不连接飞书",
+    "default": false
+  },
+  {
+    "key": "bot.feishu.app_id",
+    "label": "App ID",
+    "type": "string",
+    "group": "飞书适配器",
+    "help": "飞书开放平台「凭证与基础信息」中的应用 App ID"
+  },
+  {
+    "key": "bot.feishu.app_secret",
+    "label": "App Secret",
+    "type": "password",
+    "group": "飞书适配器",
+    "help": "飞书开放平台「凭证与基础信息」中的应用 App Secret",
+    "sensitive": true
+  },
+  {
+    "key": "bot.feishu.mode",
+    "label": "事件订阅方式",
+    "type": "select",
+    "options": [
+      "ws",
+      "webhook"
+    ],
+    "group": "飞书适配器",
+    "help": "ws（WebSocket 长连接，推荐，无需公网地址）或 webhook（需公网可访问的 HTTPS 回调地址）",
+    "default": "ws"
+  },
+  {
+    "key": "bot.feishu.webhook.listen",
+    "label": "Webhook 监听地址",
+    "type": "string",
+    "group": "飞书适配器",
+    "help": "webhook 模式下的本地监听地址",
+    "default": "127.0.0.1:7777"
+  },
+  {
+    "key": "bot.feishu.webhook.path",
+    "label": "Webhook 回调路径",
+    "type": "string",
+    "group": "飞书适配器",
+    "help": "webhook 模式下的回调路径，飞书后台请求地址需填 https://<公网地址><此路径>",
+    "default": "/webhook/event"
+  },
+  {
+    "key": "bot.feishu.webhook.verification_token",
+    "label": "Verification Token",
+    "type": "string",
+    "group": "飞书适配器",
+    "help": "webhook 模式下在飞书「事件订阅」页配置；ws 模式无需填写"
+  },
+  {
+    "key": "bot.feishu.webhook.encrypt_key",
+    "label": "Encrypt Key",
+    "type": "password",
+    "group": "飞书适配器",
+    "help": "webhook 模式下可选的事件加密密钥；ws 模式无需填写",
+    "sensitive": true
+  },
+  {
+    "key": "bot.platform.luckylilia.enable",
+    "label": "启用 QQ(Luckylilia) 平台",
+    "type": "bool",
+    "group": "平台适配器",
+    "help": "是否启用 Luckylilia（LLBot，OneBot v11）平台；与 QQ(NapCat) 可并存，ID 前缀为 lil:",
+    "default": false
+  },
+  {
+    "key": "bot.luckylilia.mode",
+    "label": "连接模式",
+    "type": "select",
+    "options": [
+      "ws",
+      "http"
+    ],
+    "group": "Luckylilia 适配器",
+    "help": "ws（WebSocket，推荐）或 http（需同时配置下方「本地监听端口」和「LLBot HTTP 地址」），重启后生效",
+    "default": "ws"
+  },
+  {
+    "key": "bot.luckylilia.token",
+    "label": "Token",
+    "type": "password",
+    "group": "Luckylilia 适配器",
+    "help": "LLBot 侧设置了 token 时填写（Authorization: Bearer 方式携带）",
+    "sensitive": true
+  },
+  {
+    "key": "bot.luckylilia.ws.address",
+    "label": "WS 地址",
+    "type": "string",
+    "group": "Luckylilia 适配器",
+    "help": "LLBot WebSocket 正向服务地址",
+    "default": "ws://localhost:3001"
+  },
+  {
+    "key": "bot.luckylilia.ws.worker_count",
+    "label": "处理线程数",
+    "type": "int",
+    "group": "Luckylilia 适配器",
+    "help": "0 为自动调整",
+    "default": 0
+  },
+  {
+    "key": "bot.luckylilia.ws.worker_queue_size",
+    "label": "消息队列大小",
+    "type": "int",
+    "group": "Luckylilia 适配器",
+    "help": "超出限制的消息将被丢弃",
+    "default": 1024
+  },
+  {
+    "key": "bot.luckylilia.http.listen_port",
+    "label": "本地监听端口",
+    "type": "int",
+    "group": "Luckylilia 适配器",
+    "help": "HTTP 模式下 Bot 接收 LLBot 事件上报的本地端口；LLBot 侧需添加「HTTP 客户端」，上报地址填 http://<Bot 主机 IP>:<此端口>",
+    "default": 6689
+  },
+  {
+    "key": "bot.luckylilia.http.target_url",
+    "label": "LLBot HTTP 地址",
+    "type": "string",
+    "group": "Luckylilia 适配器",
+    "help": "HTTP 模式下 LLBot 的「HTTP 服务器」地址，Bot 通过它调用 LLBot 接口（发消息等）",
+    "default": "http://localhost:6690"
+  },
+  {
+    "key": "bot.platform.napcat.enable",
+    "label": "启用 QQ(NapCat) 平台",
+    "type": "bool",
+    "group": "平台适配器",
+    "help": "是否启用 QQ 平台；关闭后 Bot 将不连接 NapCat",
+    "default": true
+  },
+  {
+    "key": "bot.adapter.mode",
+    "label": "连接模式",
+    "type": "select",
+    "options": [
+      "ws",
+      "http"
+    ],
+    "group": "NapCat 适配器",
+    "help": "ws（WebSocket，推荐）或 http（需同时配置下方「本地监听端口」和「NapCat HTTP 地址」），重启后生效",
+    "default": "ws"
+  },
+  {
+    "key": "bot.adapter.token",
+    "label": "Token",
+    "type": "password",
+    "group": "NapCat 适配器",
+    "help": "NapCat 侧设置了 token 时填写",
+    "sensitive": true
+  },
+  {
+    "key": "bot.adapter.ws.address",
+    "label": "WS 地址",
+    "type": "string",
+    "group": "NapCat 适配器",
+    "help": "NapCat WebSocket Server 地址",
+    "default": "ws://localhost:4455"
+  },
+  {
+    "key": "bot.adapter.ws.worker_count",
+    "label": "处理线程数",
+    "type": "int",
+    "group": "NapCat 适配器",
+    "help": "0 为自动调整",
+    "default": 0
+  },
+  {
+    "key": "bot.adapter.ws.worker_queue_size",
+    "label": "消息队列大小",
+    "type": "int",
+    "group": "NapCat 适配器",
+    "help": "超出限制的消息将被丢弃",
+    "default": 1024
+  },
+  {
+    "key": "bot.adapter.http.listen_port",
+    "label": "本地监听端口",
+    "type": "int",
+    "group": "NapCat 适配器",
+    "help": "HTTP 模式下 Bot 接收 NapCat 事件上报的本地端口；NapCat 侧需添加「HTTP 客户端」，上报地址填 http://<Bot 主机 IP>:<此端口>",
+    "default": 6679
+  },
+  {
+    "key": "bot.adapter.http.target_url",
+    "label": "NapCat HTTP 地址",
+    "type": "string",
+    "group": "NapCat 适配器",
+    "help": "HTTP 模式下 NapCat 的「HTTP 服务器」地址，Bot 通过它调用 NapCat 接口（发消息等）",
+    "default": "http://localhost:6680"
+  },
+  {
+    "key": "bot.platform.qqofficial.enable",
+    "label": "启用 QQ 官方平台",
+    "type": "bool",
+    "group": "平台适配器",
+    "help": "是否启用 QQ 官方机器人平台（QQ 开放平台 API v2）；关闭后 Bot 不连接官方网关",
+    "default": false
+  },
+  {
+    "key": "bot.qqofficial.app_id",
+    "label": "AppID",
+    "type": "string",
+    "group": "QQ 官方适配器",
+    "help": "QQ 开放平台（q.qq.com）管理端「开发 → 开发设置」中的机器人 AppID"
+  },
+  {
+    "key": "bot.qqofficial.app_secret",
+    "label": "AppSecret",
+    "type": "password",
+    "group": "QQ 官方适配器",
+    "help": "机器人 AppSecret，用于换取 access_token（Token 鉴权已废弃，请勿填写旧 Token）",
+    "sensitive": true
+  },
+  {
+    "key": "bot.qqofficial.sandbox",
+    "label": "沙箱环境",
+    "type": "bool",
+    "group": "QQ 官方适配器",
+    "help": "开启后连接沙箱环境（sandbox.api.sgroup.qq.com），联调时使用；机器人未上架前只能连接沙箱",
+    "default": false
+  },
+  {
+    "key": "bot.qqofficial.api_base",
+    "label": "API 地址",
+    "type": "string",
+    "group": "QQ 官方适配器",
+    "help": "OpenAPI 地址，默认正式环境；沙箱开关优先于此配置",
+    "default": "https://api.sgroup.qq.com"
+  },
+  {
+    "key": "bot.qqofficial.markdown",
+    "label": "Markdown 渲染",
+    "type": "bool",
+    "group": "QQ 官方适配器",
+    "help": "开启后 AI 的文本回复以 msg_type=2 Markdown 消息发送（标题/加粗/列表等富文本渲染）；发送失败自动降级纯文本",
+    "default": false
+  },
+  {
+    "key": "bot.platform.telegram.enable",
+    "label": "启用 Telegram 平台",
+    "type": "bool",
+    "group": "平台适配器",
+    "help": "是否启用 Telegram 平台；关闭后 Bot 不连接 Telegram",
+    "default": false
+  },
+  {
+    "key": "bot.telegram.token",
+    "label": "Bot Token",
+    "type": "password",
+    "group": "Telegram 适配器",
+    "help": "向 @BotFather 创建机器人后获取的 Bot Token",
+    "sensitive": true
+  },
+  {
+    "key": "bot.telegram.api_base",
+    "label": "API Base URL",
+    "type": "string",
+    "group": "Telegram 适配器",
+    "help": "官方为 https://api.telegram.org；国内部署可填自建 Bot API 网关/反代地址",
+    "default": "https://api.telegram.org"
+  },
+  {
+    "key": "bot.telegram.proxy",
+    "label": "HTTP/SOCKS5 代理",
+    "type": "string",
+    "group": "Telegram 适配器",
+    "help": "格式 http://host:port 或 socks5://host:port；留空直连"
+  },
+  {
+    "key": "bot.telegram.polling.timeout",
+    "label": "长轮询超时（秒）",
+    "type": "int",
+    "group": "Telegram 适配器",
+    "help": "getUpdates 长轮询等待秒数，默认 30（建议 10-50）",
+    "default": 30
+  },
+  {
+    "key": "bot.telegram.parse_mode",
+    "label": "消息渲染模式",
+    "type": "select",
+    "options": [
+      "off",
+      "html",
+      "markdown",
+      "markdownv2"
+    ],
+    "group": "Telegram 适配器",
+    "help": "off=纯文本；html=推荐：AI markdown 转换为 Telegram HTML 渲染（标题/加粗/代码块/列表/链接/引用），任意输入都不会解析失败；markdown=旧版 Telegram Markdown 原生解析（仅需转义 _ * [ ]）；markdownv2=新版原生解析（转义严格，AI 输出极易解析失败）；原生模式解析失败自动降级纯文本。流式结束/发送时渲染",
+    "default": "html"
+  },
+  {
+    "key": "bot.platform.weixin.enable",
+    "label": "启用微信平台",
+    "type": "bool",
+    "group": "平台适配器",
+    "help": "是否启用微信（iLink bot）平台；首次启动时会在控制台展示扫码登录二维码",
+    "default": false
+  },
+  {
+    "key": "bot.weixin.token",
+    "label": "Bot Token",
+    "type": "password",
+    "group": "微信适配器",
+    "help": "扫码登录凭据由控制台登录后自动保存在状态目录，一般无需填写；手动置入则跳过扫码（优先于状态文件）",
+    "sensitive": true
+  },
+  {
+    "key": "bot.weixin.api_base",
+    "label": "API Base URL",
+    "type": "string",
+    "group": "微信适配器",
+    "help": "iLink Bot API 地址，默认官方地址；登录成功后会自动记录服务端下发的专属地址",
+    "default": "https://ilinkai.weixin.qq.com"
+  },
+  {
+    "key": "bot.weixin.cdn_base",
+    "label": "CDN Base URL",
+    "type": "string",
+    "group": "微信适配器",
+    "help": "微信媒体 CDN 地址（图片/文件上传下载）",
+    "default": "https://novac2c.cdn.weixin.qq.com/c2c"
+  },
+  {
+    "key": "bot.weixin.state_dir",
+    "label": "状态目录",
+    "type": "string",
+    "group": "微信适配器",
+    "help": "登录凭据与长轮询游标的保存目录（建议放在 data 卷，容器重建后不丢登录）",
+    "default": "./data/weixin"
+  },
+  {
+    "key": "bot.weixin.bot_type",
+    "label": "Bot 类型",
+    "type": "string",
+    "group": "微信适配器",
+    "help": "扫码登录的 ilink bot 类型，默认 3（官方微信 bot）",
+    "default": "3"
+  },
+  {
+    "key": "plugin.dailynews.enable",
+    "label": "启用每日新闻",
+    "type": "bool",
+    "group": "每日新闻插件",
+    "help": "关闭后停止定时播报并忽略 /news 命令",
+    "default": true
+  },
+  {
+    "key": "plugin.dailynews.api",
+    "label": "API 端点",
+    "type": "string",
+    "group": "每日新闻插件",
+    "default": "https://60s.viki.moe/v2/60s?encoding=image-proxy"
+  },
+  {
+    "key": "plugin.dailynews.cron",
+    "label": "Cron 表达式",
+    "type": "string",
+    "group": "每日新闻插件",
+    "help": "如 0 18 * * * 表示每天 18 点",
+    "default": "0 18 * * *"
+  },
+  {
+    "key": "plugin.dailynews.groups",
+    "label": "播报群 ID 列表",
+    "type": "strings",
+    "group": "每日新闻插件",
+    "help": "每行一个群 ID（QQ 为 qq:群号，其他平台为带前缀的群 ID）",
+    "default": [
+      "qq:123456",
+      "qq:7891011"
+    ]
+  },
+  {
+    "key": "plugin.interceptor.enable",
+    "label": "启用请求拦截",
+    "type": "bool",
+    "group": "请求拦截插件",
+    "help": "开启后按名单模式放行或屏蔽群聊/好友的 AI 请求",
+    "default": false
+  },
+  {
+    "key": "plugin.interceptor.mode",
+    "label": "名单模式",
+    "type": "select",
+    "options": [
+      "blacklist",
+      "whitelist"
+    ],
+    "group": "请求拦截插件",
+    "help": "blacklist=名单内的群/用户被屏蔽；whitelist=仅名单内的群放行，放行的群对全部成员开放（私聊仍按用户名单）",
+    "default": "blacklist"
+  },
+  {
+    "key": "plugin.interceptor.platforms",
+    "label": "可用平台",
+    "type": "multiselect",
+    "options": [
+      "qq",
+      "qqofficial",
+      "telegram",
+      "feishu",
+      "discord",
+      "weixin"
+    ],
+    "group": "请求拦截插件",
+    "help": "仅勾选平台的消息进入名单判定，未勾选的平台直接拦截（不触发 AI）。默认全选（与旧行为一致）；单独屏蔽某平台时取消勾选它",
+    "default": [
+      "qq",
+      "qqofficial",
+      "telegram",
+      "feishu",
+      "discord",
+      "weixin"
+    ]
+  },
+  {
+    "key": "plugin.interceptor.groups",
+    "label": "群 ID 名单",
+    "type": "strings",
+    "group": "请求拦截插件",
+    "help": "每行一个群 ID（QQ 为 qq:群号，其他平台为带前缀的群 ID）"
+  },
+  {
+    "key": "plugin.interceptor.friends",
+    "label": "用户 ID 名单",
+    "type": "strings",
+    "group": "请求拦截插件",
+    "help": "每行一个用户 ID（QQ 为 qq:QQ号，其他平台为带前缀的用户 ID）。黑名单模式下对私聊及群聊发送者均生效；白名单模式下仅作用于私聊（放行的群对全部成员开放）"
+  },
+  {
+    "key": "plugin.interceptor.group_users",
+    "label": "群内屏蔽成员",
+    "type": "strings",
+    "group": "请求拦截插件",
+    "help": "每行一条 群ID:用户ID（如 tg:-100123:tg:98765、qq:123:qq:456），仅在该群内屏蔽该成员，私聊不受影响；不区分名单模式，优先级最高"
+  },
+  {
+    "key": "plugin.ai_chat_bot.base_url",
+    "label": "Base URL",
+    "type": "string",
+    "group": "AI 对话 · 模型",
+    "help": "API 地址；anthropic 格式填 https://api.anthropic.com，其余填 OpenAI 兼容地址",
+    "default": "https://api.deepseek.com"
+  },
+  {
+    "key": "plugin.ai_chat_bot.api_key",
+    "label": "API Key",
+    "type": "password",
+    "group": "AI 对话 · 模型",
+    "sensitive": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.model",
+    "label": "模型",
+    "type": "string",
+    "group": "AI 对话 · 模型",
+    "default": "deepseek-chat"
+  },
+  {
+    "key": "plugin.ai_chat_bot.api_format",
+    "label": "API 格式",
+    "type": "select",
+    "options": [
+      "chat_completions",
+      "responses",
+      "anthropic"
+    ],
+    "group": "AI 对话 · 模型",
+    "help": "chat_completions：OpenAI 兼容（DeepSeek 等，默认）；responses：OpenAI Responses API；anthropic：Anthropic Messages API（Claude）",
+    "default": "chat_completions"
+  },
+  {
+    "key": "plugin.ai_chat_bot.multimodal",
+    "label": "多模态",
+    "type": "bool",
+    "group": "AI 对话 · 模型",
+    "help": "主模型是否支持图片输入",
+    "default": false
+  },
+  {
+    "key": "plugin.ai_chat_bot.rate_limit",
+    "label": "并发限制",
+    "type": "int",
+    "group": "AI 对话 · 模型",
+    "help": "同时处理的 AI 请求数上限，超出后直接拒绝",
+    "default": 2
+  },
+  {
+    "key": "plugin.ai_chat_bot.max_context_tokens",
+    "label": "上下文 Token 上限",
+    "type": "int",
+    "group": "AI 对话 · 模型",
+    "default": 128000
+  },
+  {
+    "key": "plugin.ai_chat_bot.max_iterations",
+    "label": "最大工具调用轮数",
+    "type": "int",
+    "group": "AI 对话 · 模型",
+    "help": "单次回复中 AI 最多连续调用工具的轮数，超出后强制结束",
+    "default": 100
+  },
+  {
+    "key": "plugin.ai_chat_bot.max_token",
+    "label": "最大输出 Token",
+    "type": "int",
+    "group": "AI 对话 · 模型",
+    "help": "留空则不传该参数，使用模型 API 最大输出上限（anthropic 格式必填，留空时按 8192 下发）；已有值可清空保存恢复为不传",
+    "optional": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.temperature",
+    "label": "Temperature",
+    "type": "float",
+    "group": "AI 对话 · 模型",
+    "help": "留空则不传该参数，使用模型 API 默认值；已有值可清空保存恢复为不传",
+    "optional": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.top_p",
+    "label": "Top P",
+    "type": "float",
+    "group": "AI 对话 · 模型",
+    "help": "留空则不传该参数，使用模型 API 默认值；已有值可清空保存恢复为不传",
+    "optional": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.top_k",
+    "label": "Top K",
+    "type": "int",
+    "group": "AI 对话 · 模型",
+    "help": "留空则不传该参数，使用模型 API 默认值；已有值可清空保存恢复为不传",
+    "optional": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.headers",
+    "label": "自定义请求头",
+    "type": "strings",
+    "group": "AI 对话 · 模型",
+    "help": "附加到全部 LLM 请求（主对话/子代理/定时任务/压缩器/备用识图/备用模型），用于网关鉴权、路由标记等；每行一个，格式 Name: Value 或 Name=Value，同名覆盖默认头（含 User-Agent）；非法行跳过并记录日志"
+  },
+  {
+    "key": "plugin.ai_chat_bot.prompt",
+    "label": "系统提示词",
+    "type": "text",
+    "group": "AI 对话 · 模型",
+    "default": "你是一个运行在即时通讯平台上的 AniaBot 助手，在群聊和私聊中帮用户解决实际问题。回答要准确、简洁、自然，不堆砌术语，不要长篇大论，也不要复述工具说明。只有当前问题确实需要查证、补上下文、看图、操作或调用能力时才使用工具；普通闲聊不要频繁调用。\n\n## 一般处理流程\n1. 先理解用户意图。上下文不清、指代不明或涉及过去的事时，先调用历史消息工具（qq_get_msg_history 等，按当前平台实际注入的名称）查看最近消息，可用 user_id 参数只看某个群成员的发言，再用 memory_search / kb_search 找已有背景；仍不足再问用户。\n2. 按“最小必要”原则选择工具：能直接回答的不查，能读不写，能一次完成的不反复调用。\n3. 工具结果不等于最终回复。拿到结果后提炼成用户能看懂的回答，不要原样堆工具输出。\n4. 工具失败时先检查参数和说法，换一种表达重试一次；仍失败就如实说明原因和建议，不要假装成功。\n5. 用户意图不明确时，先问一句简短问题，不要擅自执行删除、修改、重启等有副作用操作。\n6. 只使用本次会话实际注册的工具，不要编造不存在的工具；不要把 API Key、数据库、私密文件等敏感信息泄露给用户。\n\n## 工具场景选择\n- time：问当前时间、日期、星期，或回答需要以当前时间为准的问题。\n- 历史消息工具（qq_get_msg_history 等，按当前平台实际注入的名称）：问题依赖前文、群聊上下文不完整、用户提到刚才说过或引用过，需要看更早消息时；user_id 参数可只看某个群成员的发言。\n- load_images：消息中的图片以 [图片 <hash> url:<url>] 标识（当前消息、历史消息记录、合并转发里都有）；需要看图时用 hashes 参数传入要查看的图片哈希，只加载需要的图片，不要一次性全部加载。\n- get_private_file_url：私聊收到文件但消息里没有下载链接，需要读取或处理该文件时。\n- webSearch：查最新资讯、不确定的事实、外部资料或找资源链接时。\n- webExplore：已有明确 URL，需要打开网页读取正文/详情时；搜索信息不足时用搜索结果里的链接进一步确认。\n- memory_search：涉及用户以前说过的事、偏好、本群或私聊的约定时，先检索记忆。\n- memory_save：用户透露了值得长期记住的称呼、偏好、重要事实，或群里形成约定时；保存成完整自洽的一句话事实。\n- memory_forget：用户明确要求忘记，或记忆明显错误或过时。\n- kb_search：用户问知识库/资料库内容，或问题可能已有存档资料时。\n- kb_add：用户明确要求保存教程、文章、资料，或给出了值得长期归档的完整知识内容时。\n- skill_read：当前任务匹配 available_skills 中的技能时，先读取完整指令再执行。\n- skill_reload：通过 bash 等工具直接改过本地 skill 文件后刷新缓存。\n- bash：需要在宿主机执行命令、运行脚本、检查或操作文件时（未注册表示未启用）。\n- read_file：需要查看宿主机某个文本文件/代码文件内容时，配合 offset/limit 分段读大文件（未注册表示未启用）。\n- write_file：需要新建文件或整体重写文件内容时（修改已有文件优先 edit_file）；内容较长时分段写入：先写开头一段，再用 append=true 逐段追加，避免单次输出过长被截断；写完不必再读回全文（未注册表示未启用）。\n- edit_file：需要对已有文件做小范围精确修改时；old_string 必须与文件内容逐字符一致且唯一，改前先 read_file 确认原文，改完看替换结果反馈确认生效（未注册表示未启用）。\n- glob：按文件名模式找文件（支持 ** 跨目录），如 **/*.go（未注册表示未启用）。\n- grep：按正则在文件内容里搜索（如找函数定义、引用位置），配合 include 过滤文件类型（未注册表示未启用）。\n- 编码任务流程：glob/grep/read_file 定位 → edit_file/write_file 修改 → bash 编译/测试验证，根据报错继续修复，直到通过再向用户汇报。\n- file：用户明确要求读取宿主机文件并发送时（未注册表示未启用）。\n- local_image：用户明确要求查看宿主机某张本地图片并给出路径时（未注册表示未启用）。\n- screenshot / mouse_click / mousemove / mouse_scroll / keyboard_type / keyboard_press / active_window / list_windows：用户明确要求查看或操作宿主机屏幕/界面时；先 screenshot 看到画面，再按图中坐标操作，操作后可再次 screenshot 确认效果（未注册表示未启用）。\n- clock_create/list/update/delete/log：用户要求定时提醒、周期任务、管理任务或查看执行记录时。\n- subagent_run/list/cancel：独立、耗时、多步骤且不依赖当前上下文的子任务（如深度调研、多轮搜索总结）适合委派子代理；简单问题不要委派。\n- team_run/create/list/delete：需要多视角并行处理、交叉验证或复杂分工时。\n- todo_write：需要 3 步以上的复杂任务开始时建立任务清单，逐项推进并及时更新状态（未注册表示未启用）。\n- config_get/config_set：仅当用户明确要求查看或修改 Bot 框架配置时；修改操作需要管理员审批（系统会私聊通知管理员确认），审批通过后才会写入；修改后提醒用户重启才能生效，重启需由管理员发送 /reboot 命令（普通用户无权限），你不要自己尝试重启。\n- config_file_get/config_file_set：查看或修改扩展配置（MCP 服务器、Prompt 覆盖、AI 钩子、自定义命令的 JSON 文件）时；config_file_set 同样需要管理员审批；hooks/commands/prompt 保存后数秒生效，mcp 重启后生效。\n- mcp_list/add/remove/reconnect：用户明确要求管理 MCP 服务器时。\n- skill_list/install/remove：用户明确要求查看、安装或卸载技能时。\n- MCP 懒加载工具：先 mcp_discover_<服务器> 看工具，再 mcp_load_<服务器> 加载需要的工具，最后调用具体工具。\n\n## 遇到这些情况怎么办\n- 普通闲聊或你已有可靠知识：直接回答，不调用工具。\n- 信息不足：先历史消息工具 / memory_search / kb_search 补齐；仍不足再问用户。\n- 需要最新资料或外部事实：先 webSearch，搜索结果不够再用 webExplore 打开具体链接，交叉确认后再回答。\n- 图片或文件：只有必须看图才 load_images，并通过 hashes 传入图片哈希（历史消息/合并转发里的图片哈希同样可加载）；私聊文件无链接用 get_private_file_url；本地文件/图片只在用户明确要求时用 file / local_image。\n- 定时任务：先确认 cron 含义、目标、内容、单次或重复，再 clock_create；完成后简短确认已生效。\n- 长期记忆/知识库：重要且明确的用户偏好或约定才保存；问过去的事先检索；删除必须用户明确要求。\n- 复杂任务：适合后台执行的用 subagent_run，完成后结果会回到当前会话；需要多视角/交叉验证时用 team_run。\n- 计划模式：用户开启 /plan 后只做分析与规划并输出实施计划，不调用会产生副作用的工具（修改文件、运行命令、改配置等会被系统阻止）；等用户退出计划模式再执行。\n- 执行命令：先确认命令含义和影响，不做删除数据、格式化、重启系统等危险操作。\n- 工具报错：调整参数或换说法重试一次；持续失败就如实回复，并说明可能的解决办法（如未启用、需要 token、参数不正确）。"
+  },
+  {
+    "key": "plugin.ai_chat_bot.thinking.enable",
+    "label": "启用深度思考",
+    "type": "bool",
+    "group": "AI 对话 · 模型",
+    "default": false
+  },
+  {
+    "key": "plugin.ai_chat_bot.thinking.mode",
+    "label": "思考模式",
+    "type": "select",
+    "options": [
+      "none",
+      "low",
+      "medium",
+      "high",
+      "auto"
+    ],
+    "group": "AI 对话 · 模型",
+    "default": "auto"
+  },
+  {
+    "key": "plugin.ai_chat_bot.search.token",
+    "label": "Jina AI Token",
+    "type": "password",
+    "group": "AI 对话 · 模型",
+    "help": "网页浏览与搜索功能",
+    "sensitive": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.prompt_cache.enable",
+    "label": "启用 Prompt 缓存",
+    "type": "bool",
+    "group": "AI 对话 · 模型",
+    "help": "anthropic 格式下为 system 与对话历史设置 cache_control 断点（需模型与上游支持）；chat_completions / responses 为自动前缀缓存，不受此开关影响",
+    "default": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.prompt_cache.ttl",
+    "label": "缓存保留时长",
+    "type": "select",
+    "options": [
+      "5m",
+      "1h"
+    ],
+    "group": "AI 对话 · 模型",
+    "help": "仅 anthropic 格式有效：5m 写入成本 1.25x、1h 为 2x，读取均为 0.1x；会话间隔短留 5m，长时间闲置用 1h",
+    "default": "5m"
+  },
+  {
+    "key": "plugin.ai_chat_bot.retry.max_attempts",
+    "label": "最大尝试次数",
+    "type": "int",
+    "group": "AI 对话 · 模型",
+    "help": "0 或 1 表示不重试；429/5xx/网络错误时指数退避重试（SDK 已内置 429/5xx 重试，此值为应用层补充）",
+    "default": 3
+  },
+  {
+    "key": "plugin.ai_chat_bot.retry.base_delay_sec",
+    "label": "退避基准(秒)",
+    "type": "int",
+    "group": "AI 对话 · 模型",
+    "help": "每次重试等待 基准×2^n 秒（带随机抖动）",
+    "default": 2
+  },
+  {
+    "key": "plugin.ai_chat_bot.fallback.base_url",
+    "label": "备用模型 Base URL",
+    "type": "string",
+    "group": "AI 对话 · 备用模型",
+    "help": "留空使用主模型配置"
+  },
+  {
+    "key": "plugin.ai_chat_bot.fallback.api_key",
+    "label": "备用模型 API Key",
+    "type": "password",
+    "group": "AI 对话 · 备用模型",
+    "help": "留空使用主模型配置",
+    "sensitive": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.fallback.model",
+    "label": "备用模型",
+    "type": "string",
+    "group": "AI 对话 · 备用模型",
+    "help": "留空表示不启用备用模型；主模型重试耗尽后自动切换重试一次（仅主对话与上下文压缩）"
+  },
+  {
+    "key": "plugin.ai_chat_bot.fallback.api_format",
+    "label": "备用模型 API 格式",
+    "type": "select",
+    "options": [
+      "chat_completions",
+      "responses",
+      "anthropic"
+    ],
+    "group": "AI 对话 · 备用模型",
+    "help": "留空跟随主模型格式"
+  },
+  {
+    "key": "plugin.ai_chat_bot.compressor.base_url",
+    "label": "压缩器 Base URL",
+    "type": "string",
+    "group": "AI 对话 · 备用模型",
+    "help": "留空使用主模型配置"
+  },
+  {
+    "key": "plugin.ai_chat_bot.compressor.api_key",
+    "label": "压缩器 API Key",
+    "type": "password",
+    "group": "AI 对话 · 备用模型",
+    "help": "留空使用主模型配置",
+    "sensitive": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.compressor.model",
+    "label": "压缩器模型",
+    "type": "string",
+    "group": "AI 对话 · 备用模型",
+    "help": "留空使用主模型；建议填更便宜的模型降低历史压缩成本"
+  },
+  {
+    "key": "plugin.ai_chat_bot.compressor.api_format",
+    "label": "压缩器 API 格式",
+    "type": "select",
+    "options": [
+      "chat_completions",
+      "responses",
+      "anthropic"
+    ],
+    "group": "AI 对话 · 备用模型",
+    "help": "留空跟随主模型格式"
+  },
+  {
+    "key": "plugin.ai_chat_bot.skills_dir",
+    "label": "Skills 目录",
+    "type": "string",
+    "group": "AI 对话 · 工具",
+    "default": "./skills"
+  },
+  {
+    "key": "plugin.ai_chat_bot.skills",
+    "label": "Skills 白名单",
+    "type": "strings",
+    "group": "AI 对话 · 工具",
+    "help": "为空则加载全部，每行一个"
+  },
+  {
+    "key": "plugin.ai_chat_bot.bash.enable",
+    "label": "启用 Bash 工具",
+    "type": "bool",
+    "group": "AI 对话 · 工具",
+    "help": "直接在宿主机执行 shell 命令，注意安全风险",
+    "default": false
+  },
+  {
+    "key": "plugin.ai_chat_bot.bash.shell",
+    "label": "Shell 路径",
+    "type": "string",
+    "group": "AI 对话 · 工具",
+    "help": "留空使用系统默认（Linux/macOS 为 sh，Windows 为 cmd），可填 /bin/bash、/bin/ash 等"
+  },
+  {
+    "key": "plugin.ai_chat_bot.bash.env",
+    "label": "环境变量",
+    "type": "strings",
+    "group": "AI 对话 · 工具",
+    "help": "KEY=VALUE，每行一个"
+  },
+  {
+    "key": "plugin.ai_chat_bot.bash.whitelist",
+    "label": "命令白名单(正则)",
+    "type": "strings",
+    "group": "AI 对话 · 工具",
+    "help": "非空时仅允许匹配的命令，每行一个"
+  },
+  {
+    "key": "plugin.ai_chat_bot.bash.blacklist",
+    "label": "命令黑名单(正则)",
+    "type": "strings",
+    "group": "AI 对话 · 工具",
+    "help": "匹配的命令被禁止，每行一个",
+    "default": [
+      "config(\\.dev)?\\.(yaml|yml|json)",
+      "^mkfs",
+      "^shutdown",
+      "^reboot"
+    ]
+  },
+  {
+    "key": "plugin.ai_chat_bot.bash.working_dir",
+    "label": "工作目录",
+    "type": "string",
+    "group": "AI 对话 · 工具",
+    "help": "bash 命令的起始执行目录；「持久化工作目录」关闭时每次命令都从该目录开始"
+  },
+  {
+    "key": "plugin.ai_chat_bot.bash.persist_cwd",
+    "label": "持久化工作目录",
+    "type": "bool",
+    "group": "AI 对话 · 工具",
+    "help": "开启后命令内 cd 会延续到后续调用，适合在同一项目目录内连续操作；关闭时每次都回到「工作目录」重新开始。注意：该目录在所有群聊/私聊会话之间共享",
+    "default": false
+  },
+  {
+    "key": "plugin.ai_chat_bot.bash.timeout_sec",
+    "label": "命令超时(秒)",
+    "type": "int",
+    "group": "AI 对话 · 工具",
+    "help": "单条命令的最长执行时间，超时会被终止并提示；0 表示使用默认值 300",
+    "default": 300
+  },
+  {
+    "key": "plugin.ai_chat_bot.bash.max_output",
+    "label": "输出保留字符数",
+    "type": "int",
+    "group": "AI 对话 · 工具",
+    "help": "命令输出超出时保留头尾、隐藏中段（编译报错等长输出头部最关键）；0 表示使用默认值 30000",
+    "default": 30000
+  },
+  {
+    "key": "plugin.ai_chat_bot.file.enable",
+    "label": "启用文件发送工具",
+    "type": "bool",
+    "group": "AI 对话 · 工具",
+    "help": "可读取宿主机任意文件并发送给用户，默认关闭",
+    "default": false
+  },
+  {
+    "key": "plugin.ai_chat_bot.local_image.enable",
+    "label": "启用本地图片工具",
+    "type": "bool",
+    "group": "AI 对话 · 工具",
+    "help": "可读取宿主机本地图片，默认关闭",
+    "default": false
+  },
+  {
+    "key": "plugin.ai_chat_bot.file_tools.enable",
+    "label": "启用文件读写工具",
+    "type": "bool",
+    "group": "AI 对话 · 工具",
+    "help": "read_file / write_file / edit_file / glob / grep 五个工具，AI 可直接读取、编辑宿主机的代码与文本文件，注意安全风险，默认关闭",
+    "default": false
+  },
+  {
+    "key": "plugin.ai_chat_bot.file_tools.root",
+    "label": "工作根目录",
+    "type": "string",
+    "group": "AI 对话 · 工具",
+    "help": "非空时工具的相对路径基于该目录解析，且所有路径必须位于该目录内；留空不设访问边界"
+  },
+  {
+    "key": "plugin.ai_chat_bot.computer_use.enable",
+    "label": "启用电脑操作工具",
+    "type": "bool",
+    "group": "AI 对话 · 工具",
+    "help": "允许 AI 截图查看宿主机屏幕并控制鼠标键盘（仅 Windows）：可把 mouse_click 等加入「工具审批」的工具列表，实现每次操作人工确认；默认关闭",
+    "default": false
+  },
+  {
+    "key": "plugin.ai_chat_bot.computer_use.max_width",
+    "label": "截图最大宽度(像素)",
+    "type": "int",
+    "group": "AI 对话 · 工具",
+    "help": "超出时等比缩小截图以节省 token，0 表示不缩放",
+    "default": 1280
+  },
+  {
+    "key": "plugin.ai_chat_bot.config_tool.enable",
+    "label": "启用配置管理工具",
+    "type": "bool",
+    "group": "AI 对话 · 工具",
+    "help": "允许 AI 查看与修改框架配置及扩展配置（MCP 服务器/Prompt 覆盖/AI 钩子/自定义命令等 JSON 文件）：config_get/config_set/config_file_get/config_file_set，敏感字段对 AI 掩码，修改需管理员审批，默认关闭",
+    "default": false
+  },
+  {
+    "key": "plugin.ai_chat_bot.skill_tool.enable",
+    "label": "启用 Skill 管理工具",
+    "type": "bool",
+    "group": "AI 对话 · 工具",
+    "help": "允许 AI 安装/卸载/查看技能（skill_list/skill_install/skill_remove）：AI 可先用 webSearch/webExplore 上网搜索技能资源，再从 zip 链接或 GitHub 仓库下载安装，也可直接撰写 SKILL.md 内容创建；安装后热重载立即生效，默认关闭",
+    "default": false
+  },
+  {
+    "key": "plugin.ai_chat_bot.todo.enable",
+    "label": "启用任务清单",
+    "type": "bool",
+    "group": "AI 对话 · 工具",
+    "help": "启用后 AI 可用 todo_write 维护当前会话的任务清单，复杂多步任务更有条理",
+    "default": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.mcp.lazy_load",
+    "label": "MCP 工具懒加载",
+    "type": "bool",
+    "group": "AI 对话 · 工具",
+    "help": "开启后 MCP 工具按需发现/加载（mcp_discover/mcp_load），工具定义不进初始上下文、节省 token；但会话内动态加载会改变 tools 列表，可能降低上游 prompt 缓存命中率。关闭后启动时全量注册所有 MCP 工具（工具列表恒定、缓存友好，但工具较多时上下文开销大）",
+    "default": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.mcp_tool.enable",
+    "label": "启用 MCP 管理工具",
+    "type": "bool",
+    "group": "AI 对话 · 工具",
+    "help": "允许 AI 添加/删除/重连/查看 MCP 服务器（mcp_list/mcp_add/mcp_remove/mcp_reconnect）：支持 stdio 命令与 streamable/sse HTTP 端点，配置写入 files.mcp_json 持久化并即时生效，默认关闭",
+    "default": false
+  },
+  {
+    "key": "plugin.ai_chat_bot.ocr.enable",
+    "label": "启用备用识图模型",
+    "type": "bool",
+    "group": "AI 对话 · 备用识图模型",
+    "help": "主模型不支持多模态时将图片转文字",
+    "default": false
+  },
+  {
+    "key": "plugin.ai_chat_bot.ocr.base_url",
+    "label": "Base URL",
+    "type": "string",
+    "group": "AI 对话 · 备用识图模型",
+    "default": "https://api.siliconflow.cn/v1"
+  },
+  {
+    "key": "plugin.ai_chat_bot.ocr.api_key",
+    "label": "API Key",
+    "type": "password",
+    "group": "AI 对话 · 备用识图模型",
+    "sensitive": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.ocr.model",
+    "label": "模型",
+    "type": "string",
+    "group": "AI 对话 · 备用识图模型",
+    "default": "Qwen/Qwen3-VL-8B-Instruct"
+  },
+  {
+    "key": "plugin.ai_chat_bot.ocr.max_token",
+    "label": "最大输出 Token",
+    "type": "int",
+    "group": "AI 对话 · 备用识图模型",
+    "default": 600
+  },
+  {
+    "key": "plugin.ai_chat_bot.ocr.temperature",
+    "label": "Temperature",
+    "type": "float",
+    "group": "AI 对话 · 备用识图模型",
+    "help": "留空则不传该参数，使用模型 API 默认值；已有值可清空保存恢复为不传",
+    "optional": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.ocr.top_p",
+    "label": "Top P",
+    "type": "float",
+    "group": "AI 对话 · 备用识图模型",
+    "help": "留空则不传该参数，使用模型 API 默认值；已有值可清空保存恢复为不传",
+    "optional": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.ocr.top_k",
+    "label": "Top K",
+    "type": "int",
+    "group": "AI 对话 · 备用识图模型",
+    "help": "留空则不传该参数，使用模型 API 默认值；已有值可清空保存恢复为不传",
+    "optional": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.ocr.prompt",
+    "label": "识图提示词",
+    "type": "text",
+    "group": "AI 对话 · 备用识图模型",
+    "default": "你负责将看到的图片用markdown格式描述出来，不要有无关的其他对话"
+  },
+  {
+    "key": "plugin.ai_chat_bot.clock.enable",
+    "label": "启用 AI 定时任务",
+    "type": "bool",
+    "group": "AI 对话 · 定时任务",
+    "default": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.clock.default_timeout_sec",
+    "label": "默认超时(秒)",
+    "type": "int",
+    "group": "AI 对话 · 定时任务",
+    "default": 120
+  },
+  {
+    "key": "plugin.ai_chat_bot.clock.max_log_entries",
+    "label": "日志保留条数",
+    "type": "int",
+    "group": "AI 对话 · 定时任务",
+    "default": 20000
+  },
+  {
+    "key": "plugin.ai_chat_bot.memory.enable",
+    "label": "启用长期记忆",
+    "type": "bool",
+    "group": "AI 对话 · 记忆",
+    "default": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.memory.max_entries",
+    "label": "单会话记忆上限",
+    "type": "int",
+    "group": "AI 对话 · 记忆",
+    "default": 200
+  },
+  {
+    "key": "plugin.ai_chat_bot.memory.auto_inject",
+    "label": "主动注入相关记忆",
+    "type": "bool",
+    "group": "AI 对话 · 记忆",
+    "help": "每轮按用户消息检索相关记忆并追加到用户消息前（system 保持不变，不影响上游前缀缓存；用户消息不落盘，历史无污染）。启用向量检索后按语义+关键词混合检索，否则纯关键词",
+    "default": false
+  },
+  {
+    "key": "plugin.ai_chat_bot.memory.inject_max",
+    "label": "每轮注入条数上限",
+    "type": "int",
+    "group": "AI 对话 · 记忆",
+    "help": "主动注入的最大记忆条数，0 表示不限制",
+    "default": 3
+  },
+  {
+    "key": "plugin.ai_chat_bot.kb.enable",
+    "label": "启用知识库",
+    "type": "bool",
+    "group": "AI 对话 · 知识库",
+    "default": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.kb.max_docs",
+    "label": "单作用域文档上限",
+    "type": "int",
+    "group": "AI 对话 · 知识库",
+    "default": 500
+  },
+  {
+    "key": "plugin.ai_chat_bot.kb.auto_inject",
+    "label": "自动注入上下文",
+    "type": "bool",
+    "group": "AI 对话 · 知识库",
+    "help": "每次对话前自动检索相关文档并注入上下文。启用向量检索后按语义+关键词混合检索（每轮一次 embed，带缓存），未启用则纯关键词",
+    "default": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.kb.embedding.enable",
+    "label": "启用向量检索",
+    "type": "bool",
+    "group": "AI 对话 · 知识库",
+    "help": "入库时计算语义向量，检索与自动注入按语义+关键词混合打分（自动注入每轮一次 embed，带缓存）；启动时自动回填存量数据的向量。需要 embedding 服务支持，provider 不支持时自动退回纯关键词",
+    "default": false
+  },
+  {
+    "key": "plugin.ai_chat_bot.kb.embedding.base_url",
+    "label": "Embedding Base URL",
+    "type": "string",
+    "group": "AI 对话 · 知识库",
+    "help": "留空使用主模型的 Base URL；如主模型无 embedding 接口（如 DeepSeek），可填 https://api.jina.ai/v1 或其它 OpenAI 兼容服务"
+  },
+  {
+    "key": "plugin.ai_chat_bot.kb.embedding.api_key",
+    "label": "Embedding API Key",
+    "type": "password",
+    "group": "AI 对话 · 知识库",
+    "help": "留空使用主模型的 API Key（用 Jina 时可填 Jina AI Token）",
+    "sensitive": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.kb.embedding.model",
+    "label": "Embedding 模型",
+    "type": "string",
+    "group": "AI 对话 · 知识库",
+    "help": "如 jina-embeddings-v3、text-embedding-3-small、BAAI/bge-large-zh-v1.5",
+    "default": "jina-embeddings-v3"
+  },
+  {
+    "key": "plugin.ai_chat_bot.query_log.enable",
+    "label": "启用 Query 日志",
+    "type": "bool",
+    "group": "AI 对话 · 查询日志",
+    "help": "在面板记录每次 AI 回复的完整执行过程（耗时、token、工具调用详情）",
+    "default": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.query_log.max_entries",
+    "label": "日志保留条数",
+    "type": "int",
+    "group": "AI 对话 · 查询日志",
+    "default": 20000
+  },
+  {
+    "key": "plugin.ai_chat_bot.query_log.max_tool_records",
+    "label": "单条日志工具明细上限",
+    "type": "int",
+    "group": "AI 对话 · 查询日志",
+    "help": "每条 Query 日志最多保留的工具调用明细条数，超出部分仅保留总数不存明细；0 表示不限制（实际条数受最大工具轮数约束）",
+    "default": 200
+  },
+  {
+    "key": "plugin.ai_chat_bot.query_log.max_result_runes",
+    "label": "日志中工具结果截断上限(字符)",
+    "type": "int",
+    "group": "AI 对话 · 查询日志",
+    "help": "仅控制工具执行结果写入 Query 日志时的保留长度，不影响 AI 实际收到的完整输出；0 表示不限制。仅此字段限长（网页抓取、命令执行等外部输出可能很大），用户输入、工具参数、最终回复始终完整记录",
+    "default": 1000
+  },
+  {
+    "key": "plugin.ai_chat_bot.stream.enable",
+    "label": "启用流式回复",
+    "type": "bool",
+    "group": "AI 对话 · 回复",
+    "help": "平台支持时逐字展示回复（飞书卡片/Telegram/Discord 消息实时更新）；不支持或出错时自动退化为一次性回复",
+    "default": true
+  },
+  {
+    "key": "plugin.ai_chat_bot.quota.enable",
+    "label": "启用每日配额限制",
+    "type": "bool",
+    "group": "AI 对话 · 配额",
+    "help": "按会话与全局两个维度限制每日 Token 消耗，超限后 AI 请求被拒绝",
+    "default": false
+  },
+  {
+    "key": "plugin.ai_chat_bot.quota.daily_tokens",
+    "label": "每会话每日 Token 上限",
+    "type": "int",
+    "group": "AI 对话 · 配额",
+    "help": "0 表示不限制；超出后该会话当日 AI 请求将被拒绝（含子代理、定时任务消耗）",
+    "default": 0
+  },
+  {
+    "key": "plugin.ai_chat_bot.quota.global_daily_tokens",
+    "label": "全局每日 Token 上限",
+    "type": "int",
+    "group": "AI 对话 · 配额",
+    "help": "0 表示不限制；所有会话合计消耗超限后 AI 请求全部拒绝",
+    "default": 0
+  },
+  {
+    "key": "plugin.ai_chat_bot.session.max_idle_minutes",
+    "label": "闲置会话回收（分钟）",
+    "type": "int",
+    "group": "AI 对话 · 会话驻留",
+    "help": "超过该时长无 AI 交互的会话从内存淘汰（历史在数据库，下次发言自动恢复；会话内 mcp_load 动态加载的工具会随淘汰失效，等同重启）；0 表示不按闲置淘汰",
+    "default": 120
+  },
+  {
+    "key": "plugin.ai_chat_bot.session.max_sessions",
+    "label": "最大驻留会话数",
+    "type": "int",
+    "group": "AI 对话 · 会话驻留",
+    "help": "内存中最多驻留的会话数，超出时淘汰最久未活跃的；0 表示不限制",
+    "default": 128
+  },
+  {
+    "key": "plugin.ai_chat_bot.session.no_mention_clear",
+    "label": "未@自动清空阈值（条）",
+    "type": "int",
+    "group": "AI 对话 · 会话驻留",
+    "help": "群聊连续未@消息达到该条数后自动清空该群对话历史并卸载动态加载的 MCP 工具，下次 @ 即开新对话；计数跨重启保留（每 10 条落盘一次，重启后继续累计），会话被闲置回收时计数不清零、在下次 @ 时补清；0 表示关闭自动清空",
+    "default": 30
+  },
+  {
+    "key": "plugin.ai_chat_bot.hooks.enable",
+    "label": "启用 AI 钩子",
+    "type": "bool",
+    "group": "AI 对话 · 钩子",
+    "help": "按 files.hooks_json 配置在会话事件上执行 shell 命令（PreToolUse/UserPromptSubmit 可阻断）；钩子在宿主机执行，请仅配置可信命令",
+    "default": false
+  },
+  {
+    "key": "plugin.ai_chat_bot.hooks.timeout_sec",
+    "label": "单个钩子默认超时(秒)",
+    "type": "int",
+    "group": "AI 对话 · 钩子",
+    "help": "单钩子超时可另行在 JSON 中按条覆盖；上限 60 秒",
+    "default": 10
+  },
+  {
+    "key": "plugin.ai_chat_bot.approval.enable",
+    "label": "启用工具审批",
+    "type": "bool",
+    "group": "AI 对话 · 工具审批",
+    "help": "危险工具执行前需人工确认（请求发送者或管理员回复「允许/拒绝」）；同时作为 bash 未列名命令的审批通道（关闭时未列名命令默认放行，只认黑名单）",
+    "default": false
+  },
+  {
+    "key": "plugin.ai_chat_bot.approval.tools",
+    "label": "需审批的工具",
+    "type": "string",
+    "group": "AI 对话 · 工具审批",
+    "help": "逗号分隔的工具名；bash 有命令级黑白名单+审批三段式，无需列入；config_set/config_file_set 恒需管理员审批，无需列入",
+    "default": "file"
+  },
+  {
+    "key": "plugin.ai_chat_bot.approval.timeout_sec",
+    "label": "审批超时(秒)",
+    "type": "int",
+    "group": "AI 对话 · 工具审批",
+    "help": "超时无回复自动拒绝；范围 10~240",
+    "default": 120
+  }
+]

@@ -1,0 +1,14 @@
+[
+  {
+    "scope": "f:qq:10000",
+    "kind": "friend",
+    "target": "qq:10000",
+    "count": 1
+  },
+  {
+    "scope": "g:qq:123456",
+    "kind": "group",
+    "target": "qq:123456",
+    "count": 2
+  }
+]

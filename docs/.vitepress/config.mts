@@ -31,6 +31,7 @@ export default withMermaid(defineConfig({
       {
         text: '链接',
         items: [
+          { text: '在线体验 Demo', link: '/demo/' },
           { text: 'GitHub', link: 'https://github.com/AniaBot-Project/AniaBot' },
           { text: '提交 Issue', link: 'https://github.com/AniaBot-Project/AniaBot/issues' },
           { text: 'Releases', link: 'https://github.com/AniaBot-Project/AniaBot/releases' },

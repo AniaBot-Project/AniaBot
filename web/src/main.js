@@ -29,4 +29,13 @@ export const router = createRouter({
   routes,
 })
 
-createApp(App).directive('backdrop-close', backdropClose).use(router).mount('#app')
+async function boot() {
+  // 演示模式（--mode demo）：装载本地 mock，替换 fetch；正式构建中该分支被静态消除
+  if (import.meta.env.MODE === 'demo') {
+    const { installMock } = await import('./mock')
+    installMock()
+  }
+  createApp(App).directive('backdrop-close', backdropClose).use(router).mount('#app')
+}
+
+boot()
