@@ -709,7 +709,8 @@ export function route(method, url, init) {
 }
 function normalize(result) {
   if (result === undefined || result === null) return { status: 200, body: { ok: true } }
-  if (result.status && result.body !== undefined && typeof result.body === 'string') return result
-  if (result.status) return result
+  // 仅当 status 是合法 HTTP 状态码时才视为响应描述符；业务载荷本身可能带 status 字段
+  // （如 oauth/status 返回 { status: 'pending' }），不能一概透传为响应状态
+  if (typeof result.status === 'number' && result.status >= 200 && result.status <= 599) return result
   return { status: 200, body: result }
 }
