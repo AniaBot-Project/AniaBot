@@ -1,6 +1,6 @@
 # 演示模式（demo mock）
 
-本目录实现 Web 面板的"在线体验"演示模式：`npm run build:demo`（`vite build --mode demo`）产出一份不需要后端的纯静态面板，部署在 GitHub Pages（`/demo/`）供文档访客体验。正式构建（`npm run build`）中 `import.meta.env.MODE === 'demo'` 为静态 false，整个 mock 目录经 tree-shake 剔除，不会进入 `bot/adminpanel/dist`。
+本目录实现 Web 面板的"在线体验"演示模式：`npm run build:demo`（`vite build --mode demo`）产出一份不需要后端的纯静态面板，部署在 GitHub Pages（`/demo/#/`）供文档访客体验。正式构建（`npm run build`）中 `import.meta.env.MODE === 'demo'` 为静态 false，整个 mock 目录经 tree-shake 剔除，不会进入 `bot/adminpanel/dist`。
 
 ## 数据来源
 

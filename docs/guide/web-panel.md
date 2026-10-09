@@ -3,7 +3,7 @@
 AniaBot 内置 Web 控制面板（Vue 3 + Tailwind CSS，构建产物通过 `go:embed` 嵌入二进制，单文件分发无需额外部署），用于管理配置、查看运行状态与任务日志。
 
 ::: tip 在线体验
-可直接访问 [在线体验 Demo](https://aniabot-project.github.io/AniaBot/demo/) 预览面板的完整界面与交互
+可直接访问 [在线体验 Demo](https://aniabot-project.github.io/AniaBot/demo/#/) 预览面板的完整界面与交互
 :::
 
 ## 启用与访问
