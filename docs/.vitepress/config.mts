@@ -31,7 +31,8 @@ export default withMermaid(defineConfig({
       {
         text: '链接',
         items: [
-          { text: '在线体验 Demo', link: '/demo/#/' },
+          // VitePress 客户端路由会拦截站内链接，/demo/ 是独立 SPA 而非文档页，需靠 target 触发整页跳转
+          { text: '在线体验 Demo', link: '/demo/#/', target: '_blank' },
           { text: 'GitHub', link: 'https://github.com/AniaBot-Project/AniaBot' },
           { text: '提交 Issue', link: 'https://github.com/AniaBot-Project/AniaBot/issues' },
           { text: 'Releases', link: 'https://github.com/AniaBot-Project/AniaBot/releases' },

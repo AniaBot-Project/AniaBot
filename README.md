@@ -2,6 +2,7 @@
   <img src="./README/logo.webp" width="200" alt="AniaBot Logo"/>
   <h1>AniaBot</h1>
   <p>一个插件驱动型多平台机器人框架</p>
+  <a href="https://aniabot-project.github.io/AniaBot/demo/#/">在线Demo</a> |
   <a href="https://aniabot-project.github.io/AniaBot/">📖 文档</a> |
   <a href="https://github.com/AniaBot-Project/AniaBot">GitHub</a>
 </div>

@@ -15,6 +15,8 @@ hero:
     - theme: alt
       text: 在线体验
       link: /demo/#/
+      # /demo/ 是独立 SPA 而非文档页，避免被 VitePress 客户端路由拦截成 404
+      target: _blank
     - theme: alt
       text: 项目介绍
       link: /guide/introduction
