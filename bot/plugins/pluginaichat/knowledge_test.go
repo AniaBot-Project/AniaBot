@@ -1,16 +1,30 @@
 package pluginaichat
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/jeanhua/AniaBot/common/storage"
 )
 
 func newTestKnowledgeManager(maxDocs int) *knowledgeManager {
+	return newTestKnowledgeManagerWith(newSQLPFake(), maxDocs)
+}
+
+// newTestKnowledgeManagerWith 基于给定存储构造知识库管理器（测试用）。
+// 非 SQL 存储上 newKnowledgeManager 返回 nil（功能禁用），测试中视为致命错误。
+func newTestKnowledgeManagerWith(store storage.PersistentStorage, maxDocs int) *knowledgeManager {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return newKnowledgeManager(newPFake(), logger, maxDocs, nil)
+	km := newKnowledgeManager(store, logger, maxDocs, nil)
+	if km == nil {
+		panic("newKnowledgeManager 返回 nil（SQL 后端不可用）")
+	}
+	return km
 }
 
 func TestKbAddAndList(t *testing.T) {
@@ -103,6 +117,13 @@ func TestKbRemove(t *testing.T) {
 	if got := km.list("g:123"); len(got) != 0 {
 		t.Fatalf("删除后仍有 %d 篇", len(got))
 	}
+	// 行级存储下删除最后一行后作用域自然消失，面板不再列出该空作用域
+	if got := km.store.count("g:123"); got != 0 {
+		t.Fatalf("删除最后一篇后不应残留行，实际 %d", got)
+	}
+	if got := km.scopes(); len(got) != 0 {
+		t.Fatalf("空管理器应无 scope，实际 %v", got)
+	}
 	if km.remove("g:123", d.ID) {
 		t.Fatal("remove 不存在 ID 应返回 false")
 	}
@@ -110,6 +131,99 @@ func TestKbRemove(t *testing.T) {
 	other, _ := km.add("global", "", "全局文档", nil, "")
 	if km.remove("g:123", other.ID) {
 		t.Fatal("不应跨 scope 删除")
+	}
+	if got := km.store.count("global"); got != 1 {
+		t.Fatalf("不应跨 scope 删除，global 应仍剩 1 篇，实际 %d", got)
+	}
+}
+
+// TestKbMigrateLegacyKV 验证旧版「每 scope 一个 JSON 数组」的 kb: 数据
+// 在构造管理器时被一次性搬入行级表，残留的空数组键被清理，且迁移幂等
+// （重复构造不会重复入库）。
+func TestKbMigrateLegacyKV(t *testing.T) {
+	store := newSQLPFake()
+	// 预置旧版数据：global 两篇文档（含向量与标签），g:123 一个空数组残留键
+	legacy := store.Clone("kb:")
+	if !legacy.Set(context.Background(), "global", []kbDoc{
+		{
+			ID:        "aaaabbbb",
+			Scope:     "global",
+			Title:     "旧文档一",
+			Content:   "旧版正文一",
+			Tags:      []string{"旧"},
+			Source:    "url:https://old",
+			CreatedAt: time.Unix(1700000000, 0).UTC(),
+			Emb:       [][]float32{{0.1, 0.2}},
+		},
+		{
+			// 历史脏数据：缺 ID，迁移时应补发
+			Scope:     "global",
+			Title:     "旧文档二",
+			Content:   "旧版正文二",
+			CreatedAt: time.Unix(1700000100, 0).UTC(),
+		},
+	}) {
+		t.Fatal("预置旧版数据失败")
+	}
+	if !legacy.Set(context.Background(), "g:123", []kbDoc{}) {
+		t.Fatal("预置空数组键失败")
+	}
+
+	km := newTestKnowledgeManagerWith(store, 0)
+
+	docs := km.list("global")
+	if len(docs) != 2 {
+		t.Fatalf("迁移后应有两篇文档，实际 %d 篇", len(docs))
+	}
+	if docs[0].ID != "aaaabbbb" || docs[0].Title != "旧文档一" || !framesEqual(docs[0].Emb, [][]float32{{0.1, 0.2}}) {
+		t.Fatalf("迁移后文档一内容不符: %+v", docs[0])
+	}
+	if docs[1].ID == "" || docs[1].Title != "旧文档二" {
+		t.Fatalf("缺 ID 的旧文档应补发 ID 并保留内容: %+v", docs[1])
+	}
+	if !docs[0].CreatedAt.Equal(time.Unix(1700000000, 0).UTC()) {
+		t.Fatalf("迁移应保留创建时间: %v", docs[0].CreatedAt)
+	}
+
+	// 迁移完成后旧键应全部删除（含空数组残留键），作用域列表只由行级表决定
+	if keys, _ := legacy.Keys(context.Background(), ""); len(keys) != 0 {
+		t.Fatalf("迁移后旧键应清空，实际 %v", keys)
+	}
+	if got := km.scopes(); len(got) != 1 || got[0] != "global" {
+		t.Fatalf("作用域列表不符: %v", got)
+	}
+
+	// 幂等：同一存储上再构造一次，不得重复入库
+	km2 := newTestKnowledgeManagerWith(store, 0)
+	if got := len(km2.list("global")); got != 2 {
+		t.Fatalf("迁移应幂等，重复构造后仍应为 2 篇，实际 %d", got)
+	}
+}
+
+// framesEqual 比较嵌套向量是否逐元素相等（nil 与空切片视为相等）。
+func framesEqual(a, b [][]float32) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if len(a[i]) != len(b[i]) {
+			return false
+		}
+		for j := range a[i] {
+			if a[i][j] != b[i][j] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// TestKbDisabledWithoutSQL 非 SQL 持久化后端上知识库功能整体禁用
+// （构造返回 nil，调用方按 nil 判空）。
+func TestKbDisabledWithoutSQL(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if km := newKnowledgeManager(newPFake(), logger, 0, nil); km != nil {
+		t.Fatal("非 SQL 存储上 newKnowledgeManager 应返回 nil")
 	}
 }
 
@@ -320,15 +434,14 @@ func TestKbAutoInjectSemantic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 手工为文档补向量（embedder=nil 时 add 不计算向量，直接写底层 KV）
-	docs := km.list("global")
-	for i := range docs {
-		if docs[i].ID == doc.ID {
-			docs[i].Emb = [][]float32{{1, 0}}
-		}
+	// 手工为文档补向量（embedder=nil 时 add 不计算向量，直接写底层存储）
+	cur, ok := km.store.get("global", doc.ID)
+	if !ok {
+		t.Fatal("读取文档失败")
 	}
-	if ok := km.store.Set(t.Context(), "global", docs); !ok {
-		t.Fatal("store.Set 失败")
+	cur.Emb = [][]float32{{1, 0}}
+	if !km.store.update("global", cur) {
+		t.Fatal("补写向量失败")
 	}
 
 	// 零关键词重叠 + queryVec=nil：不注入

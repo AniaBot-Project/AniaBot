@@ -41,7 +41,7 @@ func (p *AIChatPlugin) KnowledgeScopes() []plugininfo.KnowledgeScopeInfo {
 		infos = append(infos, plugininfo.KnowledgeScopeInfo{
 			Scope: scope,
 			Kind:  scopeKind(scope),
-			Count: len(p.knowledgeManager.list(scope)),
+			Count: p.knowledgeManager.count(scope),
 		})
 	}
 	return infos
@@ -69,7 +69,7 @@ func (p *AIChatPlugin) KnowledgeList(scope string) ([]plugininfo.KnowledgeDocInf
 	if !validKbScope(scope) {
 		return nil, fmt.Errorf("非法的知识库作用域: %s", scope)
 	}
-	docs := p.knowledgeManager.list(scope)
+	docs := p.knowledgeManager.listMeta(scope)
 	infos := make([]plugininfo.KnowledgeDocInfo, 0, len(docs))
 	for i := len(docs) - 1; i >= 0; i-- {
 		d := docs[i]

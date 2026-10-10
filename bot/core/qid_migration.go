@@ -23,6 +23,7 @@ var sessionScopePattern = regexp.MustCompile(`(^|:)([gf]):([0-9]+)`)
 //   - ania_kv 中配置、配置预设、AI 会话/记忆/知识库/团队/定时任务/日志等命名空间
 //   - ania_chat_session / ania_chat_message 的会话 ID
 //   - ania_memory 的 scope 与 user_id
+//   - ania_kb_doc 的 scope
 //   - ania_query_log / ania_task_log 的冗余过滤列与完整 payload
 //
 // 迁移只处理纯数字 QQ ID 和 g:/f: 数字会话 scope，不会改写其他平台前缀。
@@ -48,6 +49,10 @@ func migrateQQIDPrefix(ctx context.Context, store storage.PersistentStorage, log
 	if err != nil {
 		return fmt.Errorf("迁移长期记忆 QQ ID: %w", err)
 	}
+	kbChanged, err := migrateKbDocRows(ctx, db, dialect, logger)
+	if err != nil {
+		return fmt.Errorf("迁移知识库 QQ ID: %w", err)
+	}
 	queryChanged, err := migrateQueryLogRows(ctx, db, dialect, logger)
 	if err != nil {
 		return fmt.Errorf("迁移 Query 日志 QQ ID: %w", err)
@@ -57,7 +62,7 @@ func migrateQQIDPrefix(ctx context.Context, store storage.PersistentStorage, log
 		return fmt.Errorf("迁移任务日志 QQ ID: %w", err)
 	}
 
-	total := kvChanged + chatChanged + memoryChanged + queryChanged + taskChanged
+	total := kvChanged + chatChanged + memoryChanged + kbChanged + queryChanged + taskChanged
 	if total > 0 {
 		logger.Info("QQ ID 前缀迁移完成", "rows", total)
 	}
@@ -616,6 +621,58 @@ func migrateMemoryRows(ctx context.Context, db *sql.DB, dialect storage.SQLDiale
 		} else if _, err := db.ExecContext(ctx,
 			`UPDATE ania_memory SET scope = ?, user_id = ? WHERE scope = ? AND id = ?`,
 			nextScope, nextUser, r.scope, r.id); err != nil {
+			return changed, err
+		}
+		changed++
+	}
+	return changed, nil
+}
+
+// migrateKbDocRows 迁移知识库文档的 scope。文档从旧版 KV 命名空间搬入
+// ania_kb_doc 表前，其 scope 已由 migrateKVRows 重写；此函数兜底处理
+// 直接入表（或迁移中断后补跑）的数据，与 ania_memory 的 scope 迁移同构。
+func migrateKbDocRows(ctx context.Context, db *sql.DB, dialect storage.SQLDialect, logger *slog.Logger) (int, error) {
+	if !tableExists(ctx, db, dialect, "ania_kb_doc") {
+		return 0, nil
+	}
+	rows, err := db.QueryContext(ctx, `SELECT scope, id FROM ania_kb_doc`)
+	if err != nil {
+		return 0, err
+	}
+	type kbRow struct {
+		scope string
+		id    string
+	}
+	var items []kbRow
+	for rows.Next() {
+		var r kbRow
+		if err := rows.Scan(&r.scope, &r.id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		items = append(items, r)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+
+	changed := 0
+	for _, r := range items {
+		nextScope := rewriteScopeIDs(r.scope)
+		if nextScope == r.scope {
+			continue
+		}
+		if rowExists2(ctx, db, dialect, "ania_kb_doc", "scope", "id", nextScope, r.id) {
+			logger.Warn("迁移知识库文档时目标记录已存在，保留新记录", "old", r.scope, "new", nextScope, "id", r.id)
+			if _, err := db.ExecContext(ctx,
+				`DELETE FROM ania_kb_doc WHERE scope = ? AND id = ?`, r.scope, r.id); err != nil {
+				return changed, err
+			}
+		} else if _, err := db.ExecContext(ctx,
+			`UPDATE ania_kb_doc SET scope = ? WHERE scope = ? AND id = ?`,
+			nextScope, r.scope, r.id); err != nil {
 			return changed, err
 		}
 		changed++

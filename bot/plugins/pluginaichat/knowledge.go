@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -23,7 +22,7 @@ import (
 const kbScopeGlobal = "global"
 
 // KbMaxContentRunes 单条文档内容的符文数上限，超出部分截断。
-// 文档可比记忆条目长得多（支持整篇文章/URL 正文），但也要避免撑爆 KV 的 key。
+// 文档可比记忆条目长得多（支持整篇文章/URL 正文），但也要避免单行体积失控。
 const KbMaxContentRunes = 8000
 
 // kbChunkSize / kbChunkOverlap 检索块大小与块间重叠。
@@ -43,20 +42,48 @@ type kbDoc struct {
 	Source    string    `json:"source,omitempty"` // manual / url:https://...
 	CreatedAt time.Time `json:"created_at"`
 	// Emb 各检索块（与 chunkText(content) 顺序对齐）的语义向量，仅启用向量检索时非空。
-	// float32 半精度即可满足余弦相似度精度需求，减小 KV 体积。
+	// float32 半精度即可满足余弦相似度精度需求，减小单行体积。
 	Emb [][]float32 `json:"emb,omitempty"`
 }
 
 // ErrKBFull 单 scope 文档条数达到上限时返回，提示先清理旧文档。
 var ErrKBFull = errors.New("知识库文档条数已达上限")
 
+// kbStore 知识库存储后端：SQL 逐行存取（ania_kb_doc 表）。
+// 去重、上限、截断与语义向量计算等逻辑留在 knowledgeManager 层，后端只做存取。
+type kbStore interface {
+	// list 读取指定 scope 的全部文档（按创建时间升序）；无记录或失败时返回 nil。
+	list(scope string) []kbDoc
+	// listMeta 读取指定 scope 的全部文档但不含向量（Emb 恒为空），
+	// 供面板列表用——向量列单篇可达数百 KB，展示时加载纯属浪费。
+	listMeta(scope string) []kbDoc
+	// listDigest 读取指定 scope 的轻量列表（仅 ID/标题/内容，不含向量），
+	// 供新增去重比较用——避免为去重加载 MB 级的向量数据。
+	listDigest(scope string) []kbDoc
+	// get 读取指定 scope 中一篇文档；不存在时返回 false。
+	get(scope, id string) (kbDoc, bool)
+	// insert 追加一篇文档（调用方已完成去重与上限检查）。
+	insert(scope string, d kbDoc) bool
+	// update 按 ID 覆盖一篇文档的可变字段；ID 不存在时返回 false。
+	update(scope string, d kbDoc) bool
+	// remove 按 ID 删除一篇文档；ID 不存在时返回 false。
+	remove(scope, id string) bool
+	// count 返回指定 scope 的文档条数（不加载文档内容，供面板统计用）。
+	count(scope string) int
+	// scopes 列出已有文档的全部 scope（排序后返回）。
+	scopes() []string
+}
+
 // knowledgeManager 知识库管理器：按作用域（global / g:会话ID / f:用户ID）存取文档。
 //
-// 与 memoryManager 同构：每个 scope 的文档是一个 JSON 数组整体读写
-// （PersistentStorage 的 KV 语义）。所有变更在 mu 保护下串行落盘；
+// 与 memoryManager 同构：持久化固定为 SQL 行级存储（ania_kb_doc 表，每篇文档一行），
+// 增删改只写单行、读取量与被读文档成正比。所有变更在 mu 保护下串行落盘；
 // 存储错误内部记录日志，不拖垮主对话流程。
 type knowledgeManager struct {
-	store    storage.PersistentStorage
+	store kbStore
+	// legacy 旧版整段 JSON 数据所在的 KV 子命名空间（kb:），仅启动时做一次性
+	// 迁移用，迁移完成后不再读写。
+	legacy   storage.PersistentStorage
 	logger   *slog.Logger
 	maxDocs  int       // 单 scope 文档条数上限，<=0 表示不限制
 	embedder *embedder // 可选语义向量计算；nil 表示仅关键词检索
@@ -64,13 +91,28 @@ type knowledgeManager struct {
 	mu sync.Mutex
 }
 
+// newKnowledgeManager 创建知识库管理器。持久化固定为 SQL 行级存储
+// （ania_kb_doc 表）；探测或建表失败时返回 nil（调用方按 nil 判空，
+// 知识库功能整体禁用），仅记录错误日志。构造时顺带把旧版 kb: 命名空间
+// 中的整段 JSON 文档一次性迁移进新表。
 func newKnowledgeManager(store storage.PersistentStorage, logger *slog.Logger, maxDocs int, emb *embedder) *knowledgeManager {
+	db, dialect, ok := storage.SQLBackend(store)
+	if !ok {
+		logger.Error("持久化存储不支持 SQL，知识库功能禁用")
+		return nil
+	}
+	if err := storage.EnsureTables(context.Background(), db, dialect, kbTables...); err != nil {
+		logger.Error("创建知识库表失败，知识库功能禁用", "error", err.Error())
+		return nil
+	}
 	km := &knowledgeManager{
-		store:    store.Clone("kb:"),
+		store:    newSQLKbStore(db, logger),
+		legacy:   store.Clone("kb:"),
 		logger:   logger,
 		maxDocs:  maxDocs,
 		embedder: emb,
 	}
+	km.migrateLegacyKV()
 	km.startBackfill()
 	return km
 }
@@ -101,25 +143,19 @@ func (km *knowledgeManager) backfillEmbeddings() {
 				continue // 计算失败静默跳过，下次重启再试
 			}
 			km.mu.Lock()
-			docs := km.listLocked(scope)
-			updated := false
-			for i, d := range docs {
-				if d.ID == doc.ID {
-					docs[i].Emb = emb
-					updated = true
-					break
-				}
-			}
-			if !updated {
+			cur, exists := km.store.get(scope, doc.ID)
+			if !exists {
 				km.mu.Unlock()
 				continue // 文档已被并发删除
 			}
-			if ok := km.store.Set(context.Background(), scope, docs); !ok {
+			cur.Emb = emb
+			saved := km.store.update(scope, cur)
+			km.mu.Unlock()
+			if !saved {
 				km.logger.Warn("回填知识库向量落盘失败", "scope", scope, "id", doc.ID)
 			} else {
 				filled++
 			}
-			km.mu.Unlock()
 			time.Sleep(backfillInterval)
 		}
 	}
@@ -133,19 +169,18 @@ func normalizeDoc(title, content string) string {
 	return strings.Join(strings.Fields(title), " ") + "\n" + strings.Join(strings.Fields(content), " ")
 }
 
-// list 读取指定 scope 的全部文档；无记录或读取失败时返回 nil。
+// list 读取指定 scope 的全部文档（含向量）；无记录或读取失败时返回 nil。
 func (km *knowledgeManager) list(scope string) []kbDoc {
 	km.mu.Lock()
 	defer km.mu.Unlock()
-	return km.listLocked(scope)
+	return km.store.list(scope)
 }
 
-func (km *knowledgeManager) listLocked(scope string) []kbDoc {
-	var docs []kbDoc
-	if ok := km.store.Get(context.Background(), scope, &docs); !ok {
-		return nil
-	}
-	return docs
+// listMeta 读取指定 scope 的全部文档但不含向量（供面板列表展示）。
+func (km *knowledgeManager) listMeta(scope string) []kbDoc {
+	km.mu.Lock()
+	defer km.mu.Unlock()
+	return km.store.listMeta(scope)
 }
 
 // add 追加一条文档，返回写入后的文档（含生成的 ID）。
@@ -168,15 +203,17 @@ func (km *knowledgeManager) add(scope, title, content string, tags []string, sou
 	km.mu.Lock()
 	defer km.mu.Unlock()
 
-	docs := km.listLocked(scope)
 	norm := normalizeDoc(title, content)
-	for _, d := range docs {
+	for _, d := range km.store.listDigest(scope) {
 		if normalizeDoc(d.Title, d.Content) == norm {
 			// 已存在相同文档，不重复写入
+			if full, ok := km.store.get(scope, d.ID); ok {
+				return full, nil
+			}
 			return d, nil
 		}
 	}
-	if km.maxDocs > 0 && len(docs) >= km.maxDocs {
+	if km.maxDocs > 0 && km.store.count(scope) >= km.maxDocs {
 		return kbDoc{}, fmt.Errorf("%w（%d 条），请先删除部分文档", ErrKBFull, km.maxDocs)
 	}
 
@@ -190,8 +227,7 @@ func (km *knowledgeManager) add(scope, title, content string, tags []string, sou
 		CreatedAt: time.Now(),
 		Emb:       emb,
 	}
-	docs = append(docs, doc)
-	if ok := km.store.Set(context.Background(), scope, docs); !ok {
+	if ok := km.store.insert(scope, doc); !ok {
 		km.logger.Error("保存知识库文档失败", "scope", scope, "title", title)
 		return kbDoc{}, errors.New("文档保存失败，请查看日志")
 	}
@@ -199,21 +235,12 @@ func (km *knowledgeManager) add(scope, title, content string, tags []string, sou
 }
 
 // remove 按 ID 删除指定 scope 中的一条文档；ID 不存在时返回 false。
+// 行级存储下删除最后一行后该作用域自然消失，面板不会再列出空作用域。
 func (km *knowledgeManager) remove(scope, id string) bool {
 	km.mu.Lock()
 	defer km.mu.Unlock()
 
-	docs := km.listLocked(scope)
-	for i, d := range docs {
-		if d.ID == id {
-			docs = append(docs[:i], docs[i+1:]...)
-			if ok := km.store.Set(context.Background(), scope, docs); !ok {
-				km.logger.Error("删除知识库文档后落盘失败", "scope", scope, "id", id)
-			}
-			return true
-		}
-	}
-	return false
+	return km.store.remove(scope, id)
 }
 
 // update 按 ID 更新指定 scope 中一条文档的标题、内容、标签与来源；
@@ -233,37 +260,38 @@ func (km *knowledgeManager) update(scope, id, title, content string, tags []stri
 	km.mu.Lock()
 	defer km.mu.Unlock()
 
-	docs := km.listLocked(scope)
-	for i, d := range docs {
-		if d.ID == id {
-			docs[i].Title = title
-			docs[i].Content = content
-			docs[i].Tags = tags
-			docs[i].Source = source
-			docs[i].Emb = emb
-			if ok := km.store.Set(context.Background(), scope, docs); !ok {
-				km.logger.Error("更新知识库文档后落盘失败", "scope", scope, "id", id)
-				return errors.New("文档保存失败，请查看日志")
-			}
-			return nil
-		}
+	doc, ok := km.store.get(scope, id)
+	if !ok {
+		return fmt.Errorf("文档不存在: %s", id)
 	}
-	return fmt.Errorf("文档不存在: %s", id)
+	doc.Title = title
+	doc.Content = content
+	doc.Tags = tags
+	doc.Source = source
+	doc.Emb = emb
+	if !km.store.update(scope, doc) {
+		km.logger.Error("更新知识库文档后落盘失败", "scope", scope, "id", id)
+		return errors.New("文档保存失败，请查看日志")
+	}
+	return nil
 }
 
 // scopes 列出当前已有文档的全部作用域，排序后返回。
-// 供 Web 面板的知识库管理页使用。
+// 供 Web 面板的知识库管理页使用。行级存储下条数为 0 的作用域不存在行，
+// 天然不会被列出。
 func (km *knowledgeManager) scopes() []string {
 	km.mu.Lock()
 	defer km.mu.Unlock()
 
-	keys, err := km.store.Keys(context.Background(), "")
-	if err != nil {
-		km.logger.Error("列出知识库作用域失败", "error", err)
-		return nil
-	}
-	slices.Sort(keys)
-	return keys
+	return km.store.scopes()
+}
+
+// count 返回指定 scope 的文档条数（不加载文档内容，供面板统计用）。
+func (km *knowledgeManager) count(scope string) int {
+	km.mu.Lock()
+	defer km.mu.Unlock()
+
+	return km.store.count(scope)
 }
 
 // newKbID 生成短随机 ID（8 位十六进制），与记忆 ID 同款退化策略。

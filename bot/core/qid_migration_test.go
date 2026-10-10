@@ -97,6 +97,7 @@ func TestMigrateQQIDPrefixTables(t *testing.T) {
 		`CREATE TABLE ania_chat_session (session_id TEXT NOT NULL PRIMARY KEY, msg_count INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE ania_chat_message (session_id TEXT NOT NULL, seq INTEGER NOT NULL, content TEXT NOT NULL, PRIMARY KEY (session_id, seq))`,
 		`CREATE TABLE ania_memory (scope TEXT NOT NULL, id TEXT NOT NULL, user_id TEXT NOT NULL DEFAULT '', PRIMARY KEY (scope, id))`,
+		`CREATE TABLE ania_kb_doc (scope TEXT NOT NULL, id TEXT NOT NULL, title TEXT NOT NULL, content TEXT NOT NULL, PRIMARY KEY (scope, id))`,
 		`CREATE TABLE ania_query_log (seq INTEGER NOT NULL PRIMARY KEY, target_id TEXT NOT NULL, senders TEXT NOT NULL, payload TEXT NOT NULL)`,
 		`CREATE TABLE ania_task_log (seq INTEGER NOT NULL PRIMARY KEY, target_id TEXT NOT NULL, payload TEXT NOT NULL)`,
 	} {
@@ -109,6 +110,7 @@ func TestMigrateQQIDPrefixTables(t *testing.T) {
 		`INSERT INTO ania_chat_session (session_id, msg_count) VALUES ('g:1', 1)`,
 		`INSERT INTO ania_chat_message (session_id, seq, content) VALUES ('g:1', 0, '{}')`,
 		`INSERT INTO ania_memory (scope, id, user_id) VALUES ('g:2', 'm1', '3')`,
+		`INSERT INTO ania_kb_doc (scope, id, title, content) VALUES ('g:2', 'k1', '旧文档', '正文')`,
 		`INSERT INTO ania_query_log (seq, target_id, senders, payload) VALUES (1, '4', ',5,', '{"target_id":"4","senders":["5"]}')`,
 		`INSERT INTO ania_task_log (seq, target_id, payload) VALUES (1, '6', '{"target_id":"6"}')`,
 	}
@@ -134,6 +136,10 @@ func TestMigrateQQIDPrefixTables(t *testing.T) {
 	if err := db.QueryRowContext(ctx,
 		`SELECT scope || ':' || user_id FROM ania_memory`).Scan(&got); err != nil || got != "g:qq:2:qq:3" {
 		t.Fatalf("memory = %q, %v", got, err)
+	}
+	if err := db.QueryRowContext(ctx,
+		`SELECT scope FROM ania_kb_doc`).Scan(&got); err != nil || got != "g:qq:2" {
+		t.Fatalf("kb doc scope = %q, %v", got, err)
 	}
 	if err := db.QueryRowContext(ctx,
 		`SELECT target_id || ':' || senders || ':' || payload FROM ania_query_log`).Scan(&got); err != nil ||

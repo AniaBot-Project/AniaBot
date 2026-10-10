@@ -973,14 +973,17 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	}
 
 	// 知识库：文档主动管理 + AI 检索（kb_search）与自动注入。作用域含全局库
-	// 与按会话库，持久化到 PersistentStorage（kb: 命名空间）。
+	// 与按会话库，持久化固定为 SQL 行级存储（ania_kb_doc 表）；探测或建表
+	// 失败时禁用该功能。构造时顺带把旧版 kb: 命名空间的整段 JSON 数据迁移进表。
 	if p.cfg.Kb.Enable {
 		maxDocs := p.cfg.Kb.MaxDocs
 		if maxDocs <= 0 {
 			maxDocs = 500
 		}
 		p.knowledgeManager = newKnowledgeManager(p.PersistentStorage, p.Logger.WithGroup("knowledge"), maxDocs, embedder)
-		p.Logger.Info("已启用知识库功能", "max_docs", maxDocs, "vector", embedder != nil, "auto_inject", p.cfg.Kb.AutoInject)
+		if p.knowledgeManager != nil {
+			p.Logger.Info("已启用知识库功能", "max_docs", maxDocs, "vector", embedder != nil, "auto_inject", p.cfg.Kb.AutoInject)
+		}
 	} else {
 		p.Logger.Info("知识库功能未启用（plugin.ai_chat_bot.kb.enable=false）")
 	}

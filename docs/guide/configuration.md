@@ -410,7 +410,7 @@ X-Proxy-Route: team-a
 
 | 配置键 | 默认值 | 说明 |
 | --- | --- | --- |
-| `plugin.ai_chat_bot.kb.enable` | `true` | 启用后 AI 可通过 `kb_add` / `kb_search` / `kb_forget` 等工具管理知识库 |
+| `plugin.ai_chat_bot.kb.enable` | `true` | 启用后 AI 可通过 `kb_add` / `kb_search` 工具管理知识库 |
 | `plugin.ai_chat_bot.kb.max_docs` | `500` | 单个作用域（会话库 / 全局库）的文档条数上限 |
 | `plugin.ai_chat_bot.kb.auto_inject` | `true` | 每次对话前自动按关键词检索相关文档并注入上下文（不走向量，避免每条消息产生 embedding 成本） |
 | `plugin.ai_chat_bot.kb.embedding.enable` | `false` | 启用向量检索：入库时计算语义向量，检索时与关键词混合打分；provider 不支持时自动退回纯关键词 |

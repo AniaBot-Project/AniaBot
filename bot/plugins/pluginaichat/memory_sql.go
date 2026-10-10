@@ -10,9 +10,10 @@ import (
 	"github.com/jeanhua/AniaBot/common/storage"
 )
 
-// memoryTimeLayout 记忆创建时间的落盘格式：固定 9 位小数的 UTC 时间，
-// 字典序即时间序（time.RFC3339Nano 会裁剪末尾零导致文本序不稳定，不可用）。
-const memoryTimeLayout = "2006-01-02T15:04:05.000000000Z"
+// rowTimeLayout 行级存储时间列的落盘格式（长期记忆、知识库共用）：
+// 固定 9 位小数的 UTC 时间，字典序即时间序（time.RFC3339Nano 会裁剪
+// 末尾零导致文本序不稳定，不可用）。
+const rowTimeLayout = "2006-01-02T15:04:05.000000000Z"
 
 // 长期记忆的行级存储 schema：每条记忆一行，(scope, id) 联合主键。
 // tags/emb 以 JSON 存列（检索打分在 Go 侧完成，无需 SQL 下推）。
@@ -98,7 +99,7 @@ func (s *sqlMemoryStore) list(scope string) []memoryEntry {
 				s.logger.Error("反序列化记忆向量失败，忽略向量", "scope", scope, "id", r.id, "error", err)
 			}
 		}
-		if t, err := time.Parse(memoryTimeLayout, r.createdAt); err == nil {
+		if t, err := time.Parse(rowTimeLayout, r.createdAt); err == nil {
 			e.CreatedAt = t
 		}
 		entries = append(entries, e)
@@ -110,7 +111,7 @@ func (s *sqlMemoryStore) insert(scope string, e memoryEntry) bool {
 	tags, emb := marshalMemoryJSON(e)
 	_, err := s.db.ExecContext(context.Background(),
 		`INSERT INTO ania_memory (scope, id, user_id, content, tags, emb, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		scope, e.ID, e.UserID, e.Content, tags, emb, e.CreatedAt.UTC().Format(memoryTimeLayout))
+		scope, e.ID, e.UserID, e.Content, tags, emb, e.CreatedAt.UTC().Format(rowTimeLayout))
 	if err != nil {
 		s.logger.Error("写入记忆失败", "scope", scope, "id", e.ID, "error", err)
 		return false

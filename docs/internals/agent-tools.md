@@ -159,7 +159,7 @@ flowchart TB
 
 - 每次触发**全新一次性上下文**（nil historyStore，执行完丢弃），带完整工具能力
 - 超时 `clock.default_timeout_sec`（默认 120），超时后发消息告知用户
-- 执行日志走 `bot/component/tasklog`（`ania_task_log` 行级 / KV 回退），记录工具调用明细、token 用量、最终回复；进程重启后遗留的 running 记录标记为 `interrupted`
+- 执行日志走 `bot/component/tasklog`（`ania_task_log` 行级），记录工具调用明细、token 用量、最终回复；进程重启后遗留的 running 记录标记为 `interrupted`
 - 中间轮文本丢弃，只有最终回复推送给目标；工具显式发送的图片/文件正常发出
 - 用户经 `/clock` 管理，AI 经 `clock_create/list/update/delete/log` 工具管理
 
@@ -206,12 +206,13 @@ clock 任务里注册的是**异步**子代理变体（`clocksubagent.go`）：�
 - **长文档切片**：入库时按 600 字符一块、60 字符重叠切片，检索命中块而非整篇，避免无关内容占用上下文
 - 向量检索可选（与长期记忆共享 `embedder`）：每块一个 embedding（float32），检索按余弦相似度加分；embedding 服务不可用自动退化为纯关键词
 - 去重（标题+内容规范化）、上限（`kb.max_docs`）、截断（8000 符文）
+- **行级存储**：每篇文档一行（`ania_kb_doc`，`(scope,id)` 联合主键，tags/embedding 为 JSON 列），增删改只写单行；旧版「每作用域一个 JSON 数组」的 KV 数据在启动时一次性迁移入表，探测或建表失败时该功能禁用
 
 ## 配额与用量统计
 
 - **quotaManager**：按「每会话每日」+「全局每日」两个维度限制 token 消耗，键 `daily:<日期>:<会话key>` 天然按天过期；Check-Add 为宽松语义（非硬实时），面板可查看用量
 - **usageAcc**：goroutine 安全的派生用量累加器，归集主循环之外的消耗（异步子代理、team 成员、备用识图），收尾并入统计与配额
-- **Query 日志**：一次「触发 → 最终响应」的完整记录（`ania_query_log` / KV 回退），含用户输入、发送者、工具调用明细（上限 20 条 + 总数）、token、状态（running/success/stopped/timeout/error），面板「Query 日志」页按条件筛选
+- **Query 日志**：一次「触发 → 最终响应」的完整记录（`ania_query_log` 行级），含用户输入、发送者、工具调用明细（上限 20 条 + 总数）、token、状态（running/success/stopped/timeout/error），面板「Query 日志」页按条件筛选
 
 ## 钩子系统（hooks）
 

@@ -71,8 +71,8 @@ func TestKnowledgePanelCRUD(t *testing.T) {
 	if err := p.KnowledgeDelete("global", id); err != nil {
 		t.Fatalf("KnowledgeDelete 失败: %v", err)
 	}
-	if got := p.KnowledgeScopes(); len(got) != 1 || got[0].Count != 0 {
-		t.Fatalf("删除后条数不符: %+v", got)
+	if got := p.KnowledgeScopes(); len(got) != 0 {
+		t.Fatalf("删除全部文档后不应残留作用域: %+v", got)
 	}
 	if err := p.KnowledgeDelete("global", id); err == nil {
 		t.Fatal("删除不存在的 ID 应报错")

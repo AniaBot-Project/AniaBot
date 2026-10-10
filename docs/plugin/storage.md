@@ -151,7 +151,7 @@ if ok {
 }
 ```
 
-约定：表名统一 `ania_` 前缀；MySQL 字符串键用 `VARCHAR(255) COLLATE utf8mb4_bin`、大载荷用 `MEDIUMTEXT`。框架内的对话历史（`ania_chat_session` + `ania_chat_message`）、长期记忆（`ania_memory`）、Query/任务日志（`ania_query_log` / `ania_task_log`）都是这一模式的参考实现。详见 [API · 存储接口 · 关系表能力](/api/storage#关系表能力-可选)。
+约定：表名统一 `ania_` 前缀；MySQL 字符串键用 `VARCHAR(255) COLLATE utf8mb4_bin`、大载荷用 `MEDIUMTEXT`。框架内的对话历史（`ania_chat_session` + `ania_chat_message`）、长期记忆（`ania_memory`）、知识库（`ania_kb_doc`）、Query/任务日志（`ania_query_log` / `ania_task_log`）都是这一模式的参考实现。详见 [API · 存储接口 · 关系表能力](/api/storage#关系表能力-可选)。
 
 ## 错误处理约定
 

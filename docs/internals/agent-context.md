@@ -61,9 +61,9 @@ SQL 后端下（探测 `storage.SQLBackend`）建两张表：
 
 Append 在事务内读取并推进 `msg_count` 分配 seq，只 INSERT 新行；Replace 清空该会话消息并重排 seq；Clear 删除两表对应行。SQLite 单连接（`MaxOpenConns(1)`）下读取遵循「收集→关闭 rows→解析」纪律，写入在单事务内完成。
 
-### KV 回退
+### 无 SQL 时
 
-非 SQL 后端回退为 `history:` 命名空间整段 JSON（`newPersistentHistoryStore`），语义一致。
+SQL 探测或建表失败时历史不落盘（仅内存窗口，重启即丢），不再回退 KV。
 
 ### 图片降级落盘
 
@@ -115,7 +115,7 @@ flowchart LR
 - **截断**：单条内容上限 2000 符文
 - **检索**：无 query 时返回全部（新在前）；有 query 时关键词打分（标签命中权重大于内容命中），零分剔除后排序
 - **语义向量**：可选 embedding（与知识库共享 `embedder`），入库时计算向量，检索时语义加分；embedding 服务不可用时静默降级为纯关键词
-- **存储**：SQL 后端下每条记忆一行（`ania_memory`，`(scope,id)` PK，tags/embedding JSON 列，`created_at` 定宽 UTC 文本使文本序 = 时间序）；非 SQL 回退每 scope 一个 JSON 数组
+- **存储**：每条记忆一行（`ania_memory`，`(scope,id)` PK，tags/embedding JSON 列，`created_at` 定宽 UTC 文本使文本序 = 时间序）；SQL 探测或建表失败时记忆功能整体禁用
 - 面板实现 `adminpanel.MemorySource`，可在「记忆管理」页直接增删改查，scope 校验 `^[gf]:\d+$` 防越界
 
 ## 备用识图（OCR）
