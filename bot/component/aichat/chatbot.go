@@ -124,8 +124,9 @@ func (b *ChatBot) Chat(ctx context.Context, userInput string, callbacks llmtool.
 	}
 
 	messages := b.msgBuilder.BuildChatMessages(userInput, b.window.history())
-	// 记录构建完成时的真实长度作为新消息起点：ExecuteWithTools 返回的
-	// updatedMessages 以 messages 为前缀，追加多出的部分即本轮新增消息
+	// 记录构建完成时的真实长度：messages = [system, ...history, user]，因此
+	// builtLen-1 是本轮用户消息的下标，updatedMessages 从该处起的后缀即
+	// 本轮新增（用户消息 + AI 回复 + 工具消息），需完整写回历史
 	builtLen := len(messages)
 
 	response, updatedMessages, usage, err := b.toolOrchestrator.ExecuteWithTools(ctx, b.llmClient, messages, callbacks, opts)
@@ -139,8 +140,16 @@ func (b *ChatBot) Chat(ctx context.Context, userInput string, callbacks llmtool.
 
 	b.window.RecordUsage(usage)
 
-	if builtLen < len(updatedMessages) {
-		b.window.append(updatedMessages[builtLen:]...)
+	if start := builtLen - 1; start < len(updatedMessages) {
+		newMessages := updatedMessages[start:]
+		// 落盘/回放用注入前的原始用户文本（PersistUserText）：记忆/知识库等注入
+		// 及 UserPromptSubmit 钩子上下文只作用于当轮请求，不随历史回放（否则旧
+		// 注入白占上下文、且可能引用已失效的记忆 ID 或过期资料）
+		if opts.PersistUserText != "" {
+			newMessages = append([]Message(nil), newMessages...)
+			newMessages[0] = TextMessage(RoleUser, b.msgBuilder.withTimePrefix(opts.PersistUserText))
+		}
+		b.window.append(newMessages...)
 	}
 
 	response = RemoveThinkContent(response)

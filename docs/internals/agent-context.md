@@ -52,6 +52,10 @@ type HistoryStore interface {
 
 两个写入语义的设计动机：常规对话用 **Append 增量**（行级存储只 INSERT 新行，避免整条历史反复全量重写的写放大），压缩/截断后历史重排才用 **Replace 全量覆盖**。
 
+### 本轮落盘与注入剥离
+
+每轮对话的落盘范围是 **用户消息 + AI 回复 + 工具消息链**：`Chat` 组装请求后按「本轮到用户消息」的起点取 `updatedMessages` 后缀写入窗口。当调用方向用户消息拼入了只应作用于当轮的注入（记忆/知识库片段、待办提醒、计划模式附言等）时，通过 `ChatOptions.PersistUserText` 传入注入前的原始文本：注入只进入本轮请求，历史中保存的是原文。同类地，`UserPromptSubmit` 钩子注入的上下文在提供 `PersistUserText` 时也不写入历史（钩子每轮重新触发，无需回放）。动机：旧注入随历史回放既白占 token，又可能引用已失效的记忆 ID 或过期资料。
+
 ### SQL 行级存储（推荐）
 
 SQL 后端下（探测 `storage.SQLBackend`）建两张表：

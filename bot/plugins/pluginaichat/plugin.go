@@ -549,8 +549,9 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 
 	// 长期记忆自动注入：按原始用户消息检索相关记忆（有向量时语义+关键词
 	// 混合，否则纯关键词），命中后拼到用户消息前（尾部注入：system 保持
-	// 不变，不影响上游前缀缓存；用户消息不落盘，注入内容不会污染持久化
-	// 历史）。与知识库注入叠加时记忆块在最前、知识库块居中、用户消息最后。
+	// 不变，不影响上游前缀缓存；用户消息落盘时以注入前的原文为准，注入
+	// 内容不会污染持久化历史）。与知识库注入叠加时记忆块在最前、知识库块
+	// 居中、用户消息最后。
 	if p.memoryManager != nil && p.cfg.Memory.AutoInject {
 		memScope := "f:" + id.String()
 		if isGroup {
@@ -582,6 +583,11 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	if p.planManager != nil && p.planManager.IsOn(sessionKey(id, isGroup)) {
 		extraText = "【计划模式】当前处于计划模式：请只做分析与规划并输出实施计划，不要执行任何会产生实际副作用的操作（修改文件、运行命令、改配置、建任务等会被系统自动阻止）。用户确认计划后会退出计划模式再执行。\n\n" + extraText
 	}
+
+	// 落盘用注入前的原始用户文本：记忆/知识库/待办/计划附言等注入只作用于当轮，
+	// 不随历史回放（旧注入白占上下文，且可能引用已失效的记忆 ID 或过期资料）；
+	// 用户消息本身正常落盘，跨轮/跨重启的对话上下文保持完整
+	chatOpts.PersistUserText = userText
 
 	resp, usage, err := chat.Chat(ctx, extraText, msgFuncs, chatOpts)
 	// 流式回复收尾：Chat 返回后结束流式消息（幂等；工具轮边界已由 OnStreamRoundEnd 处理）

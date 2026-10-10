@@ -170,8 +170,8 @@ type memoryConfig struct {
 	Enable     bool `cfg:"enable" label:"启用长期记忆" group:"AI 对话 · 记忆" default:"true"`
 	MaxEntries int  `cfg:"max_entries" label:"单会话记忆上限" group:"AI 对话 · 记忆" default:"200"`
 	// AutoInject 每轮按用户消息纯关键词检索相关记忆并注入到用户消息前
-	// （尾部注入：system 不变，不影响上游前缀缓存；用户消息不落盘，历史无污染）
-	AutoInject bool `cfg:"auto_inject" label:"主动注入相关记忆" group:"AI 对话 · 记忆" default:"false" help:"每轮按用户消息检索相关记忆并追加到用户消息前（system 保持不变，不影响上游前缀缓存；用户消息不落盘，历史无污染）。启用向量检索后按语义+关键词混合检索，否则纯关键词"`
+	// （尾部注入：system 不变，不影响上游前缀缓存；历史写回以注入前原文为准，无污染）
+	AutoInject bool `cfg:"auto_inject" label:"主动注入相关记忆" group:"AI 对话 · 记忆" default:"false" help:"每轮按用户消息检索相关记忆并追加到用户消息前（system 保持不变，不影响上游前缀缓存；用户消息按注入前原文写入历史，注入内容不随历史回放）。启用向量检索后按语义+关键词混合检索，否则纯关键词"`
 	InjectMax  int  `cfg:"inject_max" label:"每轮注入条数上限" group:"AI 对话 · 记忆" default:"3" help:"主动注入的最大记忆条数，0 表示不限制"`
 }
 
