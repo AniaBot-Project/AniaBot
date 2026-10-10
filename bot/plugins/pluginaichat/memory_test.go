@@ -139,6 +139,7 @@ func TestMemoryRemove(t *testing.T) {
 	}
 }
 
+// TestMemoryUpdate 按 ID 更新一条记忆的内容、关联用户 ID 与标签。
 func TestMemoryUpdate(t *testing.T) {
 	m := newTestMemoryManager(0)
 
@@ -442,8 +443,14 @@ func TestMemoryAutoInjectRuneBudget(t *testing.T) {
 	if got == "" {
 		t.Fatal("应命中并返回注入块")
 	}
-	if n := len([]rune(got)); n > memoryInjectMaxRunes+64 {
-		t.Fatalf("注入块符文数超预算: %d > %d", n, memoryInjectMaxRunes+64)
+	// 预算约束的是记忆行（头部说明行不计入），去掉首行后校验；
+	// 截断行末尾带一个省略号，故上界为 memoryInjectMaxRunes + 1
+	body := got
+	if idx := strings.Index(got, "\n"); idx >= 0 {
+		body = got[idx+1:]
+	}
+	if n := len([]rune(body)); n > memoryInjectMaxRunes+1 {
+		t.Fatalf("注入内容超预算: %d > %d", n, memoryInjectMaxRunes+1)
 	}
 }
 
@@ -471,5 +478,155 @@ func TestMemoryAutoInjectSemantic(t *testing.T) {
 	got := m.autoInject("g:123", "他平时爱喝什么饮品", 3, []float32{1, 0})
 	if !strings.Contains(got, "小明喜爱熬夜喝咖啡") {
 		t.Fatalf("语义命中应注入记忆: %q", got)
+	}
+}
+
+// ---- memory_update / 近似重复提示 ----
+
+// memoryToolByName 按名字取一个会话记忆工具（索引会随工具增减变化，避免写死下标）。
+func memoryToolByName(t *testing.T, m *memoryManager, name string) llmtool.Tool {
+	t.Helper()
+	for _, tool := range newMemoryTools(m, "g:123", "群聊（群号 123）") {
+		if tool.Name() == name {
+			return tool
+		}
+	}
+	t.Fatalf("工具 %s 不存在", name)
+	return nil
+}
+
+// TestMemoryUpdateToolPartialFields 只更新内容时保留原关联用户与标签；
+// 显式传空标签则清空；未提供内容或 ID 不存在时报错。
+func TestMemoryUpdateToolPartialFields(t *testing.T) {
+	m := newTestMemoryManager(0)
+	seed, err := m.add("g:123", "456", "小明喜欢喝咖啡", []string{"偏好"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := memoryToolByName(t, m, "memory_update")
+
+	// 只改内容：user_id / tags 保留原值
+	result, err := tool.Execute(context.Background(), &memoryUpdateParams{
+		ID:      seed.ID,
+		Content: "小明喜欢喝拿铁（每天早上一杯）",
+	}, llmtool.CallBackFuncs{})
+	if err != nil {
+		t.Fatalf("update 工具执行失败: %v", err)
+	}
+	if !strings.Contains(result, "已更新记忆") || !strings.Contains(result, "拿铁") {
+		t.Fatalf("反馈应包含更新后的内容: %s", result)
+	}
+	got := m.list("g:123")[0]
+	if got.Content != "小明喜欢喝拿铁（每天早上一杯）" || got.UserID != "456" {
+		t.Fatalf("部分更新不应丢关联用户: %+v", got)
+	}
+	if len(got.Tags) != 1 || got.Tags[0] != "偏好" {
+		t.Fatalf("部分更新不应丢标签: %+v", got.Tags)
+	}
+	// ID 与创建时间保持不变
+	if got.ID != seed.ID || !got.CreatedAt.Equal(seed.CreatedAt) {
+		t.Fatalf("update 不应改变 ID/创建时间: %+v", got)
+	}
+
+	// 显式空标签 → 清空；显式 user_id → 覆盖
+	empty := ""
+	if _, err := tool.Execute(context.Background(), &memoryUpdateParams{
+		ID: seed.ID, Content: "小明改喝美式", UserID: &empty, Tags: []string{},
+	}, llmtool.CallBackFuncs{}); err != nil {
+		t.Fatalf("update 工具执行失败: %v", err)
+	}
+	got = m.list("g:123")[0]
+	if got.UserID != "" || len(got.Tags) != 0 {
+		t.Fatalf("显式清空应生效: %+v", got)
+	}
+
+	if _, err := tool.Execute(context.Background(), &memoryUpdateParams{ID: seed.ID}, llmtool.CallBackFuncs{}); err == nil {
+		t.Fatal("缺少 content 应报错")
+	}
+	if _, err := tool.Execute(context.Background(), &memoryUpdateParams{ID: "deadbeef", Content: "x"}, llmtool.CallBackFuncs{}); err == nil {
+		t.Fatal("ID 不存在应报错")
+	}
+}
+
+// TestMemorySaveToolDedupAndSimilarHint 精确重复不重复写入并明确反馈；
+// 近似重复（换个说法）写入后附带合并提示（含旧条目 ID 与 memory_update 指引）。
+func TestMemorySaveToolDedupAndSimilarHint(t *testing.T) {
+	m := newTestMemoryManager(0)
+	save := memoryToolByName(t, m, "memory_save")
+
+	first, err := save.Execute(context.Background(), &memorySaveParams{Content: "小明喜欢喝咖啡"}, llmtool.CallBackFuncs{})
+	if err != nil {
+		t.Fatalf("save 失败: %v", err)
+	}
+	if !strings.Contains(first, "已记住") {
+		t.Fatalf("首次保存应返回已记住: %s", first)
+	}
+	if strings.Contains(first, "提示：") {
+		t.Fatalf("首条记忆不应有相似提示: %s", first)
+	}
+	oldID := m.list("g:123")[0].ID
+
+	// 精确重复（仅空白差异）→ 不重复写入
+	dup, err := save.Execute(context.Background(), &memorySaveParams{Content: " 小明喜欢喝咖啡 "}, llmtool.CallBackFuncs{})
+	if err != nil {
+		t.Fatalf("重复 save 失败: %v", err)
+	}
+	if !strings.Contains(dup, "未重复保存") {
+		t.Fatalf("精确重复应明确反馈未写入: %s", dup)
+	}
+	if n := len(m.list("g:123")); n != 1 {
+		t.Fatalf("精确重复不应新增条目，实际 %d 条", n)
+	}
+
+	// 近似重复（同一件事的不同说法）→ 写入但提示合并
+	similar, err := save.Execute(context.Background(), &memorySaveParams{Content: "小明喜欢熬夜喝咖啡"}, llmtool.CallBackFuncs{})
+	if err != nil {
+		t.Fatalf("近似 save 失败: %v", err)
+	}
+	if !strings.Contains(similar, "高度相似") || !strings.Contains(similar, oldID) || !strings.Contains(similar, "memory_update") {
+		t.Fatalf("近似重复应附带合并提示（含旧 ID 与 memory_update）: %s", similar)
+	}
+
+	// 无关内容不触发提示
+	other, err := save.Execute(context.Background(), &memorySaveParams{Content: "小美喜欢喝奶茶"}, llmtool.CallBackFuncs{})
+	if err != nil {
+		t.Fatalf("save 失败: %v", err)
+	}
+	if strings.Contains(other, "高度相似") {
+		t.Fatalf("无关内容不应提示相似: %s", other)
+	}
+}
+
+// TestMemoryFindSimilarThreshold 相似度阈值：换个说法的同一件事命中，
+// 仅共享主语的不同事实不命中。
+func TestMemoryFindSimilarThreshold(t *testing.T) {
+	m := newTestMemoryManager(0)
+	if _, err := m.add("g:123", "", "小明喜欢喝咖啡", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := m.findSimilar("g:123", "小明喜欢熬夜喝咖啡", "", 1); len(got) != 1 {
+		t.Fatalf("换个说法的同一件事应命中相似: %d 条", len(got))
+	}
+	if got := m.findSimilar("g:123", "小美喜欢喝奶茶", "", 1); len(got) != 0 {
+		t.Fatalf("不同事实不应误报相似: %+v", got)
+	}
+	// excludeID 排除自身
+	entries := m.list("g:123")
+	if got := m.findSimilar("g:123", entries[0].Content, entries[0].ID, 1); len(got) != 0 {
+		t.Fatalf("排除自身后不应命中: %+v", got)
+	}
+}
+
+// TestMemoryAutoInjectHintsUpdate 注入块应带 memory_update 更正指引，
+// 让 AI 在使用记忆时顺手发现并维护过时内容。
+func TestMemoryAutoInjectHintsUpdate(t *testing.T) {
+	m := newTestMemoryManager(0)
+	if _, err := m.add("g:123", "", "小明讨厌被半夜@", nil); err != nil {
+		t.Fatal(err)
+	}
+	got := m.autoInject("g:123", "小明你晚上在吗", 3, nil)
+	if !strings.Contains(got, "memory_update") {
+		t.Fatalf("注入块应包含 memory_update 更正指引: %q", got)
 	}
 }

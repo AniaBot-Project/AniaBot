@@ -144,6 +144,91 @@ func normalizeMemoryContent(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
+// memorySimilarThreshold 近似重复判定的相似度阈值（词元集合的 Dice 系数）。
+// 取 0.55：同一件事换个说法（「小明喜欢喝咖啡」vs「小明喜欢熬夜喝咖啡」约 0.63）
+// 能命中，仅在个别词上重合的不同事实（共享主语等，通常低于 0.3）不会误报。
+const memorySimilarThreshold = 0.55
+
+// memoryTermSet 用与检索同一套 CJK 分词（整词 + 相邻二元组）把文本转成词元集合。
+func memoryTermSet(s string) map[string]struct{} {
+	terms := queryTerms(s)
+	if len(terms) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(terms))
+	for _, t := range terms {
+		set[t] = struct{}{}
+	}
+	return set
+}
+
+// diceSimilarity 两个词元集合的 Dice 系数（2|A∩B| / (|A|+|B|)），范围 [0,1]。
+func diceSimilarity(a, b map[string]struct{}) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	inter := 0
+	for t := range a {
+		if _, ok := b[t]; ok {
+			inter++
+		}
+	}
+	return 2 * float64(inter) / float64(len(a)+len(b))
+}
+
+// findSimilar 返回与 content 高度相似（Dice 系数 >= memorySimilarThreshold）的
+// 其它记忆，按相似度降序最多 limit 条；excludeID 用于排除条目自身。
+// 与精确去重互补：识别换个说法的近似重复，供写入时提示 AI 合并。
+func (m *memoryManager) findSimilar(scope, content, excludeID string, limit int) []memoryEntry {
+	if limit <= 0 {
+		limit = 1
+	}
+	base := memoryTermSet(content)
+	if len(base) == 0 {
+		return nil
+	}
+
+	type scored struct {
+		e     memoryEntry
+		score float64
+	}
+	var matched []scored
+	for _, e := range m.list(scope) {
+		if e.ID == excludeID {
+			continue
+		}
+		if s := diceSimilarity(base, memoryTermSet(e.Content)); s >= memorySimilarThreshold {
+			matched = append(matched, scored{e, s})
+		}
+	}
+	for i := 1; i < len(matched); i++ {
+		for j := i; j > 0 && matched[j].score > matched[j-1].score; j-- {
+			matched[j], matched[j-1] = matched[j-1], matched[j]
+		}
+	}
+	if len(matched) > limit {
+		matched = matched[:limit]
+	}
+	out := make([]memoryEntry, len(matched))
+	for i, sc := range matched {
+		out[i] = sc.e
+	}
+	return out
+}
+
+// similarHint 生成写入后的近似重复提示：新条目与已有记忆高度相似时，建议合并
+// 为一条（memory_update 更新保留的条目，再 memory_forget 删除多余的）。
+// 无相似记忆时返回空串。
+func (m *memoryManager) similarHint(scope, excludeID, content string) string {
+	similar := m.findSimilar(scope, content, excludeID, 1)
+	if len(similar) == 0 {
+		return ""
+	}
+	e := similar[0]
+	return fmt.Sprintf("提示：与已有记忆 [%s]「%s」高度相似。若是同一件事的不同说法，请合并为一条：用 memory_update 把合并后的完整内容更新到 [%s]，再 memory_forget 删除 [%s]；若确实是两件独立的事，忽略本提示。",
+		e.ID, tasklog.Truncate(e.Content, 100), e.ID, excludeID)
+}
+
 // list 读取指定 scope 的全部记忆；无记录或读取失败时返回 nil。
 func (m *memoryManager) list(scope string) []memoryEntry {
 	m.mu.Lock()
@@ -159,9 +244,16 @@ func (m *memoryManager) listLocked(scope string) []memoryEntry {
 // 内容与已有记忆重复（规范化后相同）时不重复写入，返回已有条目；
 // 达到 maxEntries 上限时返回 ErrMemoryFull；超长内容按 MaxContentRunes 截断。
 func (m *memoryManager) add(scope, userID, content string, tags []string) (memoryEntry, error) {
+	entry, _, err := m.addEntry(scope, userID, content, tags)
+	return entry, err
+}
+
+// addEntry 与 add 相同，额外返回是否为新写入的条目（false 表示命中精确去重，
+// 返回的是已有条目）。AI 工具据此区分「已记住」与「已有相同内容，未重复保存」。
+func (m *memoryManager) addEntry(scope, userID, content string, tags []string) (memoryEntry, bool, error) {
 	content = tasklog.Truncate(strings.TrimSpace(content), MaxContentRunes)
 	if content == "" {
-		return memoryEntry{}, errors.New("记忆内容不能为空")
+		return memoryEntry{}, false, errors.New("记忆内容不能为空")
 	}
 
 	m.mu.Lock()
@@ -172,11 +264,11 @@ func (m *memoryManager) add(scope, userID, content string, tags []string) (memor
 	for _, e := range entries {
 		if normalizeMemoryContent(e.Content) == norm {
 			// 已存在相同记忆，不重复写入
-			return e, nil
+			return e, false, nil
 		}
 	}
 	if m.maxEntries > 0 && len(entries) >= m.maxEntries {
-		return memoryEntry{}, fmt.Errorf("%w（%d 条），请先调用 memory_forget 删除或合并旧记忆", ErrMemoryFull, m.maxEntries)
+		return memoryEntry{}, false, fmt.Errorf("%w（%d 条），请先用 memory_update 合并或 memory_forget 删除旧记忆", ErrMemoryFull, m.maxEntries)
 	}
 
 	entry := memoryEntry{
@@ -190,9 +282,21 @@ func (m *memoryManager) add(scope, userID, content string, tags []string) (memor
 	m.embedEntry(&entry)
 	if ok := m.store.insert(scope, entry); !ok {
 		m.logger.Error("保存记忆失败", "scope", scope)
-		return memoryEntry{}, errors.New("记忆保存失败，请查看日志")
+		return memoryEntry{}, false, errors.New("记忆保存失败，请查看日志")
 	}
-	return entry, nil
+	return entry, true, nil
+}
+
+// get 按 ID 读取指定 scope 中的一条记忆；ID 不存在时返回 false。
+func (m *memoryManager) get(scope, id string) (memoryEntry, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, e := range m.listLocked(scope) {
+		if e.ID == id {
+			return e, true
+		}
+	}
+	return memoryEntry{}, false
 }
 
 // embedEntry 计算单条记忆的语义向量；embedder 未启用（nil）或计算失败时
@@ -277,7 +381,7 @@ func (m *memoryManager) autoInject(scope, userMsg string, max int, queryVec []fl
 	}
 
 	var sb strings.Builder
-	sb.WriteString("【长期记忆】以下记忆可能与当前话题相关，可参考（与话题无关可忽略）：\n")
+	sb.WriteString("【长期记忆】以下记忆可能与当前话题相关，可参考（与话题无关可忽略）；如发现与当前事实不符或已过时，用 memory_update 按方括号中的 ID 更正：\n")
 	budget := memoryInjectMaxRunes
 	for _, e := range matched {
 		if budget <= 0 {

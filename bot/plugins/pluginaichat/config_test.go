@@ -29,6 +29,7 @@ func TestDefaultPromptContainsToolGuidance(t *testing.T) {
 		"webExplore",
 		"memory_search",
 		"memory_save",
+		"memory_update",
 		"clock_create",
 		"subagent_run",
 		"team_run",

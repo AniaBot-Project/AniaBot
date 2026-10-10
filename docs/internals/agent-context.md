@@ -107,14 +107,16 @@ flowchart LR
 
 ## 长期记忆（memoryManager）
 
-与上下文窗口不同，长期记忆**跨会话、跨重启**保留，由 AI 通过 `memory_save` / `memory_search` / `memory_forget` 工具自行管理：
+与上下文窗口不同，长期记忆**跨会话、跨重启**保留，由 AI 通过 `memory_save` / `memory_search` / `memory_update` / `memory_forget` 工具自行管理：
 
 - **作用域隔离**：scope = `g:群ID` / `f:用户ID`，工具在注册时绑定 scope，从机制上保证记忆不会跨会话泄露
-- **去重**：内容规范化（空白折叠）后相同则不重复写入
+- **去重**：内容规范化（空白折叠）后相同则不重复写入；写入时另做近似重复检测（CJK 分词后词元集合的 Dice 系数，阈值 0.55），命中则在返回值里提示 AI 用 `memory_update` 合并、`memory_forget` 删除多余条目
+- **更新**：`memory_update` 按 ID 覆盖内容；未传 `user_id` / `tags` 时保留原值，显式传空则清空；内容变更后重算语义向量
 - **上限**：`memory.max_entries`（默认 200），写满返回 `ErrMemoryFull`，提示 AI 先清理或合并
 - **截断**：单条内容上限 2000 符文
 - **检索**：无 query 时返回全部（新在前）；有 query 时关键词打分（标签命中权重大于内容命中），零分剔除后排序
 - **语义向量**：可选 embedding（与知识库共享 `embedder`），入库时计算向量，检索时语义加分；embedding 服务不可用时静默降级为纯关键词
+- **注入语**：`memory.auto_inject` 注入块除「可参考」外还提示发现不符或过时时用 `memory_update` 更正，让 AI 在使用中顺手维护
 - **存储**：每条记忆一行（`ania_memory`，`(scope,id)` PK，tags/embedding JSON 列，`created_at` 定宽 UTC 文本使文本序 = 时间序）；SQL 探测或建表失败时记忆功能整体禁用
 - 面板实现 `adminpanel.MemorySource`，可在「记忆管理」页直接增删改查，scope 校验 `^[gf]:\d+$` 防越界
 

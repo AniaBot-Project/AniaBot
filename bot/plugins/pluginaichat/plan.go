@@ -42,7 +42,7 @@ var planBlockedTools = map[string]struct{}{
 	"write_file": {}, "edit_file": {}, // 文件写入/编辑有副作用；read_file/glob/grep 只读放行
 	"mouse_click": {}, "mousemove": {}, "mouse_scroll": {},
 	"keyboard_type": {}, "keyboard_press": {},
-	"memory_save": {}, "memory_forget": {}, "kb_add": {},
+	"memory_save": {}, "memory_update": {}, "memory_forget": {}, "kb_add": {},
 	"clock_create": {}, "clock_update": {}, "clock_delete": {},
 	"skill_install": {}, "skill_remove": {},
 	"mcp_add": {}, "mcp_remove": {}, "mcp_reconnect": {},

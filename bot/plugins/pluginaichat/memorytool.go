@@ -30,8 +30,12 @@ func newMemoryTools(mgr *memoryManager, scope string, sessionDesc string) []llmt
 			BaseTool:       llmtool.MakeBaseTool("memory_search", "检索当前会话（"+sessionDesc+"）的长期记忆。当对话涉及过去的事情、用户的喜好或你不确定的背景时先调用。query 填写关键词（可多个，空格分隔），只返回相关记忆；不传则按时间倒序列出全部记忆。query 没命中时换个说法重试，或直接不传 query 看全量", memorySearchParams{}),
 			memoryToolBase: base,
 		},
+		&memoryUpdateTool{
+			BaseTool:       llmtool.MakeBaseTool("memory_update", "按 ID 更新一条长期记忆（内容有误、过时、不完整，或与其它记忆重复需要合并时使用；先用 memory_search 拿到 ID）。只改部分字段时未填写的字段保留原值；合并重复记忆时，把合并后的完整内容更新到保留的一条（本工具），再 memory_forget 删除被合并的多余条目", memoryUpdateParams{}),
+			memoryToolBase: base,
+		},
 		&memoryForgetTool{
-			BaseTool:       llmtool.MakeBaseTool("memory_forget", "按 ID 删除一条长期记忆。当记忆过时、有误，或用户明确要求忘记时使用；需要修改记忆时先删除旧的再 memory_save 新的", memoryForgetParams{}),
+			BaseTool:       llmtool.MakeBaseTool("memory_forget", "按 ID 删除一条长期记忆。当用户明确要求忘记时使用；以及在 memory_update 合并重复记忆后，删除被合并掉的多余条目（合并后的内容已保存在保留的条目里）。修改单条记忆的内容用 memory_update，不要删除重建", memoryForgetParams{}),
 			memoryToolBase: base,
 		},
 	}
@@ -52,11 +56,19 @@ type memorySaveTool struct {
 
 func (t *memorySaveTool) Execute(_ context.Context, params any, _ llmtool.CallBackFuncs) (string, error) {
 	p := params.(*memorySaveParams)
-	entry, err := t.mgr.add(t.scope, p.UserID, p.Content, p.Tags)
+	entry, created, err := t.mgr.addEntry(t.scope, p.UserID, p.Content, p.Tags)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("已记住（ID=%s）：%s", entry.ID, entry.Content), nil
+	if !created {
+		return fmt.Sprintf("已有相同内容的记忆（ID=%s），未重复保存：%s", entry.ID, entry.Content), nil
+	}
+	result := fmt.Sprintf("已记住（ID=%s）：%s", entry.ID, entry.Content)
+	// 近似重复（换个说法的同一件事）不拦截写入，但提示 AI 合并，避免重复堆积
+	if hint := t.mgr.similarHint(t.scope, entry.ID, entry.Content); hint != "" {
+		result += "\n" + hint
+	}
+	return result, nil
 }
 
 // ---- memory_search ----
@@ -173,6 +185,50 @@ func formatMemoryLine(e memoryEntry) string {
 	sb.WriteString(e.Content)
 	sb.WriteString("（记于 " + e.CreatedAt.Local().Format("2006-01-02") + "）")
 	return sb.String()
+}
+
+// ---- memory_update ----
+
+type memoryUpdateParams struct {
+	ID      string   `json:"id" desc:"要更新的记忆ID（memory_search 结果中方括号内的8位ID）"`
+	Content string   `json:"content" desc:"更新后的完整记忆内容（覆盖原内容），一条完整自洽的事实；最长 2000 字符，超出会被截断"`
+	UserID  *string  `json:"user_id,omitempty" desc:"该记忆关联的用户ID（QQ 为 qq:QQ号，其他平台为带前缀的ID）；不填保留原关联用户，填空字符串则清空关联"`
+	Tags    []string `json:"tags,omitempty" desc:"分类标签（覆盖原标签）；不填保留原标签，传空数组则清空标签"`
+}
+
+type memoryUpdateTool struct {
+	llmtool.BaseTool[memoryUpdateParams]
+	memoryToolBase
+}
+
+func (t *memoryUpdateTool) Execute(_ context.Context, params any, _ llmtool.CallBackFuncs) (string, error) {
+	p := params.(*memoryUpdateParams)
+	if strings.TrimSpace(p.ID) == "" {
+		return "", fmt.Errorf("id 不能为空（先用 memory_search 查看已有记忆获取 ID）")
+	}
+	if strings.TrimSpace(p.Content) == "" {
+		return "", fmt.Errorf("content 不能为空")
+	}
+	// 未传的字段保留原值（user_id 为 nil / tags 为 nil 时沿用），
+	// 显式传空字符串或空数组则清空，便于只更正内容而不丢标签与关联
+	cur, ok := t.mgr.get(t.scope, p.ID)
+	if !ok {
+		return "", fmt.Errorf("记忆不存在: %s", p.ID)
+	}
+	userID := cur.UserID
+	if p.UserID != nil {
+		userID = *p.UserID
+	}
+	tags := cur.Tags
+	if p.Tags != nil {
+		tags = p.Tags
+	}
+	if err := t.mgr.update(t.scope, p.ID, userID, p.Content, tags); err != nil {
+		return "", err
+	}
+	// 回读落盘结果：内容可能被 MaxContentRunes 截断，反馈实际保存的版本
+	updated, _ := t.mgr.get(t.scope, p.ID)
+	return fmt.Sprintf("已更新记忆（ID=%s）：%s", p.ID, updated.Content), nil
 }
 
 // ---- memory_forget ----

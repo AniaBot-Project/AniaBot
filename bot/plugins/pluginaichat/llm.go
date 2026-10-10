@@ -56,7 +56,7 @@ func (p *AIChatPlugin) buildScenePrompt(b bot.Bot, id message.QID, isGroup bool)
 	}
 	sb.WriteString("\n用户消息以 [nickname:昵称 id:用户ID] 开头，id 即该发言者在当前平台的用户 ID。")
 	if p.memoryManager != nil {
-		sb.WriteString("\n\n【长期记忆】你拥有跨会话的长期记忆能力：对话中得知的用户称呼/偏好/重要信息、群里的约定或值得记住的事件，应主动调用 memory_save 保存；当对话涉及过去的事情或你不确定的背景时，先调用 memory_search 回忆；记忆有误或用户要求忘记时用 memory_forget 删除。记忆仅在当前会话内可见。")
+		sb.WriteString("\n\n【长期记忆】你拥有跨会话的长期记忆能力：对话中得知的用户称呼/偏好/重要信息、群里的约定或值得记住的事件，应主动调用 memory_save 保存；当对话涉及过去的事情或你不确定的背景时，先调用 memory_search 回忆；发现记忆有误、过时或与现有记忆重复时主动维护——用 memory_update 更正或合并（合并后删除多余条目），不必等用户开口，只有用户明确要求忘记时才整条删除。记忆仅在当前会话内可见。")
 	}
 	if p.knowledgeManager != nil {
 		sb.WriteString("\n\n【知识库】你拥有知识库检索能力：遇到需要查资料、或用户询问知识库中应有文档的问题时，先调用 kb_search 检索；若用户明确提供了值得长期保存的完整资料/教程，可调用 kb_add 记入当前会话的知识库。知识库含当前会话库与全局库，回答引用知识库内容时可说明出处。")
