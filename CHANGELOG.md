@@ -11,6 +11,8 @@
 
 ## [Unreleased]
 
+## [v4.7.8] - 2026-10-10
+
 ### 变更
 
 - 精简AI插件配置，subagent和agent team跟随主模型配置
