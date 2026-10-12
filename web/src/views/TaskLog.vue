@@ -202,6 +202,9 @@
             <span v-if="log.tool_calls?.length" class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap bg-zinc-100 text-zinc-600 border border-zinc-200">
               {{ log.tool_calls.length }} 次工具调用
             </span>
+            <span v-if="log.output_skipped" class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap bg-amber-50 text-amber-700 border border-amber-200">
+              已跳过输出
+            </span>
             <span class="ml-auto text-xs text-slate-400 font-mono whitespace-nowrap">{{ fmtTime(log.trigger_time) }}</span>
           </div>
           <p class="mt-2 text-sm text-slate-700 font-medium truncate">{{ log.task_title || '(无标题)' }}</p>
@@ -320,10 +323,17 @@
             </div>
           </div>
 
-          <!-- 最终回复 -->
+          <!-- 最终回复（AI 调用 skip_output 时未发送给目标，仅存档在此） -->
           <div v-if="detail.reply">
-            <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium mb-2">最终回复</h3>
+            <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium mb-2">
+              最终回复
+              <span v-if="detail.output_skipped" class="normal-case tracking-normal text-amber-600">（已跳过输出，未发送给目标）</span>
+            </h3>
             <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-white/60 rounded-lg px-3 py-2">{{ detail.reply }}</p>
+          </div>
+          <!-- AI 未输出任何文本但请求了跳过：说明原因，避免只看到空白 -->
+          <div v-else-if="detail.output_skipped" class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+            本次执行已跳过输出，未向目标发送任何消息{{ detail.skip_reason ? '：' + detail.skip_reason : '' }}
           </div>
         </div>
       </div>

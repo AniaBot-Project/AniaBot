@@ -152,15 +152,19 @@ flowchart TB
     I --> J[完整工具循环]
     J --> K{委派了异步子代理?}
     K -->|是| L[drainClockSubagents 等待全部<br/>结果回喂 AI 合成最终回复]
-    K -->|否| M[只推送最终回复]
+    K -->|否| M{调用了 skip_output?}
     L --> M
-    M --> N[任务日志 success / timeout / error]
+    M -->|是| N[最终回复只进日志，不推送]
+    M -->|否| O[只推送最终回复]
+    N --> P[任务日志 success / timeout / error]
+    O --> P
 ```
 
 - 每次触发**全新一次性上下文**（nil historyStore，执行完丢弃），带完整工具能力
 - 超时 `clock.default_timeout_sec`（默认 120），超时后发消息告知用户
 - 执行日志走 `bot/component/tasklog`（`ania_task_log` 行级），记录工具调用明细、token 用量、最终回复；进程重启后遗留的 running 记录标记为 `interrupted`
 - 中间轮文本丢弃，只有最终回复推送给目标；工具显式发送的图片/文件正常发出
+- `skip_output` 工具（`clockskip.go`，仅在任务会话注册）：AI 判断本次无需汇报时调用，收尾输出（含子代理结果汇总后的合成轮）只记入执行日志、不推送给目标，供巡检/监控类任务保持安静；跳过标记与原因随任务日志落盘（面板与 `/clock log` 可见）
 - 用户经 `/clock` 管理，AI 经 `clock_create/list/update/delete/log` 工具管理
 
 ## 子代理（subagent）

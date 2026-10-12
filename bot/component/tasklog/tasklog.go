@@ -66,7 +66,9 @@ type Entry struct {
 	ToolCalls        []ToolCallRecord `json:"tool_calls,omitempty"`
 	ToolCallsTotal   int              `json:"tool_calls_total,omitempty"` // 工具调用总数（明细被截断时大于 len(ToolCalls)）
 	Error            string           `json:"error,omitempty"`
-	Reply            string           `json:"reply,omitempty"` // 最终回复（截断）
+	Reply            string           `json:"reply,omitempty"`          // 最终回复（截断）
+	OutputSkipped    bool             `json:"output_skipped,omitempty"` // AI 调用 skip_output：本轮最终回复未发送给目标
+	SkipReason       string           `json:"skip_reason,omitempty"`    // 跳过输出时 AI 说明的原因
 	PromptTokens     int              `json:"prompt_tokens,omitempty"`
 	CompletionTokens int              `json:"completion_tokens,omitempty"`
 	TotalTokens      int              `json:"total_tokens,omitempty"`

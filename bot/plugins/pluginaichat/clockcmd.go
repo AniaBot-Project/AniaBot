@@ -400,7 +400,16 @@ func formatLogLine(e tasklog.Entry) string {
 	if e.TotalTokens > 0 {
 		tokens = fmt.Sprintf(" %dtok", e.TotalTokens)
 	}
-	return fmt.Sprintf("- %s [%s] %s %s%s%s", t, string(e.Status), dur, e.TaskTitle, tokens, tail)
+	// AI 调用 skip_output 的执行没有推送消息，标出来避免看起来像「没有输出」
+	skipped := ""
+	if e.OutputSkipped {
+		skipped = " [已跳过输出"
+		if e.SkipReason != "" {
+			skipped += "：" + truncStr(e.SkipReason, 20)
+		}
+		skipped += "]"
+	}
+	return fmt.Sprintf("- %s [%s] %s %s%s%s%s", t, string(e.Status), dur, e.TaskTitle, tokens, skipped, tail)
 }
 
 func enabledText(on bool) string {
