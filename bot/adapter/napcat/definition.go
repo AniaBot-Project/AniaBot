@@ -21,6 +21,8 @@ var napcatConfigFields = []pluginconfig.Field{
 	{Key: "bot.adapter.ws.worker_queue_size", Label: "消息队列大小", Type: "int", Group: "NapCat 适配器", Help: "超出限制的消息将被丢弃", Default: 1024},
 	{Key: "bot.adapter.http.listen_port", Label: "本地监听端口", Type: "int", Group: "NapCat 适配器", Help: "HTTP 模式下 Bot 接收 NapCat 事件上报的本地端口；NapCat 侧需添加「HTTP 客户端」，上报地址填 http://<Bot 主机 IP>:<此端口>", Default: 6679},
 	{Key: "bot.adapter.http.target_url", Label: "NapCat HTTP 地址", Type: "string", Group: "NapCat 适配器", Help: "HTTP 模式下 NapCat 的「HTTP 服务器」地址，Bot 通过它调用 NapCat 接口（发消息等）", Default: "http://localhost:6680"},
+	{Key: "bot.adapter.request_timeout_sec", Label: "请求超时(秒)", Type: "int", Group: "NapCat 适配器", Help: "等待 NapCat 回包的时长；超时按失败处理（实际可能仍在执行）；0 或负数回退默认 10 秒，重启后生效", Default: 10},
+	{Key: "bot.adapter.upload_timeout_sec", Label: "上传超时(秒)", Type: "int", Group: "NapCat 适配器", Help: "发送文件/视频/语音等需先上传内容的消息时的等待时长，大文件或慢网络下可调大；0 或负数回退默认 120 秒，重启后生效", Default: 120},
 }
 
 // init 注册 NapCat（QQ 平台）适配器定义与 bot 外观包装器。

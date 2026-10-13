@@ -46,7 +46,9 @@ func MakeGroupCallback(bot bot.Bot, groupId, userId message.QID, logger *slog.Lo
 				logger.Info("发送文件", "group", groupId, "user", userId, "file", name)
 				return "发送成功", nil
 			}
-			return "", fmt.Errorf("发送失败")
+			// 失败原因可能是上传超时（见适配器上传超时配置）：内容可能稍后仍会送达，
+			// 提示模型勿自动重发，避免用户收到重复文件
+			return "", fmt.Errorf("发送失败（也可能是上传超时、内容稍后仍会送达，请勿重复发送）")
 		},
 		GetPrivateFileURL: func(fileId string) (string, error) {
 			qb := botQQ(bot)
@@ -94,8 +96,9 @@ func MakeFriendCallback(bot bot.Bot, userId message.QID, logger *slog.Logger) ll
 				logger.Info("发送文件", "user", userId, "file", name)
 				return "发送成功", nil
 			}
-			return "", fmt.Errorf("发送失败")
-
+			// 失败原因可能是上传超时（见适配器上传超时配置）：内容可能稍后仍会送达，
+			// 提示模型勿自动重发，避免用户收到重复文件
+			return "", fmt.Errorf("发送失败（也可能是上传超时、内容稍后仍会送达，请勿重复发送）")
 		},
 		GetPrivateFileURL: func(fileId string) (string, error) {
 			qb := botQQ(bot)

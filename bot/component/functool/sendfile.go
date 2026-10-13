@@ -52,7 +52,9 @@ func (t *SendFileTool) Execute(ctx context.Context, params any, callbacks llmtoo
 	}
 	_, err = callbacks.SendFile(p.Name, base64.StdEncoding.EncodeToString(data))
 	if err != nil {
-		return "发送失败", errToolExecute
+		// 原样返回回调错误：其中含「上传超时、内容可能稍后送达、请勿重复发送」
+		// 等对模型有指导意义的信息，避免模型自动重发导致用户收到重复文件
+		return "", err
 	}
 	return "发送成功", nil
 }

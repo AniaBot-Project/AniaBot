@@ -19,6 +19,8 @@ var luckyliliaConfigFields = []pluginconfig.Field{
 	{Key: "bot.luckylilia.ws.address", Label: "WS 地址", Type: "string", Group: "Luckylilia 适配器", Help: "LLBot WebSocket 正向服务地址", Default: "ws://localhost:3001"},
 	{Key: "bot.luckylilia.ws.worker_count", Label: "处理线程数", Type: "int", Group: "Luckylilia 适配器", Help: "0 为自动调整", Default: 0},
 	{Key: "bot.luckylilia.ws.worker_queue_size", Label: "消息队列大小", Type: "int", Group: "Luckylilia 适配器", Help: "超出限制的消息将被丢弃", Default: 1024},
+	{Key: "bot.luckylilia.request_timeout_sec", Label: "请求超时(秒)", Type: "int", Group: "Luckylilia 适配器", Help: "等待 LLBot 回包的时长；超时按失败处理（实际可能仍在执行）；0 或负数回退默认 10 秒，重启后生效", Default: 10},
+	{Key: "bot.luckylilia.upload_timeout_sec", Label: "上传超时(秒)", Type: "int", Group: "Luckylilia 适配器", Help: "发送文件/视频/语音等需先上传内容的消息时的等待时长，大文件或慢网络下可调大；0 或负数回退默认 120 秒，重启后生效", Default: 120},
 	{Key: "bot.luckylilia.http.listen_port", Label: "本地监听端口", Type: "int", Group: "Luckylilia 适配器", Help: "HTTP 模式下 Bot 接收 LLBot 事件上报的本地端口；LLBot 侧需添加「HTTP 客户端」，上报地址填 http://<Bot 主机 IP>:<此端口>", Default: 6689},
 	{Key: "bot.luckylilia.http.target_url", Label: "LLBot HTTP 地址", Type: "string", Group: "Luckylilia 适配器", Help: "HTTP 模式下 LLBot 的「HTTP 服务器」地址，Bot 通过它调用 LLBot 接口（发消息等）", Default: "http://localhost:6690"},
 }

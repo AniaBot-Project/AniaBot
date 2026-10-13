@@ -25,22 +25,30 @@ type luckyliliaHttpAdapter struct {
 	token      *string
 	httpClient *resty.Client
 	trigger    adapter.TriggerWrapper
+	// reqTimeout 普通请求等待超时；uploadTimeout 上传类请求（文件/视频/语音等）等待超时
+	reqTimeout    time.Duration
+	uploadTimeout time.Duration
 }
-
-const defaultTimeout = time.Second * 5
 
 // maxEventBodySize 上报事件体上限：容忍 base64 大图/语音等大事件，
 // 同时防止无界读取把内存撑爆
 const maxEventBodySize = 64 << 20 // 64MB
 
-func (n *luckyliliaHttpAdapter) createContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), defaultTimeout)
+func (n *luckyliliaHttpAdapter) createContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), timeout)
 }
 
 // postAndCheck 调用 LLBot 的 HTTP API：Bearer 头鉴权（llms.txt Token 鉴权文档），
 // 同时携带 access_token 查询参数兼容仅识别 OneBot v11 标准查询参数的协议端。
 func (n *luckyliliaHttpAdapter) postAndCheck(url string, body any, result any) bool {
-	ctx, cancel := n.createContext()
+	// 上传类调用 LLBot 需先把内容上传到服务器再回包，耗时远高于普通接口，
+	// 用单独的上传超时等待，避免慢上传被误判为发送失败
+	upload := isUploadRequest(actionFromURL(url), body)
+	timeout := n.reqTimeout
+	if upload {
+		timeout = n.uploadTimeout
+	}
+	ctx, cancel := n.createContext(timeout)
 	defer cancel()
 
 	req := n.httpClient.R().SetContext(ctx)
@@ -56,6 +64,15 @@ func (n *luckyliliaHttpAdapter) postAndCheck(url string, body any, result any) b
 	}
 	resp, err := req.Post(url)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			if upload {
+				// 超时仅表示结果未知：LLBot 侧的上传并未取消，内容可能仍会送达，勿重发
+				log.Printf("上传请求超时（结果未知：内容可能仍在发送、稍后送达，请勿重发）: %s", url)
+			} else {
+				log.Printf("HTTP请求超时: %s", url)
+			}
+			return false
+		}
 		log.Printf("HTTP请求失败: %v", err)
 		return false
 	}

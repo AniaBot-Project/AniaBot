@@ -20,12 +20,14 @@ import (
 type napcatWebSocketAdapter struct {
 	wsConn      *websocket.Conn
 	trigger     adapter.TriggerWrapper
-	ackMng      *ackManager
+	ackMng      *ackManager // ackMng.timeout 为普通请求超时
 	mu          sync.Mutex
 	msgCh       chan []byte
 	workerWg    sync.WaitGroup
 	workerCount int
 	queueSize   int
+	// uploadTimeout 上传类请求（文件/视频/语音等，见 isUploadRequest）的等待超时
+	uploadTimeout time.Duration
 
 	// 连接状态（供 Web 面板展示）
 	connState string // connecting | connected | reconnecting
@@ -109,7 +111,15 @@ func request[T any](n *napcatWebSocketAdapter, action string, params any, prefix
 		return nil, false
 	}
 
-	timer := time.NewTimer(n.ackMng.timeout)
+	// 上传类调用（文件/视频/语音等）NapCat 需先把内容上传到服务器再回包，耗时远高于
+	// 普通接口，用单独的上传超时等待，避免慢上传被误判为发送失败
+	upload := isUploadRequest(action, params)
+	timeout := n.ackMng.timeout
+	if upload {
+		timeout = n.uploadTimeout
+	}
+
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
 	select {
@@ -125,7 +135,12 @@ func request[T any](n *napcatWebSocketAdapter, action string, params any, prefix
 		}
 		return &resp.Data, true
 	case <-timer.C:
-		log.Printf("[%s] 请求超时, echo: %s", action, echo)
+		if upload {
+			// 超时仅表示结果未知：NapCat 侧的上传并未取消，内容可能仍会送达，勿重发
+			log.Printf("[%s] 上传超时（结果未知：内容可能仍在发送、稍后送达，请勿重发）, echo: %s", action, echo)
+		} else {
+			log.Printf("[%s] 请求超时, echo: %s", action, echo)
+		}
 		return nil, false
 	}
 }

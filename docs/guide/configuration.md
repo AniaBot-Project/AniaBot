@@ -193,6 +193,13 @@ bot.adapter.http.target_url    = http://localhost:6680 # NapCat HTTP 服务端�
 
 :::
 
+两种模式还共用以下超时配置（单位：秒，`0` 或负数回退默认值，**重启后生效**）：
+
+```text
+bot.adapter.request_timeout_sec = 10    # 普通请求等待 NapCat 回包的超时
+bot.adapter.upload_timeout_sec  = 120   # 发送文件/视频/语音等需先上传内容的消息时的等待超时，大文件或慢网络可调大
+```
+
 ::: warning Docker 部署注意
 HTTP 模式下 NapCat 向 `localhost` 上报会失败，请将 NapCat 的 HTTP Client 地址改为 AniaBot 所在机器的内网 IP。
 :::
@@ -210,6 +217,13 @@ bot.luckylilia.token              # 若 LLBot 端设置了 Token 则填写（Aut
 bot.luckylilia.ws.address         = ws://localhost:3001   # LLBot WebSocket 正向服务地址
 bot.luckylilia.ws.worker_count    = 0                     # 事件处理线程数，0 = 按 CPU 自动调整
 bot.luckylilia.ws.worker_queue_size = 1024                # 消息队列长度，超出则丢弃
+```
+
+两种模式还共用以下超时配置（单位：秒，`0` 或负数回退默认值，**重启后生效**）：
+
+```text
+bot.luckylilia.request_timeout_sec = 10    # 普通请求等待 LLBot 回包的超时
+bot.luckylilia.upload_timeout_sec  = 120   # 发送文件/视频/语音等需先上传内容的消息时的等待超时，大文件或慢网络可调大
 ```
 
 ```text [HTTP]

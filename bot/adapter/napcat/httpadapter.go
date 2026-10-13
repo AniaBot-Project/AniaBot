@@ -25,20 +25,28 @@ type napcatHttpAdapter struct {
 	token      *string
 	httpClient *resty.Client
 	trigger    adapter.TriggerWrapper
+	// reqTimeout 普通请求等待超时；uploadTimeout 上传类请求（文件/视频/语音等）等待超时
+	reqTimeout    time.Duration
+	uploadTimeout time.Duration
 }
-
-const defaultTimeout = time.Second * 5
 
 // maxEventBodySize 上报事件体上限：容忍 base64 大图/语音等大事件，
 // 同时防止无界读取把内存撑爆
 const maxEventBodySize = 64 << 20 // 64MB
 
-func (n *napcatHttpAdapter) createContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), defaultTimeout)
+func (n *napcatHttpAdapter) createContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), timeout)
 }
 
 func (n *napcatHttpAdapter) postAndCheck(url string, body any, result any) bool {
-	ctx, cancel := n.createContext()
+	// 上传类调用 NapCat 需先把内容上传到服务器再回包，耗时远高于普通接口，
+	// 用单独的上传超时等待，避免慢上传被误判为发送失败
+	upload := isUploadRequest(actionFromURL(url), body)
+	timeout := n.reqTimeout
+	if upload {
+		timeout = n.uploadTimeout
+	}
+	ctx, cancel := n.createContext(timeout)
 	defer cancel()
 
 	req := n.httpClient.R().SetContext(ctx)
@@ -53,6 +61,15 @@ func (n *napcatHttpAdapter) postAndCheck(url string, body any, result any) bool 
 	}
 	resp, err := req.Post(url)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			if upload {
+				// 超时仅表示结果未知：NapCat 侧的上传并未取消，内容可能仍会送达，勿重发
+				log.Printf("上传请求超时（结果未知：内容可能仍在发送、稍后送达，请勿重发）: %s", url)
+			} else {
+				log.Printf("HTTP请求超时: %s", url)
+			}
+			return false
+		}
 		log.Printf("HTTP请求失败: %v", err)
 		return false
 	}

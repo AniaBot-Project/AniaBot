@@ -860,7 +860,7 @@ func (m *clockManager) makeClockCallback(ctx context.Context, task *ClockTask, u
 		SendFile: func(name, bs64 string) (string, error) {
 			ok := m.sendFile(task, name, bs64)
 			if !ok {
-				return "", fmt.Errorf("发送失败")
+				return "", fmt.Errorf("发送失败（也可能是上传超时、内容稍后仍会送达，请勿重复发送）")
 			}
 			logger.Info("定时任务发送文件", "task", task.ID, "target", targetIDStr, "file", name)
 			return "发送成功", nil

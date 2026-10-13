@@ -78,6 +78,8 @@ bot:
     http:
       listen_port: 6679 # 本地监听端口，用于napcat向bot上报事件。注意这里如果是docker的话使用localhost无法连接，建议换成内网ip，即在napcat配置页面的http client设置为ip
       target_url: http://localhost:6680 # napcat开放的url，用于bot向napcat上报事件
+    request_timeout_sec: 10 # 普通请求等待 NapCat 回包的秒数，超时按失败处理
+    upload_timeout_sec: 120 # 发送文件/视频/语音等需先上传内容的消息时的等待秒数，大文件或慢网络可调大
 
   # Luckylilia(LLBot) 适配器（OneBot v11 QQ 协议端，与 NapCat 同类；websocket/http二选一）
   luckylilia:
@@ -90,6 +92,8 @@ bot:
     http:
       listen_port: 6689 # 本地监听端口，用于LLBot向bot上报事件（与 napcat 的 6679 区分）
       target_url: http://localhost:6690 # LLBot 开放的 url，用于bot调用 LLBot 接口（发消息等）
+    request_timeout_sec: 10 # 普通请求等待 LLBot 回包的秒数，超时按失败处理
+    upload_timeout_sec: 120 # 发送文件/视频/语音等需先上传内容的消息时的等待秒数，大文件或慢网络可调大
 
   # 缓存存储（易失，支持 TTL 与列表语义）
   store:
