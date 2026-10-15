@@ -55,6 +55,11 @@ func mkMsg(seq int, sender string) message.Message {
 	return message.Message{MessageSeq: seq, Sender: message.MessageSender{UserId: message.QID(sender)}}
 }
 
+// mkTimedMsg 构造带时间戳的消息（seq 与时间是同向递增的，便于按时间断言）。
+func mkTimedMsg(seq, ts int, sender string) message.Message {
+	return message.Message{MessageSeq: seq, Time: uint(ts), Sender: message.MessageSender{UserId: message.QID(sender)}}
+}
+
 func callHistory(t *testing.T, tool Tool, args string) string {
 	t.Helper()
 	out, err := tool.Execute(context.Background(), paramsOf(t, tool, args))
@@ -196,6 +201,130 @@ func setTestPageSize(t *testing.T, n int) {
 	old := historyPageSize
 	historyPageSize = n
 	t.Cleanup(func() { historyPageSize = old })
+}
+
+// TestHistoryBackwardCursorByTimeNotPosition 续查游标必须按时间取最旧一条，不能按
+// 数组位置：QQ 协议端修复后按时间升序返回（最旧在最前），此时取末位会拿到最新一条，
+// 翻页原地踏步（NapCat issue #441 的现象）；内存缓存类适配器则是最新在前。
+// 两种返回顺序都必须选中同一条最旧消息（seq=57）。
+func TestHistoryBackwardCursorByTimeNotPosition(t *testing.T) {
+	// 复用同一批消息的两种排列：升序（最旧在前）与倒序（最新在前）
+	ascending := []message.Message{
+		mkTimedMsg(57, 5700, "qq:2"), mkTimedMsg(58, 5800, "qq:2"),
+		mkTimedMsg(59, 5900, "qq:2"), mkTimedMsg(60, 6000, "qq:1"),
+	}
+	descending := []message.Message{
+		mkTimedMsg(60, 6000, "qq:1"), mkTimedMsg(59, 5900, "qq:2"),
+		mkTimedMsg(58, 5800, "qq:2"), mkTimedMsg(57, 5700, "qq:2"),
+	}
+	for name, firstPage := range map[string][]message.Message{"升序返回": ascending, "倒序返回": descending} {
+		t.Run(name, func(t *testing.T) {
+			fake := &fakeHistoryBot{group: true, pages: [][]message.Message{
+				firstPage,
+				// 第二页只有一条命中，且不足一页 → 翻页到此结束
+				{mkTimedMsg(56, 5600, "qq:1"), mkTimedMsg(55, 5500, "qq:2")},
+			}}
+			setTestPageSize(t, 4)
+			tool := NewMsgHistoryTool(historyCtx(fake, nil), "qq_get_msg_history")
+
+			// 首条命中只凑够 1 条（count=2），必然继续发起第二次请求
+			out := callHistory(t, tool, `{"count":2,"user_id":"qq:1"}`)
+			if len(fake.lastSeqs) < 2 {
+				t.Fatalf("应继续向前翻页, lastSeqs=%v", fake.lastSeqs)
+			}
+			if fake.lastSeqs[1] != 57 {
+				t.Errorf("续查游标应为最旧的 57（而非数组端点的 57/60）, got %d", fake.lastSeqs[1])
+			}
+			if !strings.Contains(out, "[message_seq:60]") {
+				t.Errorf("首条命中应为最新的 60:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestHistoryFilterCursorStopsWhenNotAdvancing 平台忽略游标（或已到最早消息）时，
+// 最旧一条与传入游标相同 → 停止翻页，不得无限循环。
+func TestHistoryFilterCursorStopsWhenNotAdvancing(t *testing.T) {
+	fake := &fakeHistoryBot{group: true, pages: [][]message.Message{
+		// 平台忽略游标：两次都返回同一批
+		{mkTimedMsg(60, 6000, "qq:2"), mkTimedMsg(59, 5900, "qq:2"), mkTimedMsg(58, 5800, "qq:2"), mkTimedMsg(57, 5700, "qq:2")},
+		{mkTimedMsg(60, 6000, "qq:2"), mkTimedMsg(59, 5900, "qq:2"), mkTimedMsg(58, 5800, "qq:2"), mkTimedMsg(57, 5700, "qq:2")},
+	}}
+	setTestPageSize(t, 4)
+	tool := NewMsgHistoryTool(historyCtx(fake, nil), "qq_get_msg_history")
+
+	out := callHistory(t, tool, `{"user_id":"qq:9"}`)
+	if len(fake.calls) > 2 {
+		t.Errorf("游标不前进时应尽快停止, calls=%d", len(fake.calls))
+	}
+	if !strings.Contains(out, "没有找到") {
+		t.Errorf("未命中应如实提示:\n%s", out)
+	}
+}
+
+// TestHistoryFilterCursorWithinSameSecond QQ 时间戳是秒级，页内可能多条落在同一秒：
+// 报文顺序即真实先后（升序页里同秒组由旧到新），必须选中该秒组内最旧的一条。
+// 若只按 Time 取最小值而忽略同秒内的先后，会拿到同秒里较新的一条，续查窗口随之
+// 缩水。该场景只出现在填充 message_seq 的 QQ 协议端（返回时间升序）。
+func TestHistoryFilterCursorWithinSameSecond(t *testing.T) {
+	// 首条 5000 与末条 4000 之间夹着同秒组，整页升序
+	page := []message.Message{
+		mkTimedMsg(57, 5000, "qq:2"), // 同秒组内最旧
+		mkTimedMsg(58, 5000, "qq:2"),
+		mkTimedMsg(59, 5000, "qq:2"),
+	}
+	fake := &fakeHistoryBot{group: true, pages: [][]message.Message{
+		page,
+		{mkTimedMsg(56, 4000, "qq:1")}, // 第二页命中且不足一页 → 结束
+	}}
+	setTestPageSize(t, 3) // 首页须满一页才会继续回溯
+	tool := NewMsgHistoryTool(historyCtx(fake, nil), "qq_get_msg_history")
+
+	callHistory(t, tool, `{"count":1,"user_id":"qq:1"}`)
+	if len(fake.lastSeqs) < 2 {
+		t.Fatalf("应继续向前翻页, lastSeqs=%v", fake.lastSeqs)
+	}
+	if fake.lastSeqs[1] != 57 {
+		t.Errorf("同秒页的续查游标应为同秒组内最旧的 57, got %d", fake.lastSeqs[1])
+	}
+}
+
+// TestHistoryNoFilterSortsAscendingAndHintsCursor 无筛选单页：输出按时间升序
+// （最早在最上面），并在开头给出本页最早一条的游标，AI 无需从位置推断翻页入口。
+func TestHistoryNoFilterSortsAscendingAndHintsCursor(t *testing.T) {
+	fake := &fakeHistoryBot{group: true, pages: [][]message.Message{
+		{mkTimedMsg(105, 1050, "qq:1"), mkTimedMsg(104, 1040, "qq:2"), mkTimedMsg(103, 1030, "qq:1")},
+	}}
+	tool := NewMsgHistoryTool(historyCtx(fake, nil), "qq_get_msg_history")
+
+	out := callHistory(t, tool, `{"count":3}`)
+	if !strings.Contains(out, "最早一条的 message_seq=103") {
+		t.Errorf("应给出续查游标提示:\n%s", out)
+	}
+	// 升序：103 在 105 之前
+	if strings.Index(out, "[message_seq:103]") > strings.Index(out, "[message_seq:105]") {
+		t.Errorf("输出应按时间升序（旧的在前）:\n%s", out)
+	}
+}
+
+// TestHistoryFilterDedupAcrossPages 反向翻页时锚点消息常同时出现在相邻两页，
+// 命中的重复条目应去重，避免同一条发言重复占满结果。
+func TestHistoryFilterDedupAcrossPages(t *testing.T) {
+	// 两页在 seq=57 处重叠，且它来自被筛选成员
+	fake := &fakeHistoryBot{group: true, pages: [][]message.Message{
+		{mkTimedMsg(60, 6000, "qq:2"), mkTimedMsg(59, 5900, "qq:2"), mkTimedMsg(58, 5800, "qq:2"), mkTimedMsg(57, 5700, "qq:1")},
+		{mkTimedMsg(57, 5700, "qq:1"), mkTimedMsg(56, 5600, "qq:1"), mkTimedMsg(55, 5500, "qq:2"), mkTimedMsg(54, 5400, "qq:2")},
+	}}
+	setTestPageSize(t, 4)
+	tool := NewMsgHistoryTool(historyCtx(fake, nil), "qq_get_msg_history")
+
+	out := callHistory(t, tool, `{"count":2,"user_id":"1"}`)
+	if got := strings.Count(out, "[message_seq:57]"); got != 1 {
+		t.Errorf("跨页重叠的命中消息应去重（出现 %d 次）:\n%s", got, out)
+	}
+	if !strings.Contains(out, "2 条来自 qq:1") {
+		t.Errorf("应命中 2 条（57、56）:\n%s", out)
+	}
 }
 
 // TestHistoryImageSink 拉取到的消息应回调 OnMessages（宿主借此登记图片）。

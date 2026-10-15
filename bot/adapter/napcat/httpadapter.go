@@ -393,11 +393,7 @@ func (n *napcatHttpAdapter) SendGroupSign(groupId message.QID) bool {
 }
 
 func (n *napcatHttpAdapter) GetGroupMsgHistory(groupId message.QID, count int, message_seq int) (*[]message.Message, bool) {
-	data := map[string]any{
-		"group_id":    rawQQ(groupId),
-		"count":       count,
-		"message_seq": message_seq,
-	}
+	data := historyParams("group_id", groupId, count, message_seq)
 	var resp message.Response[httpForwardData]
 	if !n.postAndCheck(n.baseUrl+"/get_group_msg_history", data, &resp) {
 		return nil, false
@@ -412,11 +408,7 @@ func (n *napcatHttpAdapter) GetGroupMsgHistory(groupId message.QID, count int, m
 }
 
 func (n *napcatHttpAdapter) GetFriendMsgHistory(userId message.QID, count int, message_seq int) (*[]message.Message, bool) {
-	data := map[string]any{
-		"user_id":     rawQQ(userId),
-		"count":       count,
-		"message_seq": message_seq,
-	}
+	data := historyParams("user_id", userId, count, message_seq)
 	var resp message.Response[httpForwardData]
 	if !n.postAndCheck(n.baseUrl+"/get_friend_msg_history", data, &resp) {
 		return nil, false

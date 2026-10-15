@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/jeanhua/AniaBot/common/bot"
@@ -53,7 +54,8 @@ func NewMsgHistoryTool(ctx Context, name string) Tool {
 
 func (t *msgHistoryTool) Name() string { return t.name }
 func (t *msgHistoryTool) Description() string {
-	return "查看当前会话的历史消息记录，可向前翻页（把某条消息的 message_seq 作为游标传入）；" +
+	return "查看当前会话的历史消息记录，消息按时间从旧到新排列；可向前翻页：把当前结果中最早一条" +
+		"（最上面）的 message_seq 作为游标传入即可继续查看更早的消息。" +
 		"支持按群成员筛选：user_id 填某成员 ID 时只返回其在最近消息中的发言。" +
 		"消息中的图片以 [图片 <hash> url:<url>] 标识，可用 load_images 按哈希查看。"
 }
@@ -78,7 +80,15 @@ func (t *msgHistoryTool) Execute(ctx context.Context, params any) (string, error
 		if err != nil {
 			return "", err
 		}
-		return FormatMessages(*msgs, t.ctx.Bot), nil
+		list := *msgs
+		out := FormatMessages(sortByTime(list), t.ctx.Bot)
+		// 显式给出本页最早一条的游标：AI 不必再从列表位置推断往哪传，
+		// 也避免在返回顺序相反的协议端上取错端点。
+		if oldest, ok := oldestInPage(list); ok {
+			out = fmt.Sprintf("最近 %d 条消息（最早一条的 message_seq=%d，传回可继续向前查看更早消息）：\n%s",
+				len(list), oldest, out)
+		}
+		return out, nil
 	}
 
 	// 按成员筛选：从游标（默认最新）处整页向前回溯，凑够 count 条命中即止
@@ -88,6 +98,7 @@ func (t *msgHistoryTool) Execute(ctx context.Context, params any) (string, error
 	}
 	var (
 		matched   []message.Message
+		seen      = map[int]struct{}{}
 		fetched   int
 		cursor    = p.MessageSeq
 		exhausted bool
@@ -104,13 +115,25 @@ func (t *msgHistoryTool) Execute(ctx context.Context, params any) (string, error
 		}
 		fetched += len(list)
 		for _, m := range list {
-			if m.Sender.UserId == userID {
-				matched = append(matched, m)
+			if m.Sender.UserId != userID {
+				continue
 			}
+			// 相邻页可能以同一条消息为边界（反向翻页时锚点消息常同时出现在页首/页尾），
+			// 按游标去重，避免同一条发言在结果里重复出现。
+			if m.MessageSeq != 0 {
+				if _, dup := seen[m.MessageSeq]; dup {
+					continue
+				}
+				seen[m.MessageSeq] = struct{}{}
+			}
+			matched = append(matched, m)
 		}
-		next := list[len(list)-1].MessageSeq
-		// 游标不前进（平台忽略游标或已到最早消息）或返回不足一页：无法继续回溯
-		if next == 0 || next == cursor || len(list) < historyPageSize {
+		// 续查游标必须取本页最旧一条：各协议端返回顺序不统一（QQ 协议端按时间
+		// 升序、内存缓存类按时间降序），按数组位置取会在其中一种顺序下把游标取
+		// 成最新一条，导致翻页原地踏步。
+		next, ok := oldestInPage(list)
+		if !ok || next == 0 || next == cursor || len(list) < historyPageSize {
+			// 无游标可取、游标不前进（平台忽略游标或已到最早消息）或返回不足一页：无法继续回溯
 			exhausted = true
 			break
 		}
@@ -127,11 +150,78 @@ func (t *msgHistoryTool) Execute(ctx context.Context, params any) (string, error
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "已回溯最近 %d 条消息，其中 %d 条来自 %s：\n", fetched, len(matched), userID)
-	sb.WriteString(FormatMessages(matched, t.ctx.Bot))
+	sb.WriteString(FormatMessages(sortByTime(matched), t.ctx.Bot))
 	if !exhausted && len(matched) < count {
 		fmt.Fprintf(&sb, "\n（还有更早消息未回溯，可带上 message_seq=%d 继续向前筛选）", cursor)
 	}
 	return sb.String(), nil
+}
+
+// oldestInPage 返回本页最旧消息的 message_seq。
+//
+// 历史页的数组顺序随协议端变化（QQ 协议端按时间升序，内存缓存类按时间降序），因此
+// 按时间取最旧，不能依赖数组端点。时间戳为秒级，一页可能整段落在同一秒：此时按页面
+// 方向取该秒组的端点（升序取组内首条、降序取组内末条），选错会拿到同秒内较新的一条，
+// 续查窗口以它为准虽不丢消息（调用方按游标去重）但会大幅缩小每次前进的距离。
+// 整页时间完全相同时方向无从判断：按升序处理——填充 message_seq 的只有 NapCat 系
+// 协议端，其返回按时间升序，正是该分支命中的场景。
+// 全页缺失时间戳时回退旧实现的末位约定（假定最新在前）；最旧一条没有 sequence
+// （返回 0）时 ok=false，调用方停止翻页。
+func oldestInPage(msgs []message.Message) (int, bool) {
+	if len(msgs) == 0 {
+		return 0, false
+	}
+	timed := make([]message.Message, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Time != 0 {
+			timed = append(timed, m)
+		}
+	}
+	if len(timed) == 0 {
+		if seq := msgs[len(msgs)-1].MessageSeq; seq != 0 {
+			return seq, true
+		}
+		return 0, false
+	}
+	ascending := timed[0].Time <= timed[len(timed)-1].Time
+	oldest := timed[0]
+	for _, m := range timed[1:] {
+		if m.Time < oldest.Time {
+			oldest = m
+		}
+	}
+	if !ascending {
+		// 降序页：同秒组内更旧的排在更后面
+		for i := len(timed) - 1; i >= 0; i-- {
+			if timed[i].Time == oldest.Time {
+				oldest = timed[i]
+				break
+			}
+		}
+	}
+	if oldest.MessageSeq == 0 {
+		return 0, false
+	}
+	return oldest.MessageSeq, true
+}
+
+// sortByTime 返回按时间升序（旧→新）排列的消息副本：历史页的数组顺序随协议端变化，
+// 展示前统一排序，使「最早一条在最上面」成为稳定契约。时间缺失（0）的消息排在末尾，
+// 比较关系因此是全序（不依赖排序算法的稳定性）。
+func sortByTime(msgs []message.Message) []message.Message {
+	out := append([]message.Message(nil), msgs...)
+	sort.SliceStable(out, func(i, j int) bool {
+		return sortKey(out[i].Time) < sortKey(out[j].Time)
+	})
+	return out
+}
+
+// sortKey 排序键：时间缺失（0）视为未知并排在末尾（取 uint 最大值）。
+func sortKey(t uint) uint {
+	if t == 0 {
+		return ^uint(0)
+	}
+	return t
 }
 
 // fetch 按会话类型拉取一页历史消息，并在 OnMessages 回调非空时把消息交给宿主
