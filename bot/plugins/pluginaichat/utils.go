@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jeanhua/AniaBot/bot/component/aichat"
+	"github.com/jeanhua/AniaBot/bot/component/functool"
 	"github.com/jeanhua/AniaBot/bot/component/llmtool"
 	"github.com/jeanhua/AniaBot/common/aitool"
 	"github.com/jeanhua/AniaBot/common/bot"
@@ -388,7 +389,7 @@ func (p *AIChatPlugin) configureImageCallbacks(ctx context.Context, bot bot.Bot,
 // usageSink 接收备用识别产生的 LLM 用量（多模态路径不产生产量，不会调用）。
 // 与 file 工具一致，禁止读取配置文件以避免凭据等敏感信息经图片通道泄露。
 func (p *AIChatPlugin) loadLocalImageInto(ctx context.Context, path string, loadedImages *[]string, usageSink func(aichat.TokenUsage)) string {
-	if strings.Contains(path, "aniabot.db") {
+	if functool.SensitiveHostPath(path) {
 		return "禁止读取aniabot数据库文件"
 	}
 	data, err := os.ReadFile(path)

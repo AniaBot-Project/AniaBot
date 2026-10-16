@@ -58,6 +58,12 @@ func SafeErrorText(err error) string {
 	return maskSensitive(sanitizeOneLine(stripWrapPrefixes(safeErrText(err))))
 }
 
+// contextOverflowPattern 上游「输入超出上下文长度」类错误的文本特征。
+var contextOverflowPattern = regexp.MustCompile(`(?i)context length|maximum context|too many tokens|input length exceeds|prompt is too long|context_length_exceeded`)
+
+// contextOverflowHint 超限类错误对应的用户可见文案
+const contextOverflowHint = "对话内容超出模型的上下文长度限制"
+
 // knownErrPatterns 常见上游错误的关键词 → 简短中文原因。命中时用户只看中文
 // 结论（原始英文长文不展示，完整内容仍在日志里）。
 var knownErrPatterns = []struct {
@@ -68,14 +74,36 @@ var knownErrPatterns = []struct {
 	{regexp.MustCompile(`(?i)unsupported image|invalid image|not a valid image|image.*is invalid`),
 		"消息中的图片不受支持或已损坏（仅支持 webp/png/jpeg/gif）"},
 	// 上下文/输入超长
-	{regexp.MustCompile(`(?i)context length|maximum context|too many tokens|input length exceeds|prompt is too long`),
-		"对话内容超出模型的上下文长度限制"},
+	{contextOverflowPattern, contextOverflowHint},
 	// 余额不足（部分提供商用 400/403 文本返回）
 	{regexp.MustCompile(`(?i)insufficient (balance|quota)|balance is (empty|insufficient)|has exceeded your (quota|credit)`),
 		"账户余额不足"},
 	// 内容安全拦截
 	{regexp.MustCompile(`(?i)content (filter|policy|moderation)|content_management_policy|inappropriate content`),
 		"内容被上游安全策略拦截"},
+}
+
+// IsContextOverflowError 判断错误是否为「输入超出上下文长度」类：先看 SDK 错误
+// 的结构化 message，再兜底扫描错误文本。ChatBot 失败路径用它标记下一轮强制压缩
+// （失败请求不更新 usage，历史可能永远不触发常规压缩阈值）。
+func IsContextOverflowError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var oaiErr *openai.Error
+	if errors.As(err, &oaiErr) && errorTextOverflow(oaiErr.Message) {
+		return true
+	}
+	var antErr *anthropic.Error
+	if errors.As(err, &antErr) && errorTextOverflow(anthropicErrMessage(antErr)) {
+		return true
+	}
+	return errorTextOverflow(safeErrText(err))
+}
+
+// errorTextOverflow 文本是否命中上下文超限特征。
+func errorTextOverflow(text string) bool {
+	return text != "" && contextOverflowPattern.MatchString(text)
 }
 
 // matchKnownErrPattern 按上游错误文本匹配已知的常见错误，返回简短中文原因；未命中返回空串。

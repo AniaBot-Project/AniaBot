@@ -24,6 +24,9 @@ type messageWindow struct {
 	// nil 时复用主对话 llmClient。
 	compressorClient *LLMClient
 	lastPromptTokens int
+	// forceCompress 上一轮以「上下文超限」类错误失败，本轮必须先压缩
+	// （见 forceCompressNext）
+	forceCompress bool
 	// compressUsage 最近一次成功压缩的 token 用量，由 ChatBot.Chat 取走并入统计
 	compressUsage TokenUsage
 	store         HistoryStore
@@ -177,6 +180,21 @@ func (w *messageWindow) needsCompression() bool {
 	return w.estimateTokens() > threshold
 }
 
+// forceCompressNext 标记「上一轮以超限类错误失败，下一轮必须先压缩」。
+// 失败请求不更新 lastPromptTokens，若历史恰好在阈值之下、单轮工具循环却把
+// 请求撑过模型窗口，就会形成「每轮都失败且永不触发压缩」的循环；
+// markOverflowFailure 在失败路径调用，使下一轮 Chat 强制执行一次压缩/截断。
+func (w *messageWindow) forceCompressNext() {
+	w.forceCompress = true
+}
+
+// takeForceCompress 取走并清除强制压缩标记。
+func (w *messageWindow) takeForceCompress() bool {
+	v := w.forceCompress
+	w.forceCompress = false
+	return v
+}
+
 // estimateTokens 用字符数粗估当前历史的 token 量，仅用于 usage 缺失时的兜底判断。
 // 约 2 个字符折 1 token（中英文混合的保守估计）；图片片段按固定值估算，
 // 不统计 data URI 的 base64 长度（与真实多模态 token 计量无关）。
@@ -201,7 +219,10 @@ func (w *messageWindow) estimateTokens() int {
 }
 
 func (w *messageWindow) MaybeCompress(ctx context.Context) error {
-	if !w.needsCompression() || w.compressor == nil || w.llmClient == nil {
+	if !w.needsCompression() && !w.takeForceCompress() {
+		return nil
+	}
+	if w.compressor == nil || w.llmClient == nil {
 		return nil
 	}
 
@@ -231,6 +252,14 @@ func (w *messageWindow) MaybeCompress(ctx context.Context) error {
 	// 压缩后历史发生改变，需落盘覆盖旧记录
 	w.persistReplace()
 	return nil
+}
+
+// markOverflowFailure 记录「本轮请求以超限类错误失败」：下一轮 Chat 构建前
+// 强制执行一次压缩/截断。供 ChatBot 在错误路径调用（见 forceCompressNext）。
+func (w *messageWindow) markOverflowFailure() {
+	w.forceCompressNext()
+	// 失败请求没有真实 usage，清掉旧值让下一轮走字符数粗估兜底
+	w.lastPromptTokens = 0
 }
 
 // takeCompressUsage 取走最近一次压缩的 token 用量（取后清零），

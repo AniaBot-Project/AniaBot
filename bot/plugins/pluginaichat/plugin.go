@@ -58,6 +58,11 @@ type AIChatPlugin struct {
 	// pendingMsgs AI 响应期间到达的消息排队队列，按会话（群/好友）隔离
 	pendingMsgs sync.Map
 
+	// sessionBots 会话 → 最近使用的平台外观（事件来源 bot.Bot），供后台兜底
+	// 清扫器在没有事件来源时构造发送回调；独立于 chats 存放，
+	// 避免与事件线程并发写同一结构体字段
+	sessionBots sync.Map
+
 	// noMentionCount 未 @ 消息计数；noMentionMu 保护其读改写（sync.Map 的
 	// Load+Store 组合非原子，并发消息会丢计数）。计数跨重启持久化（见
 	// nomention.go），避免重启清零导致「30 条未@自动清空」永远无法触发
@@ -201,19 +206,26 @@ func (p *AIChatPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 	}
 
 	if cmd.Name == "stop" {
-		// 停止当前请求、取消异步子代理，同时丢弃排队消息
-		p.cancelAsyncSubagents(msg.GroupId, true)
-		p.drainPending(msg.GroupId, true)
-		if p.stopRequest(msg.GroupId, true) {
+		isAdmin := msg.Sender.UserId == p.SystemConfig.AdminId
+		stopped, denied := p.stopRequest(msg.GroupId, true, msg.Sender.UserId, isAdmin)
+		if denied != "" {
 			builder := msgchain.Builder().Group()
-			builder.Text("用户停止AI响应")
+			builder.Text(denied)
 			bot.SendGroupMsg(msg.GroupId, builder.Build())
+			return false, nil
+		}
+		// 确实停止了一个请求才丢弃排队消息、取消异步子代理：无活跃请求时
+		// 不清队列（队列里可能有待消费的遗留消息，由兜底清扫器负责处理）
+		builder := msgchain.Builder().Group()
+		if stopped {
+			p.cancelAsyncSubagents(msg.GroupId, true)
+			p.drainPending(msg.GroupId, true)
+			builder.Text("用户停止AI响应")
 			p.Logger.Info("用户停止 AI 响应", "group", msg.GroupId, "user", msg.Sender.UserId)
 		} else {
-			builder := msgchain.Builder().Group()
 			builder.Text("当前没有正在进行的 AI 请求")
-			bot.SendGroupMsg(msg.GroupId, builder.Build())
 		}
+		bot.SendGroupMsg(msg.GroupId, builder.Build())
 		return false, nil
 	}
 
@@ -230,8 +242,16 @@ func (p *AIChatPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 		p.commandManager.rewriteCustomCommand(cmd, &msg)
 	}
 
-	lock := p.tryLock(msg.GroupId, true)
+	lock, fail := p.tryLockDetailed(msg.GroupId, true)
 	if lock == nil {
+		if fail == lockRateLimited {
+			// 全局并发槽位已满：与「会话正忙」不同，此队列没有消费者
+			//（会话本身空闲，拿不到的是配额），直接拒绝而不是静默排队
+			builder := msgchain.Builder().Group()
+			builder.Text("当前请求太多啦，请稍后再试~")
+			bot.SendGroupMsg(msg.GroupId, builder.Build())
+			return true, nil
+		}
 		// 当前正在响应：消息进入排队队列，响应结束后自动合并处理
 		first, ok := p.enqueuePending(msg.GroupId, true, msg)
 		if !ok {
@@ -244,6 +264,9 @@ func (p *AIChatPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 			bot.SendGroupMsg(msg.GroupId, builder.Build())
 		}
 		p.touchChat(sessionKey(msg.GroupId, true))
+		// 兜底唤醒：入队可能与持锁者最后一次 drain 交错而错过所有消费者，
+		// 由后台尝试接管会话消费队列（正常路径下锁仍在，短暂重试即放弃）
+		bot.Go("pending:"+sessionKey(msg.GroupId, true), func() { p.kickPending(bot, msg.GroupId, true) })
 		return true, nil
 	}
 	p.touchChat(sessionKey(msg.GroupId, true))
@@ -263,15 +286,25 @@ func (p *AIChatPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 	// 无论是否清空，@ 消息都会重置连续未@计数
 	p.applyNoMentionClear(ctx, msg.GroupId, chat)
 
-	chatCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	p.setActiveContext(msg.GroupId, true, cancel)
+	// runCtx 只承载 /stop 与锁丢失的取消信号（不带事件 deadline），每批消息
+	// 各自派生预算：复用同一个 ctx 会让第二批及之后只剩首批消耗后的残额
+	// （长响应下几乎必然超时），而会话被淘汰重建/后台兜底触发的路径本来就是
+	// 按次独立预算。锁丢失时心跳经 attachCancel 取消 runCtx 中止整条请求。
+	// WithoutCancel 保留事件 ctx 的值（追踪等），仅剥离 deadline 与取消。
+	runCtx, cancelRun := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelRun()
+	lock.attachCancel(cancelRun)
 
 	// 先取出可能遗留的排队消息（上一响应结束瞬间到达、未来得及处理的），与本次消息合并；
 	// 之后每轮响应结束继续排空队列，直到没有新消息为止
 	batch := append(p.drainPending(msg.GroupId, true), msg)
 	for len(batch) > 0 {
-		if !p.processChatBatch(chatCtx, bot, msg.GroupId, true, chat, batch) {
+		p.setActiveContext(msg.GroupId, true, &activeRequest{cancel: cancelRun, requester: batchRequester(batch)})
+		batchCtx, cancelBatch := context.WithTimeout(runCtx, p.msgEventTimeout)
+		ok := p.processChatBatch(batchCtx, bot, msg.GroupId, true, chat, batch)
+		cancelBatch()
+		p.clearActiveContext(msg.GroupId, true)
+		if !ok {
 			return false, nil
 		}
 		batch = p.drainPending(msg.GroupId, true)
@@ -300,19 +333,24 @@ func (p *AIChatPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command
 	}
 
 	if cmd.Name == "stop" {
-		// 停止当前请求、取消异步子代理，同时丢弃排队消息
-		p.cancelAsyncSubagents(msg.Sender.UserId, false)
-		p.drainPending(msg.Sender.UserId, false)
-		if p.stopRequest(msg.Sender.UserId, false) {
+		isAdmin := msg.Sender.UserId == p.SystemConfig.AdminId
+		stopped, denied := p.stopRequest(msg.Sender.UserId, false, msg.Sender.UserId, isAdmin)
+		if denied != "" {
 			builder := msgchain.Builder().Friend()
-			builder.Text("用户停止AI响应")
+			builder.Text(denied)
 			bot.SendFriendMsg(msg.Sender.UserId, builder.Build())
+			return false, nil
+		}
+		builder := msgchain.Builder().Friend()
+		if stopped {
+			p.cancelAsyncSubagents(msg.Sender.UserId, false)
+			p.drainPending(msg.Sender.UserId, false)
+			builder.Text("用户停止AI响应")
 			p.Logger.Info("用户停止 AI 响应", "user", msg.Sender.UserId)
 		} else {
-			builder := msgchain.Builder().Friend()
 			builder.Text("当前没有正在进行的 AI 请求")
-			bot.SendFriendMsg(msg.Sender.UserId, builder.Build())
 		}
+		bot.SendFriendMsg(msg.Sender.UserId, builder.Build())
 		return false, nil
 	}
 
@@ -329,8 +367,15 @@ func (p *AIChatPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command
 		p.commandManager.rewriteCustomCommand(cmd, &msg)
 	}
 
-	lock := p.tryLock(msg.Sender.UserId, false)
+	lock, fail := p.tryLockDetailed(msg.Sender.UserId, false)
 	if lock == nil {
+		if fail == lockRateLimited {
+			// 全局并发槽位已满：没有消费者会处理排队的消息，直接拒绝
+			builder := msgchain.Builder().Friend()
+			builder.Text("当前请求太多啦，请稍后再试~")
+			bot.SendFriendMsg(msg.Sender.UserId, builder.Build())
+			return true, nil
+		}
 		// 当前正在响应：消息进入排队队列，响应结束后自动合并处理
 		first, ok := p.enqueuePending(msg.Sender.UserId, false, msg)
 		if !ok {
@@ -343,6 +388,8 @@ func (p *AIChatPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command
 			bot.SendFriendMsg(msg.Sender.UserId, builder.Build())
 		}
 		p.touchChat(sessionKey(msg.Sender.UserId, false))
+		// 兜底唤醒：入队可能与持锁者最后一次 drain 交错而错过所有消费者
+		bot.Go("pending:"+sessionKey(msg.Sender.UserId, false), func() { p.kickPending(bot, msg.Sender.UserId, false) })
 		return true, nil
 	}
 	p.touchChat(sessionKey(msg.Sender.UserId, false))
@@ -357,15 +404,22 @@ func (p *AIChatPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command
 		return true, nil
 	}
 
-	chatCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	p.setActiveContext(msg.Sender.UserId, false, cancel)
+	// runCtx 只承载 /stop 与锁丢失的取消信号（不带事件 deadline），每批消息
+	// 各自派生独立预算（见 OnGroupMsg 同处注释）
+	runCtx, cancelRun := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelRun()
+	lock.attachCancel(cancelRun)
 
 	// 先取出可能遗留的排队消息（上一响应结束瞬间到达、未来得及处理的），与本次消息合并；
 	// 之后每轮响应结束继续排空队列，直到没有新消息为止
 	batch := append(p.drainPending(msg.Sender.UserId, false), msg)
 	for len(batch) > 0 {
-		if !p.processChatBatch(chatCtx, bot, msg.Sender.UserId, false, chat, batch) {
+		p.setActiveContext(msg.Sender.UserId, false, &activeRequest{cancel: cancelRun, requester: batchRequester(batch)})
+		batchCtx, cancelBatch := context.WithTimeout(runCtx, p.msgEventTimeout)
+		ok := p.processChatBatch(batchCtx, bot, msg.Sender.UserId, false, chat, batch)
+		cancelBatch()
+		p.clearActiveContext(msg.Sender.UserId, false)
+		if !ok {
 			return false, nil
 		}
 		batch = p.drainPending(msg.Sender.UserId, false)
@@ -1050,6 +1104,10 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 		p.Logger.Info("已启用会话内存回收",
 			"max_idle_minutes", p.cfg.Session.MaxIdleMinutes, "max_sessions", maxSessions)
 	}
+
+	// 排队消息兜底清扫器：唤醒集中在入队路径时，限流饱和或与锁释放交错
+	// 都可能让消息错过所有消费者，由周期扫描接管（队列为空时零开销）
+	p.startPendingSweeper()
 
 	// 全部组件就绪：放行消息事件（早退路径保持 false，处理器据此跳过）
 	p.ready = true

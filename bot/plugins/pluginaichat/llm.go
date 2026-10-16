@@ -13,23 +13,57 @@ import (
 	"github.com/jeanhua/AniaBot/common/model/message"
 )
 
-// stopRequest 停止指定会话的 AI 请求
-func (p *AIChatPlugin) stopRequest(id message.QID, isGroup bool) bool {
-	if cancel, ok := p.activeContexts.LoadAndDelete(sessionKey(id, isGroup)); ok {
-		cancel.(context.CancelFunc)()
-		return true
+// activeRequest 一个会话当前在跑的请求：取消函数 + 触发者（/stop 权限判定）。
+// 取消函数是整条请求（含后续排队批次）的总开关，/stop 与锁丢失都经它中止。
+type activeRequest struct {
+	cancel    context.CancelFunc
+	requester message.QID
+}
+
+// stopRequest 停止指定会话的 AI 请求。by 为发起停止的用户，isAdmin 表示
+// 管理员豁免；仅触发本次请求的用户或管理员有权停止（群聊里任何人都能
+// /stop 会让刷屏者随意打断他人请求，且会连带丢弃他人排队中的消息）。
+// 返回 (stopped, deniedReason)：deniedReason 非空表示因权限被拒绝。
+func (p *AIChatPlugin) stopRequest(id message.QID, isGroup bool, by message.QID, isAdmin bool) (bool, string) {
+	key := sessionKey(id, isGroup)
+	v, ok := p.activeContexts.Load(key)
+	if !ok {
+		return false, ""
 	}
-	return false
+	ar, ok := v.(*activeRequest)
+	if !ok || ar == nil {
+		return false, ""
+	}
+	if !isAdmin && ar.requester != message.FromUint64(0) && by != ar.requester {
+		return false, "只有触发本次请求的用户或管理员可以停止 AI 响应"
+	}
+	// 只有移除成功才取消：并发 /stop 或请求正常结束时不能误伤新请求
+	if !p.activeContexts.CompareAndDelete(key, ar) {
+		return false, ""
+	}
+	ar.cancel()
+	return true, ""
 }
 
 // setActiveContext 设置活跃的请求上下文
-func (p *AIChatPlugin) setActiveContext(id message.QID, isGroup bool, cancel context.CancelFunc) {
-	p.activeContexts.Store(sessionKey(id, isGroup), cancel)
+func (p *AIChatPlugin) setActiveContext(id message.QID, isGroup bool, ar *activeRequest) {
+	p.activeContexts.Store(sessionKey(id, isGroup), ar)
 }
 
 // clearActiveContext 清除活跃的请求上下文
 func (p *AIChatPlugin) clearActiveContext(id message.QID, isGroup bool) {
 	p.activeContexts.Delete(sessionKey(id, isGroup))
+}
+
+// batchRequester 取一批消息里最后一位真实发言者（跳过子代理结果等合成消息），
+// 作为 /stop 权限判定的对象；全为合成消息时返回 0（仅管理员可停止）。
+func batchRequester(batch []message.Message) message.QID {
+	for i := len(batch) - 1; i >= 0; i-- {
+		if uid := batch[i].Sender.UserId; uid != message.FromUint64(0) {
+			return uid
+		}
+	}
+	return message.FromUint64(0)
 }
 
 // buildScenePrompt 生成当前对话场景描述，经 WithScenePrompt 注入 system prompt
@@ -199,6 +233,7 @@ func (p *AIChatPlugin) getChat(b bot.Bot, id message.QID, isGroup bool, prompt s
 	if v, ok := p.chats.Load(key); ok {
 		e := v.(*chatEntry)
 		e.lastActive.Store(time.Now().Unix())
+		p.sessionBots.Store(key, b) // 供后台兜底清扫器复用
 		// Prompt 覆盖热生效：面板修改 files.prompt_json 后，驻留会话在下一轮
 		// 对话时同步新的系统提示词（覆盖词 + 场景描述），无需重启或等会话回收
 		if e.prompt != prompt {
@@ -267,6 +302,7 @@ func (p *AIChatPlugin) getChat(b bot.Bot, id message.QID, isGroup bool, prompt s
 		// 回放持久化的历史，使对话跨重启延续
 		c.LoadHistory(context.Background())
 		p.chats.Store(key, newChatEntry(c, id, isGroup, prompt))
+		p.sessionBots.Store(key, b)
 		// SessionStart 钩子：会话（重）创建（首次发言或被淘汰后重建）；
 		// 产出的上下文暂存，由下一轮对话消费一次（见 processChatBatch）
 		if p.hookManager != nil {

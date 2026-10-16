@@ -74,11 +74,24 @@ type kbStore interface {
 	scopes() []string
 }
 
+// kbSearchCacheMaxScopes / kbSearchCacheMaxBytes 检索缓存容量：最多缓存
+// 多少个 scope（FIFO 淘汰）；单 scope 近似体积（内容 + 向量）超限时不缓存，
+// 避免把大库整体驻留内存。
+const (
+	kbSearchCacheMaxScopes = 64
+	kbSearchCacheMaxBytes  = 8 << 20
+)
+
 // knowledgeManager 知识库管理器：按作用域（global / g:会话ID / f:用户ID）存取文档。
 //
 // 与 memoryManager 同构：持久化固定为 SQL 行级存储（ania_kb_doc 表，每篇文档一行），
 // 增删改只写单行、读取量与被读文档成正比。所有变更在 mu 保护下串行落盘；
 // 存储错误内部记录日志，不拖垮主对话流程。
+//
+// cache 为检索路径的进程内文档缓存（含向量）：自动注入每轮都要读会话库与
+// 全局库，向量列体积大，直连数据库会在每条用户消息上重复付出读取与 JSON
+// 解析成本。写入路径（add/update/remove/回填/旧数据迁移）统一失效对应 scope，
+// 面板写入同样经本管理器，故不会读到陈旧数据。
 type knowledgeManager struct {
 	store kbStore
 	// legacy 旧版整段 JSON 数据所在的 KV 子命名空间（kb:），仅启动时做一次性
@@ -88,7 +101,9 @@ type knowledgeManager struct {
 	maxDocs  int       // 单 scope 文档条数上限，<=0 表示不限制
 	embedder *embedder // 可选语义向量计算；nil 表示仅关键词检索
 
-	mu sync.Mutex
+	mu         sync.Mutex
+	cache      map[string][]kbDoc
+	cacheOrder []string // FIFO 淘汰顺序（先进先出），与 cache 同步维护
 }
 
 // newKnowledgeManager 创建知识库管理器。持久化固定为 SQL 行级存储
@@ -111,6 +126,7 @@ func newKnowledgeManager(store storage.PersistentStorage, logger *slog.Logger, m
 		logger:   logger,
 		maxDocs:  maxDocs,
 		embedder: emb,
+		cache:    map[string][]kbDoc{},
 	}
 	km.migrateLegacyKV()
 	km.startBackfill()
@@ -150,6 +166,10 @@ func (km *knowledgeManager) backfillEmbeddings() {
 			}
 			cur.Emb = emb
 			saved := km.store.update(scope, cur)
+			if saved {
+				// 回填改变了检索缓存里的文档（向量新增），使该 scope 失效
+				km.invalidateCacheLocked(scope)
+			}
 			km.mu.Unlock()
 			if !saved {
 				km.logger.Warn("回填知识库向量落盘失败", "scope", scope, "id", doc.ID)
@@ -170,10 +190,73 @@ func normalizeDoc(title, content string) string {
 }
 
 // list 读取指定 scope 的全部文档（含向量）；无记录或读取失败时返回 nil。
+// 供后台回填等低频路径使用（直连存储，不经缓存）。
 func (km *knowledgeManager) list(scope string) []kbDoc {
 	km.mu.Lock()
 	defer km.mu.Unlock()
 	return km.store.list(scope)
+}
+
+// listCached 读取指定 scope 的文档（含向量），带进程内缓存，供检索路径使用。
+// 缓存未命中时直读一次并尽量缓存（空结果与超体积不缓存）。
+func (km *knowledgeManager) listCached(scope string) []kbDoc {
+	km.mu.Lock()
+	defer km.mu.Unlock()
+	if docs, ok := km.cache[scope]; ok {
+		return docs
+	}
+	docs := km.store.list(scope)
+	km.putCacheLocked(scope, docs)
+	return docs
+}
+
+// putCacheLocked 写入检索缓存（调用方需持有 km.mu）。空结果与近似体积超限的
+// scope 不缓存：前者每次重查代价可忽略，后者避免把大库整体驻留内存。
+func (km *knowledgeManager) putCacheLocked(scope string, docs []kbDoc) {
+	if len(docs) == 0 || kbDocsApproxBytes(docs) > kbSearchCacheMaxBytes {
+		return
+	}
+	if _, exists := km.cache[scope]; !exists {
+		for len(km.cacheOrder) >= kbSearchCacheMaxScopes {
+			oldest := km.cacheOrder[0]
+			km.cacheOrder = km.cacheOrder[1:]
+			delete(km.cache, oldest)
+		}
+		km.cacheOrder = append(km.cacheOrder, scope)
+	}
+	km.cache[scope] = docs
+}
+
+// invalidateCacheLocked 使指定 scope 的检索缓存失效（调用方需持有 km.mu）。
+func (km *knowledgeManager) invalidateCacheLocked(scope string) {
+	if km.cache == nil {
+		return
+	}
+	if _, ok := km.cache[scope]; !ok {
+		return
+	}
+	delete(km.cache, scope)
+	for i, s := range km.cacheOrder {
+		if s == scope {
+			km.cacheOrder = append(km.cacheOrder[:i], km.cacheOrder[i+1:]...)
+			break
+		}
+	}
+}
+
+// kbDocsApproxBytes 估算一组文档的近似内存体积（内容 + 向量）。
+func kbDocsApproxBytes(docs []kbDoc) int {
+	total := 0
+	for _, d := range docs {
+		total += len(d.Title) + len(d.Content) + len(d.Source)
+		for _, t := range d.Tags {
+			total += len(t)
+		}
+		for _, v := range d.Emb {
+			total += len(v) * 4
+		}
+	}
+	return total
 }
 
 // listMeta 读取指定 scope 的全部文档但不含向量（供面板列表展示）。
@@ -231,6 +314,7 @@ func (km *knowledgeManager) add(scope, title, content string, tags []string, sou
 		km.logger.Error("保存知识库文档失败", "scope", scope, "title", title)
 		return kbDoc{}, errors.New("文档保存失败，请查看日志")
 	}
+	km.invalidateCacheLocked(scope)
 	return doc, nil
 }
 
@@ -240,7 +324,11 @@ func (km *knowledgeManager) remove(scope, id string) bool {
 	km.mu.Lock()
 	defer km.mu.Unlock()
 
-	return km.store.remove(scope, id)
+	ok := km.store.remove(scope, id)
+	if ok {
+		km.invalidateCacheLocked(scope)
+	}
+	return ok
 }
 
 // update 按 ID 更新指定 scope 中一条文档的标题、内容、标签与来源；
@@ -273,6 +361,7 @@ func (km *knowledgeManager) update(scope, id, title, content string, tags []stri
 		km.logger.Error("更新知识库文档后落盘失败", "scope", scope, "id", id)
 		return errors.New("文档保存失败，请查看日志")
 	}
+	km.invalidateCacheLocked(scope)
 	return nil
 }
 
@@ -474,13 +563,13 @@ func (km *knowledgeManager) searchImpl(scope, query string, topK int, queryVec [
 	// 收集候选块：会话库 + 全局库
 	var cands []kbCandidate
 	if scope != "" && scope != kbScopeGlobal {
-		for _, doc := range km.list(scope) {
+		for _, doc := range km.listCached(scope) {
 			for i, chunk := range chunkText(doc.Content) {
 				cands = append(cands, kbCandidate{doc: doc, chunk: chunk, local: true, embIdx: i})
 			}
 		}
 	}
-	for _, doc := range km.list(kbScopeGlobal) {
+	for _, doc := range km.listCached(kbScopeGlobal) {
 		for i, chunk := range chunkText(doc.Content) {
 			cands = append(cands, kbCandidate{doc: doc, chunk: chunk, embIdx: i})
 		}

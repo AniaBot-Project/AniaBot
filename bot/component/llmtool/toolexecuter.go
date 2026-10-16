@@ -247,8 +247,9 @@ type MCPServerInfo struct {
 
 // AddMCP 运行时注册 MCP 服务器：lazy 为 true 走工具发现模式（mcp_discover/mcp_load
 // 按需加载，新会话自动获得对应的 mcp_load 工具），false 全量注册所有工具。
-// 连接失败返回错误且不留残余注册。
-func (e *ToolExecuter) AddMCP(config *MCPConfig, lazy bool) error {
+// 连接失败返回错误且不留残余注册。ctx 为调用方上下文（如 AI 工具调用），
+// 取消/超时会中止连接建立，且连接等待不会超过 30s。
+func (e *ToolExecuter) AddMCP(ctx context.Context, config *MCPConfig, lazy bool) error {
 	e.mu.RLock()
 	dup := e.hasMCPLocked(config.Name)
 	e.mu.RUnlock()
@@ -256,7 +257,7 @@ func (e *ToolExecuter) AddMCP(config *MCPConfig, lazy bool) error {
 		return fmt.Errorf("MCP 服务器 '%s' 已注册", config.Name)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	client := NewMCPClient(config)
@@ -288,16 +289,22 @@ func (e *ToolExecuter) AddMCP(config *MCPConfig, lazy bool) error {
 // RemoveMCP 运行时移除 MCP 服务器：关闭连接，并移除其发现工具（懒加载模式）
 // 或全部已注册工具（全量模式）。已创建会话中残留的 mcp_load/旧工具句柄
 // 在调用时会以「未连接」错误优雅失败。
+//
+// Close 是一次可能阻塞的网络往返（默认超时可达 config.Timeout），必须在
+// e.mu 释放后执行：e.mu 是所有会话共享的工具表锁，持锁关闭会让全部会话的
+// Tools()/Execute() 一起卡住。
 func (e *ToolExecuter) RemoveMCP(name string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	var closing []*MCPClient
 
+	e.mu.Lock()
 	// 懒加载（发现模式）：移除 manager 与发现工具
 	for i, manager := range e.mcpManagers {
 		if manager.Name() == name {
-			manager.client.Close()
+			closing = append(closing, manager.client)
 			delete(e.tools, NewMCPDiscoveryTool(manager).Name())
 			e.mcpManagers = append(e.mcpManagers[:i], e.mcpManagers[i+1:]...)
+			e.mu.Unlock()
+			closeMCPClients(closing)
 			log.Printf("[MCP:%s] 已运行时移除（发现模式）", name)
 			return nil
 		}
@@ -305,21 +312,37 @@ func (e *ToolExecuter) RemoveMCP(name string) error {
 
 	// 全量注册模式：移除属于该服务器的全部工具
 	removed := 0
-	var client *MCPClient
 	for toolName, tool := range e.tools {
 		if mcpTool, ok := tool.(*MCPTool); ok && mcpTool.client.config.Name == name {
-			client = mcpTool.client
+			closing = append(closing, mcpTool.client)
 			delete(e.tools, toolName)
 			removed++
 		}
 	}
+	e.mu.Unlock()
+
 	if removed > 0 {
-		client.Close()
+		closeMCPClients(closing)
 		log.Printf("[MCP:%s] 已运行时移除（全量模式），清理 %d 个工具", name, removed)
 		return nil
 	}
 
 	return fmt.Errorf("MCP 服务器 '%s' 未注册", name)
+}
+
+// closeMCPClients 关闭 MCP 客户端（去重）。调用方须已释放工具表锁。
+func closeMCPClients(clients []*MCPClient) {
+	seen := make(map[*MCPClient]struct{}, len(clients))
+	for _, c := range clients {
+		if c == nil {
+			continue
+		}
+		if _, dup := seen[c]; dup {
+			continue
+		}
+		seen[c] = struct{}{}
+		c.Close()
+	}
 }
 
 // ReconnectMCP 重新连接指定 MCP 服务器并刷新其工具列表（两种模式均支持）。
@@ -365,7 +388,6 @@ func (e *ToolExecuter) ReconnectMCP(ctx context.Context, name string) error {
 	}
 
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	// 双检：锁外连接期间该服务器可能已被移除（RemoveMCP 会关闭旧连接），
 	// 此时不得把新工具重新挂回已删除的服务器
 	present := false
@@ -376,10 +398,10 @@ func (e *ToolExecuter) ReconnectMCP(ctx context.Context, name string) error {
 		}
 	}
 	if !present {
+		e.mu.Unlock()
 		fresh.Close()
 		return fmt.Errorf("MCP 服务器 '%s' 已被移除", name)
 	}
-	oldClient.Close()
 	for toolName, t := range e.tools {
 		if t2, ok := t.(*MCPTool); ok && t2.client == oldClient {
 			delete(e.tools, toolName)
@@ -388,6 +410,10 @@ func (e *ToolExecuter) ReconnectMCP(ctx context.Context, name string) error {
 	for _, toolDef := range fresh.GetTools() {
 		e.tools[toolDef.Name] = NewMCPTool(fresh, toolDef)
 	}
+	e.mu.Unlock()
+
+	// 旧连接关闭与保连接建立都可能在网络上阻塞，放在锁外执行（同 AddMCP 先例）
+	oldClient.Close()
 	log.Printf("[MCP:%s] 重连完成（全量模式），共 %d 个工具", name, len(fresh.GetTools()))
 	return nil
 }

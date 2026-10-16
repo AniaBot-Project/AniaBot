@@ -38,16 +38,22 @@ func (g *asyncSubagentGroup) add(id string, cancel context.CancelFunc, task stri
 	g.mu.Unlock()
 }
 
-func (g *asyncSubagentGroup) remove(id string) {
+// removeIfEmpty 移除指定 ID 的条目，返回 (removed, empty)：removed 表示该 ID
+// 确实在组内（移除与判空在同一临界区内完成，避免「判空后又加入新条目」的竞态；
+// ID 不存在时不报告 empty，杜绝误删他人刚创建、尚未入条目的新组）。
+func (g *asyncSubagentGroup) removeIfEmpty(id string) (removed, empty bool) {
 	g.mu.Lock()
+	defer g.mu.Unlock()
 	filtered := make([]asyncSubagentEntry, 0, len(g.entries))
 	for _, e := range g.entries {
-		if e.id != id {
-			filtered = append(filtered, e)
+		if e.id == id {
+			removed = true
+			continue
 		}
+		filtered = append(filtered, e)
 	}
 	g.entries = filtered
-	g.mu.Unlock()
+	return removed, len(g.entries) == 0
 }
 
 func (g *asyncSubagentGroup) cancelAll() {
@@ -95,16 +101,46 @@ func (p *AIChatPlugin) cancelAsyncSubagents(id message.QID, isGroup bool) {
 	}
 }
 
+// lookupAsyncGroup 读取会话的异步子代理组（不做创建）：查询/取消路径使用，
+// 避免用 getAsyncGroup 重建空组造成状态表随会话累积泄漏。
+func (p *AIChatPlugin) lookupAsyncGroup(id message.QID, isGroup bool) *asyncSubagentGroup {
+	v, ok := p.asyncSubagents.Load(sessionKey(id, isGroup))
+	if !ok {
+		return nil
+	}
+	g, _ := v.(*asyncSubagentGroup)
+	return g
+}
+
 // listRunningSubagents 返回当前会话运行中的异步子代理列表（供 subagent_list 工具使用）
 func (p *AIChatPlugin) listRunningSubagents(id message.QID, isGroup bool) []asyncSubagentEntry {
-	g := p.getAsyncGroup(id, isGroup)
+	g := p.lookupAsyncGroup(id, isGroup)
+	if g == nil {
+		return nil
+	}
 	return g.snapshot()
 }
 
 // cancelSubagentByID 按 ID 取消单个运行中的异步子代理（供 subagent_cancel 工具使用）
 func (p *AIChatPlugin) cancelSubagentByID(id message.QID, isGroup bool, subagentID string) bool {
-	g := p.getAsyncGroup(id, isGroup)
+	g := p.lookupAsyncGroup(id, isGroup)
+	if g == nil {
+		return false
+	}
 	return g.cancelOne(subagentID)
+}
+
+// removeAsyncSubagent 子代理结束后从会话组中移除；组已空（或已被 /stop 的
+// cancelAsyncSubagents 摘除）时清理 sync.Map 条目，避免空组滞留。
+func (p *AIChatPlugin) removeAsyncSubagent(id message.QID, isGroup bool, subagentID string) {
+	key := sessionKey(id, isGroup)
+	g := p.lookupAsyncGroup(id, isGroup)
+	if g == nil {
+		return
+	}
+	if removed, empty := g.removeIfEmpty(subagentID); removed && empty {
+		p.asyncSubagents.CompareAndDelete(key, g)
+	}
 }
 
 // launchAsyncSubagent 在后台 goroutine 中启动子代理，立即返回占位文本。
@@ -137,7 +173,7 @@ func (p *AIChatPlugin) launchAsyncSubagent(
 	p.getAsyncGroup(id, isGroup).add(launchID, asyncCancel, task)
 
 	b.Go("subagent:"+sessionKey(id, isGroup)+":"+launchID, func() {
-		defer p.getAsyncGroup(id, isGroup).remove(launchID)
+		defer p.removeAsyncSubagent(id, isGroup, launchID)
 		result, usage, runErr := p.runSubagent(asyncCtx, b, id, isGroup, task, timeoutSec, parentCbs)
 		// 消耗计入会话与全局配额（发起方已做前置检查，这里只累加不重复拒绝）
 		p.quotaManager.Add(sessionKey(id, isGroup), usage)
@@ -196,36 +232,140 @@ func (p *AIChatPlugin) onSubagentComplete(b bot.Bot, id message.QID, isGroup boo
 	}
 
 	// 尝试触发处理：若会话空闲（锁可用）则立即处理排队消息
-	p.tryProcessPending(b, id, isGroup)
+	b.Go("pending:"+sessionKey(id, isGroup), func() { p.kickPending(b, id, isGroup) })
 }
 
-// tryProcessPending 尝试获取会话锁并处理排队消息。
-// 若锁不可用（会话正在响应中），排队消息会在当前响应结束后的 drain 循环中被处理。
-func (p *AIChatPlugin) tryProcessPending(b bot.Bot, id message.QID, isGroup bool) {
+// pendingKickAttempts / pendingKickInterval 兜底唤醒的即时重试节奏：入队与持锁者
+// 「最后一次 drain」交错时消息会错过所有消费者；这种交错发生在锁释放的临界区
+// 附近，短退避重试即可跨过。更持久的情况（如并发槽位被其他会话长期占满）由
+// 常驻清扫器 sweepPendingSessions 兜底，不在这里长等。
+const (
+	pendingKickAttempts = 3
+	pendingKickInterval = 100 * time.Millisecond
+)
+
+// pendingSweepInterval 常驻清扫器的扫描周期：只处理「有排队消息且能拿到
+// 会话锁」的会话，队列为空时零开销。它是排队消息不永久滞留的最终保证——
+// 唤醒逻辑集中在入队路径时，限流饱和、锁释放临界区交错等情况都可能让消息
+// 错过所有消费者。
+const pendingSweepInterval = 10 * time.Second
+
+// kickPending 后台兜底唤醒：确认会话仍有排队消息时尝试接管消费队列。
+// 正常路径下持锁者仍在响应，短暂重试后放弃，开销可忽略（错过的会在
+// 清扫器周期内被接管）。
+func (p *AIChatPlugin) kickPending(b bot.Bot, id message.QID, isGroup bool) {
+	key := sessionKey(id, isGroup)
+	for attempt := 0; attempt < pendingKickAttempts; attempt++ {
+		if !p.hasPending(key) {
+			return // 队列已被其他消费者处理
+		}
+		if p.processPendingOnce(b, id, isGroup) {
+			return
+		}
+		if attempt < pendingKickAttempts-1 {
+			time.Sleep(pendingKickInterval)
+		}
+	}
+}
+
+// startPendingSweeper 启动常驻清扫器（与插件同生命周期，同 startChatJanitor 惯例）。
+func (p *AIChatPlugin) startPendingSweeper() {
+	go func() {
+		ticker := time.NewTicker(pendingSweepInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			p.sweepPendingSessions()
+		}
+	}()
+}
+
+// sweepPendingSessions 扫描所有会话的排队队列，尝试处理仍滞留的消息。
+// 需要平台外观（chatEntry.bot）才能构造发送回调；拿不到外观的会话跳过，
+// 其队列会在下次消息到达时由正常流程消费。
+func (p *AIChatPlugin) sweepPendingSessions() {
+	if !p.ready {
+		return
+	}
+	p.pendingMsgs.Range(func(key, value any) bool {
+		k, ok := key.(string)
+		if !ok {
+			return true
+		}
+		q, ok := value.(*pendingQueue)
+		if !ok {
+			return true
+		}
+		q.mu.Lock()
+		pending := len(q.items) > 0
+		q.mu.Unlock()
+		if !pending {
+			return true
+		}
+		id, isGroup, ok := parseSessionKey(k)
+		if !ok {
+			return true
+		}
+		v, ok := p.sessionBots.Load(k)
+		if !ok {
+			return true
+		}
+		b, ok := v.(bot.Bot)
+		if !ok || b == nil {
+			return true
+		}
+		p.processPendingOnce(b, id, isGroup)
+		return true
+	})
+}
+
+// parseSessionKey 解析 g:<id> / f:<id> 会话键（见 sessionKey）。
+func parseSessionKey(key string) (message.QID, bool, bool) {
+	if len(key) < 3 || key[1] != ':' {
+		return "", false, false
+	}
+	switch key[0] {
+	case 'g':
+		return message.FromString(key[2:]), true, true
+	case 'f':
+		return message.FromString(key[2:]), false, true
+	}
+	return "", false, false
+}
+
+// processPendingOnce 尝试获取会话锁并处理排队消息；未拿到锁返回 false。
+// 后台触发不属于任何消息事件，上下文按 p.msgEventTimeout 独立预算；
+// 队列为空时立即返回，不做任何事（等价于一次无消息触发的响应）。
+func (p *AIChatPlugin) processPendingOnce(b bot.Bot, id message.QID, isGroup bool) bool {
 	lock := p.tryLock(id, isGroup)
 	if lock == nil {
-		return
+		return false
 	}
 	defer lock.release()
 
 	chat, err := p.getChat(b, id, isGroup, p.getPromptForID(id, isGroup))
 	if err != nil {
 		p.drainPending(id, isGroup)
-		p.Logger.Error("tryProcessPending: 无法获取 ChatBot", "error", err.Error(), "id", id, "is_group", isGroup)
-		return
+		p.Logger.Error("processPendingOnce: 无法获取 ChatBot", "error", err.Error(), "id", id, "is_group", isGroup)
+		return true
 	}
 
-	chatCtx, cancel := context.WithTimeout(context.Background(), p.msgEventTimeout)
-	defer cancel()
-	p.setActiveContext(id, isGroup, cancel)
-	defer p.clearActiveContext(id, isGroup)
+	// runCtx 承载 /stop 与锁丢失的取消信号；每批消息派生独立预算（同主流程）
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	lock.attachCancel(cancelRun)
 
 	batch := p.drainPending(id, isGroup)
 	for len(batch) > 0 {
-		if !p.processChatBatch(chatCtx, b, id, isGroup, chat, batch) {
+		p.setActiveContext(id, isGroup, &activeRequest{cancel: cancelRun, requester: batchRequester(batch)})
+		batchCtx, cancelBatch := context.WithTimeout(runCtx, p.msgEventTimeout)
+		ok := p.processChatBatch(batchCtx, b, id, isGroup, chat, batch)
+		cancelBatch()
+		p.clearActiveContext(id, isGroup)
+		if !ok {
 			p.drainPending(id, isGroup)
-			return
+			return true
 		}
 		batch = p.drainPending(id, isGroup)
 	}
+	return true
 }

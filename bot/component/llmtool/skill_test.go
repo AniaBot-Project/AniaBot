@@ -103,7 +103,7 @@ func TestRemoveMCP_NotRegistered(t *testing.T) {
 func TestAddMCP_ConnectFailure(t *testing.T) {
 	e := NewToolExecuter()
 	// 不存在的命令：连接必然失败，且不应留下残余注册
-	err := e.AddMCP(&MCPConfig{Name: "bad-server", Command: "definitely-not-a-real-command-xyz"}, true)
+	err := e.AddMCP(context.Background(), &MCPConfig{Name: "bad-server", Command: "definitely-not-a-real-command-xyz"}, true)
 	if err == nil {
 		t.Fatal("连接失败的 AddMCP 应返回错误")
 	}

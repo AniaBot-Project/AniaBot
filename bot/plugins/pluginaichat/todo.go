@@ -80,6 +80,14 @@ func (m *todoManager) replace(key string, items []todoItem) error {
 	return nil
 }
 
+// clear 清空指定会话的清单与提醒哈希（会话被淘汰时调用）。
+func (m *todoManager) clear(key string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.lists, key)
+	delete(m.lastRemindHash, key)
+}
+
 // pendingReminder 生成未完成事项提醒（尾部注入用）；清单无未完成项时返回空串。
 // 内容与上次注入相同时返回空串（哈希去重），避免每轮重复占用上下文。
 func (m *todoManager) pendingReminder(key string) string {

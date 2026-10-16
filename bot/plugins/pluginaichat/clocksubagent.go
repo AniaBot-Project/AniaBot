@@ -11,6 +11,7 @@ import (
 
 	"github.com/jeanhua/AniaBot/bot/component/aichat"
 	"github.com/jeanhua/AniaBot/bot/component/llmtool"
+	"github.com/jeanhua/AniaBot/bot/component/tasklog"
 	"github.com/jeanhua/AniaBot/common/bot"
 )
 
@@ -285,10 +286,8 @@ func (t *clockSubagentListTool) Execute(ctx context.Context, params any, callbac
 	fmt.Fprintf(&sb, "当前运行中的子代理（共 %d 个）:\n\n", len(running))
 	for i, e := range running {
 		elapsed := time.Since(e.startTime).Truncate(time.Second)
-		taskPreview := e.task
-		if len(taskPreview) > 60 {
-			taskPreview = taskPreview[:60] + "…"
-		}
+		// 按 rune 截断：任务描述多为中文，按字节切会产出非法 UTF-8
+		taskPreview := tasklog.Truncate(e.task, 60)
 		fmt.Fprintf(&sb, "%d. ID: %s\n   任务: %s\n   运行时间: %s\n",
 			i+1, e.id, taskPreview, elapsed)
 		if i < len(running)-1 {

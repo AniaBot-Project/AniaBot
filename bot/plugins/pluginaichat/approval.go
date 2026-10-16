@@ -82,15 +82,38 @@ func (m *approvalManager) needsAdminApproval(tool string) bool {
 	return ok
 }
 
+// approvalWaitBudget 审批实际等待时长：取配置超时与「父上下文剩余预算减去
+// approvalFinishReserve」中的较小值。审批等待发生在请求处理链路内（同轮多个
+// 工具审批还会串行），等待时长必须给请求收尾留出空间：吃光预算会让整单请求以
+// 「请求超时」中止，用户既收不到回复也看不到审批结论。
+func (m *approvalManager) approvalWaitBudget(ctx context.Context) time.Duration {
+	wait := m.timeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if budget := time.Until(deadline) - approvalFinishReserve; budget < wait {
+			wait = budget
+		}
+	}
+	return wait
+}
+
+// approvalFinishReserve 审批等待为请求收尾预留的时间：超时被拒后模型仍需一轮
+// LLM 调用把结论告诉用户。
+const approvalFinishReserve = 20 * time.Second
+
 // request 发起一次审批：发送提示消息后阻塞等待回复/取消/超时。
 // 返回 (allowed, reason)：reason 在拒绝时说明原因（拒绝/超时/取消）。
 // 会话级互斥锁保证同会话并行工具调用的多个审批逐个提示。
-// 注意：本方法可能阻塞至超时（默认 120s），调用方不得持锁调用。
+// 注意：本方法可能阻塞至超时（默认 120s，且按父上下文剩余预算收缩），调用方不得持锁调用。
 func (m *approvalManager) request(ctx context.Context, sKey, tool, summary string, requester message.QID, sendPrompt func(text string)) (bool, string) {
 	lockAny, _ := m.locks.LoadOrStore(sKey, &sync.Mutex{})
 	lock := lockAny.(*sync.Mutex)
 	lock.Lock()
 	defer lock.Unlock()
+
+	wait := m.approvalWaitBudget(ctx)
+	if wait <= 0 {
+		return false, "当前请求剩余时间不足，未发起审批（请稍后重试）"
+	}
 
 	req := &approvalRequest{tool: tool, summary: summary, requester: requester, resultCh: make(chan approvalVerdict, 1)}
 	m.mu.Lock()
@@ -102,8 +125,8 @@ func (m *approvalManager) request(ctx context.Context, sKey, tool, summary strin
 		m.mu.Unlock()
 	}()
 
-	sendPrompt(m.formatPrompt(tool, summary, requester))
-	m.logger.Info("发起工具审批", "session", sKey, "tool", tool, "requester", requester)
+	sendPrompt(m.formatPrompt(tool, summary, requester, wait))
+	m.logger.Info("发起工具审批", "session", sKey, "tool", tool, "requester", requester, "wait_sec", int(wait.Seconds()))
 
 	select {
 	case v := <-req.resultCh:
@@ -116,9 +139,9 @@ func (m *approvalManager) request(ctx context.Context, sKey, tool, summary strin
 	case <-ctx.Done():
 		// /stop 取消请求（同一 chatCtx）：不记审计（未形成决定）
 		return false, "审批等待已取消（请求被停止）"
-	case <-time.After(m.timeout):
+	case <-time.After(wait):
 		m.audit(sKey, tool, summary, "超时自动拒绝", message.FromUint64(0))
-		return false, fmt.Sprintf("审批超时（%d 秒无回复），已自动拒绝", int(m.timeout.Seconds()))
+		return false, fmt.Sprintf("审批超时（%d 秒无回复），已自动拒绝", int(wait.Seconds()))
 	}
 }
 
@@ -190,6 +213,12 @@ func (m *approvalManager) requestAdminOnly(ctx context.Context, originSKey, tool
 	originLock.Lock()
 	defer originLock.Unlock()
 
+	// 等待时长同样按父上下文剩余预算收缩（等锁期间预算可能已被前一个审批消耗）
+	wait := m.approvalWaitBudget(ctx)
+	if wait <= 0 {
+		return false, "当前请求剩余时间不足，未发起审批（请稍后重试）"
+	}
+
 	// 待批请求登记在发起会话键（管理员在发起会话回复也可批），
 	// 另在管理员私聊键登记索引（管理员私聊回复时查找）
 	req := &approvalRequest{tool: tool, summary: summary, requester: message.FromUint64(0), resultCh: make(chan approvalVerdict, 1)}
@@ -208,7 +237,7 @@ func (m *approvalManager) requestAdminOnly(ctx context.Context, originSKey, tool
 		m.mu.Unlock()
 	}()
 
-	prompt := m.formatPrompt(tool, summary, message.FromUint64(0))
+	prompt := m.formatPrompt(tool, summary, message.FromUint64(0), wait)
 	if !sendAdminPrompt(prompt) {
 		// 管理员私聊发送失败（如未加好友）：改在发起会话提示，等待管理员在该会话回复
 		m.mu.Lock()
@@ -233,25 +262,26 @@ func (m *approvalManager) requestAdminOnly(ctx context.Context, originSKey, tool
 	case <-ctx.Done():
 		// /stop 取消请求（同一 chatCtx）：不记审计（未形成决定）
 		return false, "审批等待已取消（请求被停止）"
-	case <-time.After(m.timeout):
+	case <-time.After(wait):
 		m.audit(originSKey, tool, summary, "超时自动拒绝", message.FromUint64(0))
-		return false, fmt.Sprintf("审批超时（%d 秒无回复），已自动拒绝", int(m.timeout.Seconds()))
+		return false, fmt.Sprintf("审批超时（%d 秒无回复），已自动拒绝", int(wait.Seconds()))
 	}
 }
 
 // formatPrompt 审批提示消息文本（纯文本路径发送；群聊中 requester 非 0 时
 // 文本注明其 ID——发送闭包是 @ 无关的纯发送，避免与流式消息/丢弃桩冲突）。
-func (m *approvalManager) formatPrompt(tool, summary string, requester message.QID) string {
+// wait 为本次实际等待时长（已按剩余预算收缩），提示文案与实际一致。
+func (m *approvalManager) formatPrompt(tool, summary string, requester message.QID, wait time.Duration) string {
 	var sb strings.Builder
 	sb.WriteString("【工具审批】AI 请求执行工具：" + tool)
 	if summary != "" {
 		sb.WriteString("\n参数摘要：" + summary)
 	}
 	if requester == message.FromUint64(0) {
-		fmt.Fprintf(&sb, "\n请管理员在 %d 秒内回复「允许」或「拒绝」（超时自动拒绝）", int(m.timeout.Seconds()))
+		fmt.Fprintf(&sb, "\n请管理员在 %d 秒内回复「允许」或「拒绝」（超时自动拒绝）", int(wait.Seconds()))
 	} else {
 		fmt.Fprintf(&sb, "\n请消息发送者（%s）或管理员在 %d 秒内回复「允许」或「拒绝」（超时自动拒绝）",
-			requester.String(), int(m.timeout.Seconds()))
+			requester.String(), int(wait.Seconds()))
 	}
 	return sb.String()
 }

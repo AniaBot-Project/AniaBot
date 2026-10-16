@@ -106,6 +106,11 @@ func (b *ChatBot) Chat(ctx context.Context, userInput string, callbacks llmtool.
 	// 大小也不代表当前上下文长度）
 	compressUsage := b.window.takeCompressUsage()
 
+	// 时间前缀在构建请求前取一次、落盘补丁复用同一份字符串：重新生成
+	// 时间戳会让持久化副本与真正发出去的内容不再逐字节一致，下一轮请求的
+	// prompt 前缀缓存会在上一轮用户消息处整段分叉（见 timePrefix 注释）
+	prefix := b.msgBuilder.timePrefix()
+
 	// UserPromptSubmit 钩子：可阻断本轮输入（返回 PromptBlockedError，由插件层
 	// 把原因告知用户后继续正常流程），或注入附加上下文——尾部注入：拼到用户
 	// 消息前而非 system，保持上游前缀缓存稳定（同记忆/知识库注入的约束）
@@ -123,7 +128,7 @@ func (b *ChatBot) Chat(ctx context.Context, userInput string, callbacks llmtool.
 		}
 	}
 
-	messages := b.msgBuilder.BuildChatMessages(userInput, b.window.history())
+	messages := b.msgBuilder.buildChatMessages(prefix+userInput, b.window.history())
 	// 记录构建完成时的真实长度：messages = [system, ...history, user]，因此
 	// builtLen-1 是本轮用户消息的下标，updatedMessages 从该处起的后缀即
 	// 本轮新增（用户消息 + AI 回复 + 工具消息），需完整写回历史
@@ -135,6 +140,11 @@ func (b *ChatBot) Chat(ctx context.Context, userInput string, callbacks llmtool.
 	usage.TotalTokens += compressUsage.TotalTokens
 	usage.CachedTokens += compressUsage.CachedTokens
 	if err != nil {
+		if IsContextOverflowError(err) {
+			// 超限类失败：本轮历史无法进入窗口（失败不落盘），标记下一轮强制压缩，
+			// 否则「历史刚好在阈值下、单轮工具循环撑爆窗口」会每轮重复失败
+			b.window.markOverflowFailure()
+		}
 		return "", usage, fmt.Errorf("chat execution failed: %w", err)
 	}
 
@@ -144,10 +154,13 @@ func (b *ChatBot) Chat(ctx context.Context, userInput string, callbacks llmtool.
 		newMessages := updatedMessages[start:]
 		// 落盘/回放用注入前的原始用户文本（PersistUserText）：记忆/知识库等注入
 		// 及 UserPromptSubmit 钩子上下文只作用于当轮请求，不随历史回放（否则旧
-		// 注入白占上下文、且可能引用已失效的记忆 ID 或过期资料）
+		// 注入白占上下文、且可能引用已失效的记忆 ID 或过期资料）。
+		// 时间前缀复用请求构建时的 prefix（不重新取时间）：RFC3339 秒级精度下
+		// 重取会让落盘副本与上一轮真正发送的内容不一致，下一轮的前缀缓存
+		// 恰好在上一轮用户消息处整段分叉。
 		if opts.PersistUserText != "" {
 			newMessages = append([]Message(nil), newMessages...)
-			newMessages[0] = TextMessage(RoleUser, b.msgBuilder.withTimePrefix(opts.PersistUserText))
+			newMessages[0] = TextMessage(RoleUser, prefix+opts.PersistUserText)
 		}
 		b.window.append(newMessages...)
 	}

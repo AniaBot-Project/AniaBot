@@ -141,7 +141,7 @@ func (t *mcpAddTool) Execute(ctx context.Context, params any, _ llmtool.CallBack
 	}
 
 	// 先连接注册（失败则不落配置），再持久化（失败则回滚运行时注册，保持一致）
-	if err := t.plugin.toolExecutor.AddMCP(mcpConfig, t.plugin.cfg.MCP.LazyLoad); err != nil {
+	if err := t.plugin.toolExecutor.AddMCP(ctx, mcpConfig, t.plugin.cfg.MCP.LazyLoad); err != nil {
 		return "", err
 	}
 	fileCfg.Servers = append(fileCfg.Servers, entry)
@@ -335,7 +335,7 @@ func (p *AIChatPlugin) reconnectMCPServer(ctx context.Context, name string) erro
 		if convErr != nil {
 			return fmt.Errorf("MCP 服务器 '%s' 配置无效: %w", name, convErr)
 		}
-		return p.toolExecutor.AddMCP(mcpConfig, p.cfg.MCP.LazyLoad)
+		return p.toolExecutor.AddMCP(ctx, mcpConfig, p.cfg.MCP.LazyLoad)
 	}
 	return err
 }

@@ -130,6 +130,17 @@ func (p *AIChatPlugin) evictOneChat(key string, e *chatEntry) {
 		return
 	}
 	if p.chats.CompareAndDelete(key, e) {
+		// 会话级内存状态一并复位：计划模式与任务清单都声明为「会话淘汰后自动
+		// 清空」（见 planManager/todoManager 注释），且淘汰意味着该会话已无排队
+		// 消息与在跑请求，复位不会影响进行中的工作流；平台外观引用同时释放。
+		// 淘汰后该会话若再收到消息，getChat 重建并重新登记外观。
+		if p.planManager != nil {
+			p.planManager.Set(key, false)
+		}
+		if p.todoManager != nil {
+			p.todoManager.clear(key)
+		}
+		p.sessionBots.Delete(key)
 		p.Logger.Info("淘汰闲置会话", "key", key)
 	}
 }

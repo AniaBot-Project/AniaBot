@@ -82,15 +82,32 @@ func (c FileToolsConfig) resolvePath(path string) (string, error) {
 }
 
 // checkFilePath 解析路径并拦截敏感文件（与 file 工具同一策略：禁止触碰机器人数据库）。
+// 除路径本身外还对符号链接解引用后的真实路径做检查：软链指向数据库可绕过
+// 子树面字面匹配。
 func (c FileToolsConfig) checkFilePath(path string) (string, error) {
 	resolved, err := c.resolvePath(path)
 	if err != nil {
 		return "", err
 	}
-	if strings.Contains(strings.ToLower(resolved), "aniabot.db") {
+	if SensitiveHostPath(resolved) {
 		return "", errors.New("禁止读写机器人数据库文件")
 	}
 	return resolved, nil
+}
+
+// SensitiveHostPath 判断路径是否指向机器人自身数据库（含符号链接解引用后的
+// 真实路径）：数据库内含配置与凭据，禁止经 AI 工具读写或发送。
+func SensitiveHostPath(path string) bool {
+	const target = "aniabot.db"
+	if strings.Contains(strings.ToLower(path), target) {
+		return true
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		if strings.Contains(strings.ToLower(resolved), target) {
+			return true
+		}
+	}
+	return false
 }
 
 // readFileData 读取文件内容并做体积/二进制预检，返回文本与是否截断。

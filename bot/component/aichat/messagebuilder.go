@@ -50,15 +50,31 @@ func (b *MessageBuilder) buildSystemPrompt() string {
 	return prompt + b.scene
 }
 
-func (b *MessageBuilder) withTimePrefix(input string) string {
-	return "[" + utils.GetFormattedTime() + "] " + input
+// timePrefix 本条消息的时间前缀（"[RFC3339] "）。请求构建与历史落盘两侧
+// 必须复用同一次取值：落盘副本若重新生成时间戳（RFC3339 为秒级精度，而一次
+// LLM 请求通常跨秒），与真正发送给上游的内容不再逐字节一致，下一轮请求的
+// prompt 前缀缓存会在上一轮用户消息处整段分叉（assistant 回复与全部工具往返
+// 每轮全价重算）。
+func (b *MessageBuilder) timePrefix() string {
+	return "[" + utils.GetFormattedTime() + "] "
 }
 
+func (b *MessageBuilder) withTimePrefix(input string) string {
+	return b.timePrefix() + input
+}
+
+// BuildChatMessages 用调用方提供的原始输入组装消息（内部渲染时间前缀）。
 func (b *MessageBuilder) BuildChatMessages(userInput string, history []Message) []Message {
+	return b.buildChatMessages(b.withTimePrefix(userInput), history)
+}
+
+// buildChatMessages 组装消息数组；userText 为已渲染（含时间前缀与当轮注入）
+// 的用户文本，ChatBot 落盘补丁路径据此复用请求中实际使用的同一份字符串。
+func (b *MessageBuilder) buildChatMessages(userText string, history []Message) []Message {
 	messages := make([]Message, 0, 1+len(history)+1)
 	messages = append(messages, TextMessage(RoleSystem, b.buildSystemPrompt()))
 	messages = append(messages, history...)
-	messages = append(messages, TextMessage(RoleUser, b.withTimePrefix(userInput)))
+	messages = append(messages, TextMessage(RoleUser, userText))
 	return messages
 }
 

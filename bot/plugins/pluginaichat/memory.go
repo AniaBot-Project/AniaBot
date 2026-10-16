@@ -119,16 +119,20 @@ func (m *memoryManager) backfillEmbeddings() {
 			if len(e.Emb) > 0 {
 				continue
 			}
-			vec := m.embedder.EmbedOne(context.Background(), e.Content)
+			vec := m.embedText(e.Content)
 			if len(vec) == 0 {
 				continue // 计算失败静默跳过，下次重启再试
 			}
+			// 锁内按 ID 重新定位：回填期间条目可能已被更新/删除，
+			// 直接写回旧副本会覆盖并发修改
 			m.mu.Lock()
-			e.Emb = vec
-			if ok := m.store.update(scope, e); !ok {
-				m.logger.Warn("回填记忆向量落盘失败", "scope", scope, "id", e.ID)
-			} else {
-				filled++
+			if cur, ok := m.getLocked(scope, e.ID); ok {
+				cur.Emb = vec
+				if ok := m.store.update(scope, cur); !ok {
+					m.logger.Warn("回填记忆向量落盘失败", "scope", scope, "id", e.ID)
+				} else {
+					filled++
+				}
 			}
 			m.mu.Unlock()
 			time.Sleep(backfillInterval)
@@ -240,6 +244,16 @@ func (m *memoryManager) listLocked(scope string) []memoryEntry {
 	return m.store.list(scope)
 }
 
+// getLocked 在已持锁的前提下按 ID 读取一条记忆；供回填等路径避免使用陈旧副本。
+func (m *memoryManager) getLocked(scope, id string) (memoryEntry, bool) {
+	for _, e := range m.listLocked(scope) {
+		if e.ID == id {
+			return e, true
+		}
+	}
+	return memoryEntry{}, false
+}
+
 // add 追加一条记忆，返回写入后的条目（含生成的 ID）。
 // 内容与已有记忆重复（规范化后相同）时不重复写入，返回已有条目；
 // 达到 maxEntries 上限时返回 ErrMemoryFull；超长内容按 MaxContentRunes 截断。
@@ -250,11 +264,17 @@ func (m *memoryManager) add(scope, userID, content string, tags []string) (memor
 
 // addEntry 与 add 相同，额外返回是否为新写入的条目（false 表示命中精确去重，
 // 返回的是已有条目）。AI 工具据此区分「已记住」与「已有相同内容，未重复保存」。
+//
+// embedding 计算在锁外完成（与 knowledgeManager.add 同例）：记忆管理器是全局
+// 单锁，在锁内做网络请求（超时 30s）会连带阻塞所有会话的检索与自动注入。
 func (m *memoryManager) addEntry(scope, userID, content string, tags []string) (memoryEntry, bool, error) {
 	content = tasklog.Truncate(strings.TrimSpace(content), MaxContentRunes)
 	if content == "" {
 		return memoryEntry{}, false, errors.New("记忆内容不能为空")
 	}
+
+	// 预计算向量：去重命中（未写入）时白算一次，换来锁段内无网络等待
+	emb := m.embedText(content)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -277,9 +297,8 @@ func (m *memoryManager) addEntry(scope, userID, content string, tags []string) (
 		Content:   content,
 		Tags:      tags,
 		CreatedAt: time.Now().UTC(),
+		Emb:       emb,
 	}
-	// 入库时计算语义向量（记忆写入频率极低，锁内调用可接受；失败静默降级为纯关键词）
-	m.embedEntry(&entry)
 	if ok := m.store.insert(scope, entry); !ok {
 		m.logger.Error("保存记忆失败", "scope", scope)
 		return memoryEntry{}, false, errors.New("记忆保存失败，请查看日志")
@@ -291,23 +310,17 @@ func (m *memoryManager) addEntry(scope, userID, content string, tags []string) (
 func (m *memoryManager) get(scope, id string) (memoryEntry, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, e := range m.listLocked(scope) {
-		if e.ID == id {
-			return e, true
-		}
-	}
-	return memoryEntry{}, false
+	return m.getLocked(scope, id)
 }
 
-// embedEntry 计算单条记忆的语义向量；embedder 未启用（nil）或计算失败时
-// 保持 nil，检索时自动跳过语义加分（纯关键词），不阻断记忆写入。
-func (m *memoryManager) embedEntry(entry *memoryEntry) {
+// embedText 计算单条文本的语义向量；embedder 未启用（nil）或计算失败时
+// 返回 nil，检索时自动跳过语义加分（纯关键词），不阻断记忆写入。
+// 调用方须在锁外使用（网络请求）。
+func (m *memoryManager) embedText(content string) []float32 {
 	if m.embedder == nil {
-		return
+		return nil
 	}
-	if vec := m.embedder.EmbedOne(context.Background(), entry.Content); len(vec) > 0 {
-		entry.Emb = vec
-	}
+	return m.embedder.EmbedOne(context.Background(), content)
 }
 
 // remove 按 ID 删除指定 scope 中的一条记忆；ID 不存在时返回 false。
@@ -327,11 +340,14 @@ func (m *memoryManager) scopes() []string {
 
 // update 按 ID 更新指定 scope 中一条记忆的内容、关联用户 ID 与标签；
 // ID 不存在时返回错误。创建时间保留不变；超长内容按 MaxContentRunes 截断。
+// embedding 计算在锁外完成（同 addEntry，避免网络等待阻塞全局锁）。
 func (m *memoryManager) update(scope, id, userID, content string, tags []string) error {
 	content = tasklog.Truncate(strings.TrimSpace(content), MaxContentRunes)
 	if content == "" {
 		return errors.New("记忆内容不能为空")
 	}
+
+	emb := m.embedText(content)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -342,8 +358,9 @@ func (m *memoryManager) update(scope, id, userID, content string, tags []string)
 			e.UserID = strings.TrimSpace(userID)
 			e.Content = content
 			e.Tags = tags
-			// 内容变更后语义向量需要重新计算
-			m.embedEntry(&e)
+			// 内容变更后语义向量需要重新计算；计算失败（nil）时清空旧向量，
+			// 避免用旧内容向量给新内容打分（检索时自动跳过语义加分）
+			e.Emb = emb
 			if ok := m.store.update(scope, e); !ok {
 				m.logger.Error("更新记忆后落盘失败", "scope", scope, "id", id)
 				return errors.New("记忆保存失败，请查看日志")

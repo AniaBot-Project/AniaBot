@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 
 	"github.com/jeanhua/AniaBot/bot/component/llmtool"
 )
@@ -42,7 +41,7 @@ func (t *SendFileTool) Execute(ctx context.Context, params any, callbacks llmtoo
 	p := params.(*SendFileParams)
 	log.Println("执行file... 参数:", p)
 
-	if strings.Contains(p.Path, "aniabot.db") {
+	if SensitiveHostPath(p.Path) {
 		return "禁止发送aniabot数据库文件", errToolExecute
 	}
 
