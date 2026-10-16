@@ -317,6 +317,17 @@ func TestApprovalRequestPromptShowsActualWait(t *testing.T) {
 	}
 }
 
+// TestWaitSecondsRounding 展示秒数四舍五入：按上下文预算反推的等待时长略小于整秒
+// （40s 实为 39.99…s），截断会把提示里的「40 秒」显示成「39 秒」。
+func TestWaitSecondsRounding(t *testing.T) {
+	if got := waitSeconds(40*time.Second - time.Microsecond); got != 40 {
+		t.Fatalf("39.999999 秒应显示 40，实际 %d", got)
+	}
+	if got := waitSeconds(39*time.Second + 400*time.Millisecond); got != 39 {
+		t.Fatalf("39.4 秒应显示 39，实际 %d", got)
+	}
+}
+
 // TestEvictClearsSessionState 会话淘汰时一并复位计划模式与任务清单
 // （两者都声明「随会话淘汰清空」，此前只丢 ChatBot 会留下陈旧状态）。
 func TestEvictClearsSessionState(t *testing.T) {

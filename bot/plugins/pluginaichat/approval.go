@@ -100,6 +100,12 @@ func (m *approvalManager) approvalWaitBudget(ctx context.Context) time.Duration 
 // LLM 调用把结论告诉用户。
 const approvalFinishReserve = 20 * time.Second
 
+// waitSeconds 等待时长的展示秒数：四舍五入而非截断——预算由上下文截止时间反推
+// （60s 预算实为 39.99…s），截断会把提示里的「40 秒」显示成「39 秒」。
+func waitSeconds(wait time.Duration) int {
+	return int(wait.Round(time.Second).Seconds())
+}
+
 // request 发起一次审批：发送提示消息后阻塞等待回复/取消/超时。
 // 返回 (allowed, reason)：reason 在拒绝时说明原因（拒绝/超时/取消）。
 // 会话级互斥锁保证同会话并行工具调用的多个审批逐个提示。
@@ -126,7 +132,7 @@ func (m *approvalManager) request(ctx context.Context, sKey, tool, summary strin
 	}()
 
 	sendPrompt(m.formatPrompt(tool, summary, requester, wait))
-	m.logger.Info("发起工具审批", "session", sKey, "tool", tool, "requester", requester, "wait_sec", int(wait.Seconds()))
+	m.logger.Info("发起工具审批", "session", sKey, "tool", tool, "requester", requester, "wait_sec", waitSeconds(wait))
 
 	select {
 	case v := <-req.resultCh:
@@ -141,7 +147,7 @@ func (m *approvalManager) request(ctx context.Context, sKey, tool, summary strin
 		return false, "审批等待已取消（请求被停止）"
 	case <-time.After(wait):
 		m.audit(sKey, tool, summary, "超时自动拒绝", message.FromUint64(0))
-		return false, fmt.Sprintf("审批超时（%d 秒无回复），已自动拒绝", int(wait.Seconds()))
+		return false, fmt.Sprintf("审批超时（%d 秒无回复），已自动拒绝", waitSeconds(wait))
 	}
 }
 
@@ -264,7 +270,7 @@ func (m *approvalManager) requestAdminOnly(ctx context.Context, originSKey, tool
 		return false, "审批等待已取消（请求被停止）"
 	case <-time.After(wait):
 		m.audit(originSKey, tool, summary, "超时自动拒绝", message.FromUint64(0))
-		return false, fmt.Sprintf("审批超时（%d 秒无回复），已自动拒绝", int(wait.Seconds()))
+		return false, fmt.Sprintf("审批超时（%d 秒无回复），已自动拒绝", waitSeconds(wait))
 	}
 }
 
@@ -278,10 +284,10 @@ func (m *approvalManager) formatPrompt(tool, summary string, requester message.Q
 		sb.WriteString("\n参数摘要：" + summary)
 	}
 	if requester == message.FromUint64(0) {
-		fmt.Fprintf(&sb, "\n请管理员在 %d 秒内回复「允许」或「拒绝」（超时自动拒绝）", int(wait.Seconds()))
+		fmt.Fprintf(&sb, "\n请管理员在 %d 秒内回复「允许」或「拒绝」（超时自动拒绝）", waitSeconds(wait))
 	} else {
 		fmt.Fprintf(&sb, "\n请消息发送者（%s）或管理员在 %d 秒内回复「允许」或「拒绝」（超时自动拒绝）",
-			requester.String(), int(wait.Seconds()))
+			requester.String(), waitSeconds(wait))
 	}
 	return sb.String()
 }
