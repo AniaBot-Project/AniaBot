@@ -113,6 +113,7 @@
   "plugin.ai_chat_bot.quota.enable": true,
   "plugin.ai_chat_bot.quota.global_daily_tokens": 2000000,
   "plugin.ai_chat_bot.rate_limit": 2,
+  "plugin.ai_chat_bot.reply.split_blank_line": false,
   "plugin.ai_chat_bot.retry.base_delay_sec": 2,
   "plugin.ai_chat_bot.retry.max_attempts": 3,
   "plugin.ai_chat_bot.session.max_idle_minutes": 120,

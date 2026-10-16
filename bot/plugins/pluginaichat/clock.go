@@ -934,26 +934,40 @@ func (m *clockManager) sendFinalOutput(task *ClockTask, resp string, skipped boo
 	return m.sendText(task, resp)
 }
 
+// sendText 向任务目标发送文本。按空行拆分开关开启时拆成多条逐条发送
+// （群聊仅首条携带 @ 提醒），与主对话回复的拆分语义保持一致。
 func (m *clockManager) sendText(task *ClockTask, text string) bool {
 	if m.bot == nil {
 		return false
 	}
+	split := m.plugin != nil && m.plugin.cfg.Reply.SplitBlankLine
+	segments := replySegments(text, split)
 	targetQID := parseQID(task.TargetID)
 	if task.TargetType == clockTargetGroup {
-		builder := msgchain.Builder().Group()
-		if task.CreatedBy != "" {
-			builder.Mention(task.CreatedBy)
-			builder.Text(" " + text)
-		} else {
-			builder.Text(text)
+		for i, seg := range segments {
+			builder := msgchain.Builder().Group()
+			if i == 0 && task.CreatedBy != "" {
+				builder.Mention(task.CreatedBy)
+				builder.Text(" " + seg)
+			} else {
+				builder.Text(seg)
+			}
+			_, ok := m.bot.SendGroupMsg(targetQID, builder.Build())
+			if !ok {
+				return false
+			}
 		}
-		_, ok := m.bot.SendGroupMsg(targetQID, builder.Build())
-		return ok
+		return true
 	}
-	builder := msgchain.Builder().Friend()
-	builder.Text(text)
-	_, ok := m.bot.SendFriendMsg(targetQID, builder.Build())
-	return ok
+	for _, seg := range segments {
+		builder := msgchain.Builder().Friend()
+		builder.Text(seg)
+		_, ok := m.bot.SendFriendMsg(targetQID, builder.Build())
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *clockManager) parseTargetID(task *ClockTask) message.QID {

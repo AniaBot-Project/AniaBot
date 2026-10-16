@@ -466,9 +466,9 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	ctx = context.WithValue(ctx, imageRegistryKey{}, imageReg)
 	var msgFuncs llmtool.CallBackFuncs
 	if isGroup {
-		msgFuncs = MakeGroupCallback(b, id, lastMsg.Sender.UserId, p.Logger)
+		msgFuncs = MakeGroupCallback(b, id, lastMsg.Sender.UserId, p.Logger, p.cfg.Reply.SplitBlankLine)
 	} else {
-		msgFuncs = MakeFriendCallback(b, id, p.Logger)
+		msgFuncs = MakeFriendCallback(b, id, p.Logger, p.cfg.Reply.SplitBlankLine)
 	}
 	p.configureImageCallbacks(ctx, b, &msgFuncs, imageReg, func(u aichat.TokenUsage) {
 		// 备用图片识别（OCR）消耗：并入会话统计（finishQuery 取走）与配额
@@ -508,12 +508,14 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	// 平台不支持或流式创建失败时自动退化为一次性回复（下方原发送路径）。
 	// 群聊首条流式消息携带本批全部发言者的 @ 提及（与一次性路径的提及集一致）；
 	// 工具轮边界后续轮次的新消息不再重复 @，避免一次回复多次提醒用户。
+	// 按空行拆分回复与流式互斥（流式是单条消息逐字更新，无法拆成多条），
+	// 拆分开启时跳过流式、走一次性发送后按空行拆分。
 	var streamHandle bot.StreamHandle
 	var streamBuf strings.Builder
 	streaming := false
 	streamUnsupported := false
 	mentionPending := isGroup
-	if p.cfg.Stream.Enable {
+	if p.cfg.Stream.Enable && !p.cfg.Reply.SplitBlankLine {
 		if ss, ok := b.(bot.StreamSender); ok {
 			chatOpts.OnStreamDelta = func(delta string) {
 				if delta == "" || streamUnsupported {
@@ -695,10 +697,13 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 		return true
 	}
 
+	// 最终回复片段：默认整段一条消息；开启按空行拆分时拆成多条逐条发送。
+	segments := replySegments(resp, p.cfg.Reply.SplitBlankLine)
 	if isGroup {
-		// 群聊中 @ 本批所有发言者（去重），让排队消息的每个人都收到回应
-		builder := msgchain.Builder().Group()
+		// 群聊中 @ 本批所有发言者（去重），让排队消息的每个人都收到回应；
+		// 拆分发送时仅首条携带 @ 提及，避免每条回复都提醒
 		seen := make(map[message.QID]struct{}, len(batch))
+		mentions := make([]message.QID, 0, len(batch))
 		for i := range batch {
 			uid := batch[i].Sender.UserId
 			if uid == message.FromUint64(0) {
@@ -708,17 +713,29 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 				continue
 			}
 			seen[uid] = struct{}{}
-			builder.Mention(uid)
+			mentions = append(mentions, uid)
 		}
-		builder.Text(" " + resp)
-		if _, success := b.SendGroupMsg(id, builder.Build()); success {
-			p.Logger.Info("发送文本", "group", id, "batch", len(batch), "text", resp)
+		for i, seg := range segments {
+			builder := msgchain.Builder().Group()
+			if i == 0 {
+				for _, uid := range mentions {
+					builder.Mention(uid)
+				}
+				builder.Text(" " + seg)
+			} else {
+				builder.Text(seg)
+			}
+			if _, success := b.SendGroupMsg(id, builder.Build()); success {
+				p.Logger.Info("发送文本", "group", id, "batch", len(batch), "segment", i+1, "text", seg)
+			}
 		}
 	} else {
-		builder := msgchain.Builder().Friend()
-		builder.Text(resp)
-		if _, success := b.SendFriendMsg(id, builder.Build()); success {
-			p.Logger.Info("发送文本", "user", id, "batch", len(batch), "text", resp)
+		for i, seg := range segments {
+			builder := msgchain.Builder().Friend()
+			builder.Text(seg)
+			if _, success := b.SendFriendMsg(id, builder.Build()); success {
+				p.Logger.Info("发送文本", "user", id, "batch", len(batch), "segment", i+1, "text", seg)
+			}
 		}
 	}
 	return true

@@ -250,6 +250,13 @@ type streamConfig struct {
 	Enable bool `cfg:"enable" label:"启用流式回复" group:"AI 对话 · 回复" help:"平台支持时逐字展示回复（飞书卡片/Telegram/Discord 消息实时更新）；不支持或出错时自动退化为一次性回复" default:"true"`
 }
 
+// replyConfig 回复拆分配置：把 AI 回复中的空行作为消息边界，拆成多条消息
+// 逐条发送（默认关闭，保持整段一条）。与流式回复互斥：流式是「单条消息
+// 逐字更新」，无法按空行拆成多条，故拆分开启时该轮退化为一次性发送。
+type replyConfig struct {
+	SplitBlankLine bool `cfg:"split_blank_line" label:"按空行拆分回复" group:"AI 对话 · 回复" help:"开启后 AI 回复中的空行（连续换行）作为消息边界，拆成多条消息逐条发送，适合模型习惯用空行分段的回复；与流式回复互斥（开启时不再走流式，改一次性发送后拆分）；默认关闭" default:"false"`
+}
+
 // quotaConfig 每日 Token 配额限制配置：按会话与全局两个维度限制每日消耗。
 type quotaConfig struct {
 	Enable            bool `cfg:"enable" label:"启用每日配额限制" group:"AI 对话 · 配额" help:"按会话与全局两个维度限制每日 Token 消耗，超限后 AI 请求被拒绝" default:"false"`
@@ -317,6 +324,7 @@ type aiChatConfig struct {
 	QueryLog queryLogConfig `cfg:"plugin.ai_chat_bot.query_log"`
 
 	Stream   streamConfig   `cfg:"plugin.ai_chat_bot.stream"`
+	Reply    replyConfig    `cfg:"plugin.ai_chat_bot.reply"`
 	Quota    quotaConfig    `cfg:"plugin.ai_chat_bot.quota"`
 	Session  sessionConfig  `cfg:"plugin.ai_chat_bot.session"`
 	Hooks    hooksConfig    `cfg:"plugin.ai_chat_bot.hooks"`

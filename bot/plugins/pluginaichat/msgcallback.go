@@ -14,19 +14,27 @@ import (
 // 历史消息查询不再是回调：原 get_msg_history 已删除，由平台注入的历史消息工具
 //（aitool.NewMsgHistoryTool，经 platformtools.go 注入）替代，图片登记经
 // Context.OnMessages + 请求上下文中的 imageRegistryKey 完成。
+//
+// splitBlankLine 为「按空行拆分回复」开关：工具轮中间文本的发送同样遵循，
+// 开关开启时一段文本按空行拆成多条消息（仅首条 @ 用户）。
 
-func MakeGroupCallback(bot bot.Bot, groupId, userId message.QID, logger *slog.Logger) llmtool.CallBackFuncs {
+func MakeGroupCallback(bot bot.Bot, groupId, userId message.QID, logger *slog.Logger, splitBlankLine bool) llmtool.CallBackFuncs {
 	msgFuncs := llmtool.CallBackFuncs{
 		SendText: func(s string) (string, error) {
-			builder := msgchain.Builder().Group()
-			builder.Mention(userId)
-			builder.Text(" " + s)
-			_, success := bot.SendGroupMsg(groupId, builder.Build())
-			if success {
-				logger.Info("发送文本", "group", groupId, "user", userId, "text", s)
-				return "发送成功", nil
+			for i, seg := range replySegments(s, splitBlankLine) {
+				builder := msgchain.Builder().Group()
+				if i == 0 {
+					builder.Mention(userId)
+					builder.Text(" " + seg)
+				} else {
+					builder.Text(seg)
+				}
+				if _, success := bot.SendGroupMsg(groupId, builder.Build()); !success {
+					return "", fmt.Errorf("发送失败")
+				}
+				logger.Info("发送文本", "group", groupId, "user", userId, "segment", i+1, "text", seg)
 			}
-			return "", fmt.Errorf("发送失败")
+			return "发送成功", nil
 		},
 		SendImage: func(bs64content string) (string, error) {
 			builder := msgchain.Builder().Group()
@@ -66,17 +74,18 @@ func MakeGroupCallback(bot bot.Bot, groupId, userId message.QID, logger *slog.Lo
 	return msgFuncs
 }
 
-func MakeFriendCallback(bot bot.Bot, userId message.QID, logger *slog.Logger) llmtool.CallBackFuncs {
+func MakeFriendCallback(bot bot.Bot, userId message.QID, logger *slog.Logger, splitBlankLine bool) llmtool.CallBackFuncs {
 	msgFuncs := llmtool.CallBackFuncs{
 		SendText: func(s string) (string, error) {
-			builder := msgchain.Builder().Friend()
-			builder.Text(s)
-			_, success := bot.SendFriendMsg(userId, builder.Build())
-			if success {
-				logger.Info("发送文本", "user", userId, "text", s)
-				return "发送成功", nil
+			for i, seg := range replySegments(s, splitBlankLine) {
+				builder := msgchain.Builder().Friend()
+				builder.Text(seg)
+				if _, success := bot.SendFriendMsg(userId, builder.Build()); !success {
+					return "", fmt.Errorf("发送失败")
+				}
+				logger.Info("发送文本", "user", userId, "segment", i+1, "text", seg)
 			}
-			return "", fmt.Errorf("发送失败")
+			return "发送成功", nil
 		},
 		SendImage: func(bs64content string) (string, error) {
 			builder := msgchain.Builder().Friend()

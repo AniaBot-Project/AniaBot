@@ -75,14 +75,20 @@ func TestClockSkipOutputTool(t *testing.T) {
 
 // recordBot 记录发送行为的测试 bot.Bot（仅实现收尾推送用到的能力）。
 type recordBot struct {
-	mu     sync.Mutex
-	groups []string
-	friend []string
+	mu       sync.Mutex
+	groups   []string
+	friend   []string
+	mentions int
 }
 
 func (b *recordBot) SendGroupMsg(_ message.QID, chain msgchain.GroupChain) (message.QID, bool) {
 	b.mu.Lock()
 	b.groups = append(b.groups, chainText(chain.GetGroupMsg()))
+	for _, s := range chain.GetGroupMsg() {
+		if s.Type == "at" {
+			b.mentions++
+		}
+	}
 	b.mu.Unlock()
 	return "1", true
 }
@@ -98,6 +104,13 @@ func (b *recordBot) sent() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append(append([]string{}, b.groups...), b.friend...)
+}
+
+// groupMentions 返回收到的群聊 @ 提及段总数。
+func (b *recordBot) groupMentions() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.mentions
 }
 
 // chainText 拼接消息链中的文本段，供断言发送内容。

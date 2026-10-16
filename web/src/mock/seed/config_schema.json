@@ -1305,6 +1305,14 @@
     "default": true
   },
   {
+    "key": "plugin.ai_chat_bot.reply.split_blank_line",
+    "label": "按空行拆分回复",
+    "type": "bool",
+    "group": "AI 对话 · 回复",
+    "help": "开启后 AI 回复中的空行（连续换行）作为消息边界，拆成多条消息逐条发送，适合模型习惯用空行分段的回复；与流式回复互斥（开启时不再走流式，改一次性发送后拆分）；默认关闭",
+    "default": false
+  },
+  {
     "key": "plugin.ai_chat_bot.quota.enable",
     "label": "启用每日配额限制",
     "type": "bool",
