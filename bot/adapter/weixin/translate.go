@@ -139,8 +139,21 @@ func (a *weixinAdapter) imageSegment(img *ImageItem) (message.OB11Segment, bool)
 		a.logger.Debug("微信图片下载/解密失败", "error", err)
 		return message.OB11Segment{}, false
 	}
-	seg.Data["url"] = "data:image/png;base64," + base64.StdEncoding.EncodeToString(data)
+	// 按字节魔数标注 MIME：手机端微信图片绝大多数是 JPEG，一律写成 image/png
+	// 会让多模态/OCR 端按内容与标签不符解码失败（飞书侧已有同因教训）。
+	seg.Data["url"] = imageDataURI(data)
 	return seg, true
+}
+
+// imageDataURI 把解密后的图片字节编码为 data URI，MIME 按字节魔数推断；
+// 无法识别时退回 image/png（保持历史行为，至少不改变旧有的报错形态）。
+// 单独成函数便于测试锁定 MIME 判定（JPEG 曾被硬编码标成 PNG）。
+func imageDataURI(data []byte) string {
+	mime, ok := message.SniffImageMIME(data)
+	if !ok {
+		mime = "image/png"
+	}
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
 func appendTextSeg(segs []message.OB11Segment, text string) []message.OB11Segment {

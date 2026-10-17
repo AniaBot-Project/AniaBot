@@ -266,8 +266,8 @@ func (a *telegramAdapter) pollLoop(ctx context.Context) {
 		}
 		backoff = time.Second
 		a.setStatus("connected", "")
-		// [诊断-临时] 记录每批拉取量（定位群消息丢失问题，定位后移除）
-		a.logger.Info("Telegram getUpdates 成功", "batch", len(updates), "offset", offset)
+		// 仅 Debug 记录每批拉取量：轮询空转时也会命中，Info 级别会刷满日志
+		a.logger.Debug("Telegram getUpdates 成功", "batch", len(updates), "offset", offset)
 		offset = a.processUpdates(updates, offset)
 	}
 }
@@ -320,8 +320,7 @@ func (a *telegramAdapter) getUpdates(ctx context.Context, offset, timeout int) (
 
 // handleUpdate 分发一个已去重的更新（在独立 goroutine 中调用）。
 func (a *telegramAdapter) handleUpdate(u *Update) {
-	// [诊断-临时] 记录每个到达适配器的更新（定位群消息丢失问题，定位后移除）
-	a.logger.Info("Telegram 收到更新", "update_id", u.UpdateID,
+	a.logger.Debug("Telegram 收到更新", "update_id", u.UpdateID,
 		"message", u.Message != nil, "channel_post", u.ChannelPost != nil,
 		"my_chat_member", u.MyChatMember != nil, "message_reaction", u.MessageReaction != nil)
 	if m := u.Message; m != nil {
@@ -353,9 +352,10 @@ func (a *telegramAdapter) handleMessage(m *Message) {
 	if m.From != nil && m.From.IsBot {
 		return
 	}
-	// [诊断-临时] 记录每条非 bot 入站消息（定位群消息丢失问题，定位后移除）
-	a.logger.Info("Telegram 收到消息", "chat_id", m.Chat.ID, "chat_type", m.Chat.Type,
-		"from_id", fromIDOf(m.From), "text", m.Text)
+	// 入站消息只以 Debug 记录且不含正文：用户聊天内容不应进持久化日志，
+	// 高流量群里 Info 级别的逐条记录也会冲掉面板的环形缓冲
+	a.logger.Debug("Telegram 收到消息", "chat_id", m.Chat.ID, "chat_type", m.Chat.Type,
+		"from_id", fromIDOf(m.From), "text_runes", len([]rune(m.Text)))
 	// 服务消息：成员加入/离开。Telegram 仅当 bot 为管理员或关闭隐私模式时
 	// 才投递其他成员的变动（平台限制），bot 自己相关变动走 my_chat_member 更新。
 	if len(m.NewChatMembers) > 0 {
@@ -368,8 +368,10 @@ func (a *telegramAdapter) handleMessage(m *Message) {
 	}
 	msg := a.updateToMessage(m)
 	if msg == nil {
-		// [诊断-临时] 翻译丢弃时记录（定位群消息丢失问题，定位后移除）
-		a.logger.Warn("Telegram 消息翻译为空，丢弃", "chat_id", m.Chat.ID, "chat_type", m.Chat.Type, "text", m.Text)
+		// 翻译为空说明该消息不被支持（纯媒体/服务消息等），保留 Warn 便于排查；
+		// 但只记长度不记正文，避免用户聊天内容进入持久化日志
+		a.logger.Warn("Telegram 消息翻译为空，丢弃", "chat_id", m.Chat.ID, "chat_type", m.Chat.Type,
+			"text_runes", len([]rune(m.Text)))
 		return
 	}
 	a.msgCache.Push(chatIDRaw(m.Chat.ID), *msg)
@@ -514,7 +516,7 @@ func chatIDRaw(chatID int64) string {
 	return strconv.FormatInt(chatID, 10)
 }
 
-// fromIDOf 发送者 ID 的字符串形式（[诊断-临时] 日志用，定位后移除）。
+// fromIDOf 发送者 ID 的字符串形式（日志用）。
 func fromIDOf(u *User) string {
 	if u == nil {
 		return ""

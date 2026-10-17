@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/jeanhua/AniaBot/common/bot"
 	"github.com/jeanhua/AniaBot/common/model/message"
@@ -69,7 +68,7 @@ func (a *telegramAdapter) sendStream(target message.QID, segs []message.OB11Segm
 	if text == "" {
 		return nil, false
 	}
-	text = truncateRunes(text, maxEditTextLen)
+	text = truncateText(text, maxEditTextLen)
 	id, ok := a.sendText(ctx, chatID, text, replyTo)
 	if !ok {
 		return nil, false
@@ -139,7 +138,7 @@ func (h *telegramStreamHandle) patchLocked(final bool) error {
 	if h.a == nil || h.a.client == nil || h.msgID == 0 {
 		return nil
 	}
-	raw := truncateRunes(h.prefix+h.content, maxEditTextLen)
+	raw := truncateText(h.prefix+h.content, maxEditTextLen)
 	pm := ""
 	text := raw
 	if final {
@@ -184,17 +183,25 @@ func (h *telegramStreamHandle) patchLocked(final bool) error {
 	return nil
 }
 
-// truncateRunes 按 rune 截断到最大字节数（不切断多字节字符）。
-func truncateRunes(s string, maxBytes int) string {
-	if len(s) <= maxBytes {
-		return s
+// truncateText 按 Telegram 的计量单位（UTF-16 code unit）截断，不切断多字节字符。
+//
+// Telegram 对消息文本的上限是 4096 个 UTF-16 单元（emoji 等补充平面字符占 2 个），
+// 因此不能按字节截断：中文每字 3 字节，按字节计只保留约 1365 字，中文长回复会在
+// 远未达到平台上限时被静默砍掉。计量口径与发送路径的 splitText 保持一致。
+func truncateText(s string, maxUnits int) string {
+	if maxUnits <= 0 {
+		return ""
 	}
-	var sb strings.Builder
-	for _, r := range s {
-		if sb.Len()+utf8.RuneLen(r) > maxBytes {
-			break
+	units := 0
+	for i, r := range s {
+		u := 1
+		if r > 0xFFFF {
+			u = 2
 		}
-		sb.WriteRune(r)
+		if units+u > maxUnits {
+			return s[:i]
+		}
+		units += u
 	}
-	return sb.String()
+	return s
 }

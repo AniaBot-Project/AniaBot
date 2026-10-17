@@ -44,19 +44,29 @@ func TestSplitText(t *testing.T) {
 	}
 }
 
-// TestTruncateRunes 字节安全截断：不切断多字节字符。
-func TestTruncateRunes(t *testing.T) {
+// TestTruncateText 按 Telegram 计量单位（UTF-16 code unit）截断：不切断多字节
+// 字符，也不因中文/emoji 而提前砍掉内容（旧实现按字节计，中文只保留约 1/3）。
+func TestTruncateText(t *testing.T) {
 	s := "你好世界"
-	if got := truncateRunes(s, 100); got != s {
+	if got := truncateText(s, 100); got != s {
 		t.Fatalf("未超限不应截断, got %q", got)
 	}
-	// "你好" = 6 字节，第三个字符 3 字节，截断到 7 字节应保留"你好"
-	if got := truncateRunes("你好世", 7); got != "你好" {
+	// 中文按"字"计数：限 2 个单元应保留 2 个字（按字节计只会保留 0 个）
+	if got := truncateText("你好世", 2); got != "你好" {
 		t.Fatalf("截断结果 = %q, want 你好", got)
 	}
-	// 截断到 4096 的流式内容
+	// 中文长文本应保留接近上限的字符数（3 字节/字，按字节计只会有 ~1365 字）
+	longCN := strings.Repeat("中", 5000)
+	got := truncateText(longCN, maxEditTextLen)
+	if n := len([]rune(got)); n != maxEditTextLen {
+		t.Fatalf("中文截断应保留 %d 个字，实际 %d 个（疑似按字节计）", maxEditTextLen, n)
+	}
+	// 补充平面字符（emoji）占 2 个单元，不能切成半个
+	if got := truncateText("😀😀😀", 3); got != "😀" {
+		t.Fatalf("emoji 截断结果 = %q, want 😀", got)
+	}
 	long := strings.Repeat("a", 5000)
-	if got := truncateRunes(long, maxEditTextLen); len(got) != maxEditTextLen {
+	if got := truncateText(long, maxEditTextLen); len(got) != maxEditTextLen {
 		t.Fatalf("截断长度 = %d, want %d", len(got), maxEditTextLen)
 	}
 }
@@ -230,7 +240,7 @@ func TestStreamHandlePrefixPreserved(t *testing.T) {
 	h := &telegramStreamHandle{a: a, chatID: -100, msgID: 1, prefix: "@alice "}
 	h.content = "你好"
 	// 模拟 patchLocked 的内容构造（client nil 时不真正调用 API，直接验证拼接逻辑）
-	content := truncateRunes(h.prefix+h.content, maxEditTextLen)
+	content := truncateText(h.prefix+h.content, maxEditTextLen)
 	if content != "@alice 你好" {
 		t.Fatalf("拼接内容 = %q, want @alice 你好（prefix 保留）", content)
 	}

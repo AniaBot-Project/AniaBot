@@ -18,10 +18,15 @@ import (
 )
 
 type napcatWebSocketAdapter struct {
-	wsConn      *websocket.Conn
-	trigger     adapter.TriggerWrapper
-	ackMng      *ackManager // ackMng.timeout 为普通请求超时
-	mu          sync.Mutex
+	wsConn  *websocket.Conn
+	trigger adapter.TriggerWrapper
+	ackMng  *ackManager // ackMng.timeout 为普通请求超时
+	mu      sync.Mutex
+	// writeMu 串行化 WriteMessage（gorilla 要求同一连接至多一个并发写者）。
+	// 与 mu 分离：WriteMessage 对端假死时可在 socket 缓冲写满后长时间阻塞，
+	// 若持 mu 写入，Connected()/AdapterStatus() 与其它 request() 会一并挂起
+	//（面板状态接口一起卡住，且卡在超时计时器创建之前，请求超时配置对它无效）。
+	writeMu     sync.Mutex
 	msgCh       chan []byte
 	workerWg    sync.WaitGroup
 	workerCount int
@@ -62,6 +67,21 @@ func (n *napcatWebSocketAdapter) setStatus(state, errDetail string, failCount in
 	n.failCount = failCount
 }
 
+// wsWriteTimeout 单次写操作的上限：写超时不应长于该请求自身的等待超时，
+// 否则超时计时器先到、用户看到「请求超时」却仍占着写锁。
+func (n *napcatWebSocketAdapter) writeTimeout() time.Duration {
+	const def = 30 * time.Second
+	if n.ackMng != nil && n.ackMng.timeout > 0 && n.ackMng.timeout < def {
+		return n.ackMng.timeout
+	}
+	return def
+}
+
+// wsReadTimeout 读循环的 deadline：收到任意数据即刷新（含心跳与 ACK）。
+// 对端假死（半开 TCP，RST/FIN 都不会到达）时 ReadMessage 会永久阻塞且状态仍
+// 显示 connected；有 deadline 后至少能周期性醒来重连。
+const wsReadTimeout = 90 * time.Second
+
 // AdapterStatus 返回连接状态（connecting/connected/reconnecting）与详情（最近错误或重试次数）。
 func (n *napcatWebSocketAdapter) AdapterStatus() (state string, detail string) {
 	n.mu.Lock()
@@ -98,14 +118,22 @@ func request[T any](n *napcatWebSocketAdapter, action string, params any, prefix
 	n.ackMng.pendingAcks.Store(echo, resCh)
 	defer n.ackMng.pendingAcks.Delete(echo)
 
+	// 写路径不持 mu：WriteMessage 在对端假死、socket 缓冲写满时会长时间阻塞，
+	// 持 mu 会让 Connected()/AdapterStatus() 与其它 request() 一并卡死
+	//（且卡在下面的超时计时器创建之前，请求超时配置对它无效）。
+	// gorilla 只要求同一连接至多一个并发写者，writeMu 单独负责该约束。
 	n.mu.Lock()
-	if n.wsConn == nil {
-		n.mu.Unlock()
+	conn := n.wsConn
+	n.mu.Unlock()
+	if conn == nil {
 		log.Printf("[%s] 连接未就绪（重连中），跳过发送", action)
 		return nil, false
 	}
-	err = n.wsConn.WriteMessage(websocket.TextMessage, b)
-	n.mu.Unlock()
+	n.writeMu.Lock()
+	// 写超时：对端不读数据时避免无限阻塞（断开由读循环/心跳触发重连）
+	_ = conn.SetWriteDeadline(time.Now().Add(n.writeTimeout()))
+	err = conn.WriteMessage(websocket.TextMessage, b)
+	n.writeMu.Unlock()
 	if err != nil {
 		log.Printf("[%s] 发送失败: %v", action, err)
 		return nil, false
@@ -362,7 +390,10 @@ func (n *napcatWebSocketAdapter) Serve(v *viper.Viper) {
 	// 连接失败不退出：无限重试（指数退避，封顶 30s），
 	// 连接状态与最近错误通过 AdapterStatus 暴露给 Web 面板，
 	// 用户可在面板修改连接配置后重启生效。
-	const maxBackoff = 30 * time.Second
+	//
+	// 断开路径同样退避：只有握手失败才退避时，「握手成功但对端立即关闭」
+	//（协议端重启、token 被拒后踢线、反代空连接）会形成零间隔重连风暴——
+	// CPU 空转、每秒数千行日志，同时把对端打满。
 	failCount := 0
 	for {
 		var conn *websocket.Conn
@@ -378,31 +409,62 @@ func (n *napcatWebSocketAdapter) Serve(v *viper.Viper) {
 		if err != nil {
 			failCount++
 			n.setStatus("reconnecting", err.Error(), failCount)
-			backoff := min(time.Second*time.Duration(1<<min(failCount-1, 5)), maxBackoff)
+			backoff := wsReconnectBackoff(failCount)
 			log.Printf("连接失败（第 %d 次）: %v. %v 后重试...（可在 Web 面板修改连接配置后重启）", failCount, err, backoff)
 			time.Sleep(backoff)
 			continue
 		}
-		failCount = 0
 		n.setStatus("connected", "", 0)
 		log.Println("WebSocket 连接成功！")
 		n.mu.Lock()
 		n.wsConn = conn
 		n.mu.Unlock()
 		n.startWorkerPool(n.workerCount, n.queueSize)
+		connectedAt := time.Now()
 		n.readLoop(conn)
 		n.stopWorkerPool()
 		n.mu.Lock()
 		n.wsConn = nil
 		n.mu.Unlock()
-		n.setStatus("reconnecting", "连接已断开", 0)
-		log.Println("连接断开，准备重连...")
+
+		// 断开退避：刚建立就断开说明链路不健康，按失败累计退避重试；
+		// 长时间稳定后断开（对端正常重启）视为一次新故障，从最短退避重来。
+		failCount = wsNextFailCount(failCount, time.Since(connectedAt))
+		backoff := wsReconnectBackoff(failCount)
+		n.setStatus("reconnecting", "连接已断开", failCount)
+		log.Printf("连接断开（存活 %v），%v 后重连...", time.Since(connectedAt).Round(time.Second), backoff)
+		time.Sleep(backoff)
 	}
 }
+
+// wsReconnectBackoff 重连退避时长：按失败次数指数增长并封顶 maxBackoff。
+// Dial 失败与「连接建立后立即断开」共用同一算路——后者若不退避会形成零间隔
+// 重连风暴（协议端重启/token 被踢线/反代空连接）。
+func wsReconnectBackoff(failCount int) time.Duration {
+	const maxBackoff = 30 * time.Second
+	if failCount < 1 {
+		failCount = 1
+	}
+	return min(time.Second*time.Duration(1<<min(failCount-1, 5)), maxBackoff)
+}
+
+// wsNextFailCount 计算本次断开后的失败计数：连接存活时间短于 wsStableConnDuration
+// 视为链路不健康，累计（退避递增）；存活足够久则视为一次新故障（退避回到最短）。
+func wsNextFailCount(previous int, connectedFor time.Duration) int {
+	if connectedFor < wsStableConnDuration {
+		return previous + 1
+	}
+	return 1
+}
+
+// wsStableConnDuration 连接存活超过该时长才认为链路健康
+const wsStableConnDuration = 30 * time.Second
 
 func (n *napcatWebSocketAdapter) readLoop(conn *websocket.Conn) {
 	defer conn.Close()
 	for {
+		// 读 deadline：对端假死时 ReadMessage 不再永久阻塞（收到任意数据即刷新）
+		_ = conn.SetReadDeadline(time.Now().Add(wsReadTimeout))
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
 			log.Println("读取数据失败:", err)

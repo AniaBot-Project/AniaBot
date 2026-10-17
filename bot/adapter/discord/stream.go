@@ -95,8 +95,11 @@ type discordStreamHandle struct {
 	// prefix 初始消息中不可丢弃的提及文本：编辑替换整个消息内容，需重新带上
 	prefix string
 
-	mu        sync.Mutex
-	content   string
+	mu      sync.Mutex
+	content string
+	// full 已提交的完整内容（prefix + content）：可能超过单条上限，
+	// End 时据此补发被截断的尾部。
+	full      string
 	lastPatch time.Time
 	// lastSent 最后一次成功编辑的文本：内容未变化时跳过冗余 API 调用
 	lastSent string
@@ -126,15 +129,22 @@ func (h *discordStreamHandle) End() {
 		return
 	}
 	_ = h.patchLocked()
+	// 编辑无法追加内容：超出单条上限的尾部作为后续消息补发，避免长回复被静默截断
+	h.sendOverflowLocked()
 	h.closed = true
 }
 
 // patchLocked 以当前内容编辑消息；内容与上次成功编辑一致时跳过。调用方需持有 h.mu。
+//
+// 超出单条上限时只显示前 maxTextLen 个字符（编辑无法追加），剩余内容在 End 时
+// 作为后续消息补发（见 sendOverflowLocked）——旧实现直接丢弃尾部，用户看到的是
+// 静默截断的半截回答。
 func (h *discordStreamHandle) patchLocked() error {
 	if h.a == nil || h.a.api == nil || h.msgID == "" {
 		return nil
 	}
-	text := truncateRunes(h.prefix+h.content, maxTextLen)
+	h.full = h.prefix + h.content
+	text := truncateRunes(h.full, maxTextLen)
 	if text == h.lastSent {
 		return nil
 	}
@@ -145,4 +155,23 @@ func (h *discordStreamHandle) patchLocked() error {
 	h.lastSent = text
 	h.lastPatch = time.Now()
 	return nil
+}
+
+// sendOverflowLocked 把超出单条上限的剩余内容作为后续消息补发（调用方需持有 h.mu）。
+// End 时调用一次；补发失败只记日志（主消息已完整展示开头部分）。
+func (h *discordStreamHandle) sendOverflowLocked() {
+	if h.a == nil || h.a.api == nil {
+		return
+	}
+	runes := []rune(h.full)
+	if len(runes) <= maxTextLen {
+		return
+	}
+	rest := string(runes[maxTextLen:])
+	if strings.TrimSpace(rest) == "" {
+		return
+	}
+	if _, ok := h.a.sendText(h.channelID, rest, nil, false); !ok {
+		h.a.logger.Warn("Discord 流式回复超长部分补发失败", "channelId", h.channelID, "runes", len(runes))
+	}
 }

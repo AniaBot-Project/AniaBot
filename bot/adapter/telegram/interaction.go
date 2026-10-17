@@ -70,7 +70,7 @@ func (a *telegramAdapter) answerCallback(callbackId, text string) bool {
 	}
 	params := map[string]any{"callback_query_id": callbackId}
 	if text != "" {
-		params["text"] = truncateRunes(text, 200)
+		params["text"] = truncateText(text, 200)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -174,7 +174,7 @@ func (a *telegramAdapter) editMsg(msgId message.QID, segs []message.OB11Segment)
 		"message_id": mid,
 	}
 	if raw := text.String(); raw != "" {
-		params["text"] = truncateRunes(raw, maxEditTextLen)
+		params["text"] = truncateText(raw, maxEditTextLen)
 		if pm := a.parseMode(); pm != "" {
 			params["parse_mode"] = pm
 			params["text"] = a.renderText(raw)
@@ -188,7 +188,7 @@ func (a *telegramAdapter) editMsg(msgId message.QID, segs []message.OB11Segment)
 	err := retryAPIError(ctx, params, func(p map[string]any) error {
 		if _, has := p["parse_mode"]; !has {
 			if raw := text.String(); raw != "" {
-				p["text"] = truncateRunes(raw, maxEditTextLen) // 降级纯文本：还原原文
+				p["text"] = truncateText(raw, maxEditTextLen) // 降级纯文本：还原原文
 			}
 		}
 		callErr := a.client.call(ctx, "editMessageText", p, nil)

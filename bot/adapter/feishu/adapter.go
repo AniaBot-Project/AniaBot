@@ -62,8 +62,9 @@ type feishuAdapter struct {
 	chatTypes sync.Map
 	// openID -> 单聊 chat_id 缓存（p2p 历史消息用）
 	p2pChats sync.Map
-	// messageID -> chatID 缓存：表情回应等事件不含 chat_id，需由消息反查
-	msgChats sync.Map
+	// msgChats messageID -> chatID 缓存：表情回应等事件不含 chat_id，需由消息反查。
+	// 有界（见 newMsgChatCache）：每条入站消息都写入，无界会随累计收信量线性增长。
+	msgChats *msgChatCache
 	// nameCache open_id -> 用户昵称缓存（通讯录查询结果，飞书消息事件本身不含发送者昵称）
 	nameCache sync.Map
 
@@ -83,14 +84,64 @@ func NewAdapter(cfg *viper.Viper) *feishuAdapter {
 		http: resty.New(),
 		// 去重窗口 1 小时：飞书重推可能因断线重连/ACK 丢失延迟数分钟才到达，
 		// 同一 message_id 永远不会被合法地处理两次，窗口长只占 LRU 容量（4096 有界）
-		dedup:  safety.NewDedupCache(4096, time.Hour),
-		logger: slog.Default().With("adapter", "feishu"),
+		dedup:    safety.NewDedupCache(4096, time.Hour),
+		msgChats: newMsgChatCache(),
+		logger:   slog.Default().With("adapter", "feishu"),
 	}
 	return a
 }
 
 func (a *feishuAdapter) Name() string     { return "feishu" }
 func (a *feishuAdapter) Platform() string { return Platform }
+
+// msgChatCacheCap messageID -> chatID 反查缓存的容量上限。表情回应事件不含
+// chat_id，只能按消息 ID 反查；但每条入站消息都会写入，无界会随累计收信量
+// 线性增长（百万级消息 ≈ 百 MB 级常驻）。表情回应总是发生在"刚发出的消息"上，
+// 保留最近若干条足够覆盖，超出即淘汰最旧。
+const msgChatCacheCap = 4096
+
+// msgChatCache 有界的 messageID -> chatID 映射（FIFO 淘汰）。
+type msgChatCache struct {
+	mu    sync.Mutex
+	byMsg map[string]string
+	order []string
+}
+
+func newMsgChatCache() *msgChatCache {
+	return &msgChatCache{byMsg: make(map[string]string, msgChatCacheCap)}
+}
+
+// store 记录消息所属会话；同一消息重复写入不重复入队。
+func (c *msgChatCache) store(msgID, chatID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, exists := c.byMsg[msgID]; exists {
+		c.byMsg[msgID] = chatID
+		return
+	}
+	for len(c.order) >= msgChatCacheCap {
+		oldest := c.order[0]
+		c.order = c.order[1:]
+		delete(c.byMsg, oldest)
+	}
+	c.byMsg[msgID] = chatID
+	c.order = append(c.order, msgID)
+}
+
+// load 反查消息所属会话。
+func (c *msgChatCache) load(msgID string) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	chatID, ok := c.byMsg[msgID]
+	return chatID, ok
+}
+
+// len 当前缓存条目数（测试断言有界性用）。
+func (c *msgChatCache) len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.byMsg)
+}
 
 // MessageKey 实现 adapter.EventKeyer：按 message_id 去重（官方推荐，勿用 event_id——
 // 每次投递 event_id 可能不同）。core 层以此为键做幂等去重；与适配器自身的早期
@@ -413,7 +464,7 @@ func (a *feishuAdapter) onReceive(ctx context.Context, event *larkim.P2MessageRe
 		a.chatTypes.Store(*em.ChatId, chatType)
 	}
 	if em.MessageId != nil && em.ChatId != nil {
-		a.msgChats.Store(*em.MessageId, *em.ChatId)
+		a.msgChats.store(*em.MessageId, *em.ChatId)
 	}
 
 	openID := ""
@@ -524,8 +575,8 @@ func (a *feishuAdapter) onReaction(ctx context.Context, event *larkim.P2MessageR
 	if a.dedup.IsDuplicate(reactKey) {
 		return nil
 	}
-	chatID, _ := a.msgChats.Load(*ev.MessageId)
-	if chatID == nil || a.chatTypeOfOrGroup(chatID.(string)) != "group" {
+	chatID, ok := a.msgChats.load(*ev.MessageId)
+	if !ok || a.chatTypeOfOrGroup(chatID) != "group" {
 		return nil
 	}
 	trig := a.triggerOf()
@@ -537,7 +588,7 @@ func (a *feishuAdapter) onReaction(ctx context.Context, event *larkim.P2MessageR
 		openID = *ev.UserId.OpenId
 	}
 	n := message.GroupMsgEmojiLikeNotice{
-		GroupId:   message.QID(idPrefix + chatID.(string)),
+		GroupId:   message.QID(idPrefix + chatID),
 		UserId:    message.QID(idPrefix + openID),
 		MessageId: message.QID(idPrefix + deref(ev.MessageId)),
 		Likes: []struct {

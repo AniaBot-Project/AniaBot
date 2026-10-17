@@ -36,6 +36,10 @@ type discordAdapter struct {
 	// msgCache 入站/出站消息内存缓存（GetMsgDetail 快路径、撤回通知作者反查、历史兜底）
 	msgCache *msgCache
 
+	// auditSem 审计日志查询的并发闸门（见 resolveDeleter）：批量删除时避免
+	// 同时发起大量 REST 查询撞速率限制。缓冲即并发上限。
+	auditSem chan struct{}
+
 	connState string
 	lastErr   string
 
@@ -45,9 +49,13 @@ type discordAdapter struct {
 func NewAdapter(cfg *viper.Viper) *discordAdapter {
 	return &discordAdapter{
 		msgCache: newMsgCache(msgCachePerChat, msgCacheMaxChats),
+		auditSem: make(chan struct{}, discordAuditMaxConcurrent),
 		logger:   slog.Default().With("adapter", "discord"),
 	}
 }
+
+// discordAuditMaxConcurrent 审计日志查询的最大并发：批量删除时限制 REST 调用量。
+const discordAuditMaxConcurrent = 4
 
 func (a *discordAdapter) Name() string     { return "discord" }
 func (a *discordAdapter) Platform() string { return Platform }

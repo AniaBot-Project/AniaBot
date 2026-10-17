@@ -2,9 +2,43 @@ package discord
 
 import (
 	"testing"
+	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/jeanhua/AniaBot/common/model/message"
 )
+
+// TestResolveDeleterQueryBounded 审计日志查询必须受并发闸门限制：
+// 批量删除（purge）会同时产生大量查询，无上限会撞 Discord 速率限制并影响正常发送。
+// 闸门满时跳过查询、操作者留空（通知照常投递，不阻塞事件循环）。
+func TestResolveDeleterQueryBounded(t *testing.T) {
+	a := NewAdapter(nil)
+	if cap(a.auditSem) != discordAuditMaxConcurrent {
+		t.Fatalf("并发上限应为 %d, got %d", discordAuditMaxConcurrent, cap(a.auditSem))
+	}
+	if discordAuditMaxConcurrent < 1 {
+		t.Fatal("并发上限必须为正")
+	}
+	// 占满闸门后：查询应被立即跳过（不留空即会退到 2s 睡眠 + REST 调用）
+	for i := 0; i < discordAuditMaxConcurrent; i++ {
+		a.auditSem <- struct{}{}
+	}
+	start := time.Now()
+	got := a.resolveDeleter(&discordgo.MessageDelete{
+		Message: &discordgo.Message{ChannelID: "1", GuildID: "2"},
+	}, message.QID("dc:1:9"))
+	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
+		t.Fatalf("闸门满时不应等待/查询，耗时 %v", elapsed)
+	}
+	if got != "" {
+		t.Fatalf("闸门满时操作者应留空, got %q", got)
+	}
+	// 释放后闸门恢复可用（容量语义正确）
+	<-a.auditSem
+	if len(a.auditSem) != discordAuditMaxConcurrent-1 {
+		t.Fatalf("释放一个令牌后占用数应为 %d, got %d", discordAuditMaxConcurrent-1, len(a.auditSem))
+	}
+}
 
 func TestMsgIDRoundTrip(t *testing.T) {
 	id := msgID("111", "222")

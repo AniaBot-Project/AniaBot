@@ -53,6 +53,8 @@ func (a *discordAdapter) onMessageDelete(s *discordgo.Session, e *discordgo.Mess
 	if trig.OnGroupRecall == nil {
 		return
 	}
+	// 通知投递本身很快（不阻塞事件循环）；耗时的审计日志查询在 resolveDeleter
+	// 内单独限流，避免批量删除触发 429 风暴。
 	go a.emitGroupRecall(trig, e, authorID, mid, now)
 }
 
@@ -75,12 +77,23 @@ func (a *discordAdapter) emitGroupRecall(trig adapter.TriggerWrapper, e *discord
 // resolveDeleter 尽力解析删除者：作者未知或查询失败（无 View Audit Log 权限等）
 // 返回空（不作自删假设）；有窗口内匹配条目返回操作者；无匹配条目（审计日志不记录
 // 本人自删）返回作者。
+//
+// 审计日志查询带固定延迟且是 REST 调用，必须有并发上限：批量删除/purge（一次
+// 几百上千条）会同时产生同量查询，撞 Discord 速率限制（429 风暴）并影响正常发送。
+// 令牌不足时跳过查询、操作者留空（通知照常投递，降级语义与查询失败一致）。
 func (a *discordAdapter) resolveDeleter(e *discordgo.MessageDelete, authorID message.QID) message.QID {
 	if a.api == nil {
 		return ""
 	}
 	authorRaw := strings.TrimPrefix(authorID.String(), idPrefix)
 	if authorRaw == "" {
+		return ""
+	}
+	select {
+	case a.auditSem <- struct{}{}:
+		defer func() { <-a.auditSem }()
+	default:
+		a.logger.Debug("审计日志查询并发已达上限，撤回操作者留空", "channelId", e.ChannelID)
 		return ""
 	}
 	time.Sleep(recallAuditLogDelay)
