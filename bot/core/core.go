@@ -277,8 +277,8 @@ func (ania *AniaBot) Run() {
 
 	// 旧版 QQ ID 为裸数字，升级后统一迁移到 qq: 前缀。
 	// 必须在配置中心读取前执行，保证 admin_id、插件配置和 AI 持久化数据
-	// 都以新 ID 格式加载。
-	if err := migrateQQIDPrefix(context.Background(), ania.persistent, Logger().WithGroup("Migration")); err != nil {
+	// 都以新 ID 格式加载。迁移成功后落标记，后续启动不再全表扫描。
+	if err := migrateQQIDPrefixOnce(context.Background(), ania.persistent, Logger().WithGroup("Migration")); err != nil {
 		Logger().Error("QQ ID 前缀迁移失败，部分旧数据可能仍是无前缀格式", "error", err)
 	}
 
@@ -344,8 +344,10 @@ func (ania *AniaBot) Run() {
 		Logger().Info("已启用平台适配器", "platform", d.Name)
 	}
 	if len(ania.adapters) == 0 {
-		Logger().Error("未启用任何平台适配器：请在 Web 面板的「平台适配器」配置中启用至少一个平台")
-		os.Exit(1)
+		// 不再直接退出：该状态可经由面板自身造成（在面板里关掉所有平台），
+		// 退出会让面板来不及启动、用户只能手改数据库才能恢复——形成自锁。
+		// 降级运行：保留面板与日志，用户可在面板中重新启用平台后重启。
+		Logger().Error("未启用任何平台适配器：请在 Web 面板的「平台适配器」配置中启用至少一个平台（当前仅面板可用）")
 	}
 
 	// 自动初始化：把配置填充进各插件声明的配置结构体（Start 之前完成）。

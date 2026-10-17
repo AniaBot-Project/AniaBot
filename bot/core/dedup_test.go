@@ -166,6 +166,43 @@ func TestMessageDedupEmptyID(t *testing.T) {
 	}
 }
 
+// TestNoticeTypeOfReadsEmbeddedField 通知类型必须能从**值**形态的通知结构取出。
+//
+// GetNoticeType 定义在 *BasicNotice 上（指针接收者），而 broadcastNotice 传的是值
+// （如 message.GroupUploadNotice），值类型的方法集不含该方法 → 旧实现的类型断言
+// 恒失败、noticeType 恒为空串（去重键静默失去类型维度）。
+func TestNoticeTypeOfReadsEmbeddedField(t *testing.T) {
+	up := message.GroupUploadNotice{}
+	up.NoticeType = "group_upload"
+	if got := noticeTypeOf(up); got != "group_upload" {
+		t.Errorf("值形态: noticeTypeOf = %q, want %q", got, "group_upload")
+	}
+	if got := noticeTypeOf(&up); got != "group_upload" {
+		t.Errorf("指针形态: noticeTypeOf = %q, want %q", got, "group_upload")
+	}
+
+	ban := message.GroupBanNotice{}
+	ban.NoticeType = "group_ban"
+	if got := noticeTypeOf(ban); got != "group_ban" {
+		t.Errorf("noticeTypeOf = %q, want %q", got, "group_ban")
+	}
+
+	// 无该字段 / nil / 非结构体：返回空串且不 panic
+	if got := noticeTypeOf(nil); got != "" {
+		t.Errorf("nil 应返回空串, got %q", got)
+	}
+	var nilPtr *message.GroupUploadNotice
+	if got := noticeTypeOf(nilPtr); got != "" {
+		t.Errorf("nil 指针应返回空串, got %q", got)
+	}
+	if got := noticeTypeOf("not-a-notice"); got != "" {
+		t.Errorf("非结构体应返回空串, got %q", got)
+	}
+	if got := noticeTypeOf(struct{ Other int }{Other: 1}); got != "" {
+		t.Errorf("无 NoticeType 字段应返回空串, got %q", got)
+	}
+}
+
 // TestNoticeDedupWithKey 适配器提供 NoticeKey 时通知去重。
 func TestNoticeDedupWithKey(t *testing.T) {
 	a, cp := newDedupTestBot(t, &fakeKeyerAdapter{fakeAdapter{name: "test", platform: "test"}})

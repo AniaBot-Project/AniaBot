@@ -2,6 +2,9 @@ package core
 
 import (
 	"context"
+	"encoding/base64"
+	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/jeanhua/AniaBot/common/storage"
@@ -82,6 +85,44 @@ func TestMigrateQQIDPrefixKV(t *testing.T) {
 	}
 	if oldCount != 0 {
 		t.Fatalf("旧会话 key 应已迁移，仍剩 %d 条", oldCount)
+	}
+}
+
+// TestMigrateQQIDPrefixOnceSkipsAfterMarker 迁移成功后必须落标记并在后续启动短路：
+// 迁移本身幂等，但每次启动都要全表扫描 ania_kv 与各日志/会话表并把候选行读进
+// 内存，库大之后启动时间与峰值内存随数据量线性上升。
+func TestMigrateQQIDPrefixOnceSkipsAfterMarker(t *testing.T) {
+	ctx := context.Background()
+	store := makeSqliteStore(t)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	if err := migrateQQIDPrefixOnce(ctx, store, logger); err != nil {
+		t.Fatalf("首次迁移失败: %v", err)
+	}
+	// 标记已落
+	marker := store.Clone(base64.StdEncoding.EncodeToString([]byte("__core_meta")) + ":")
+	if v, ok := marker.GetString(ctx, qidMigratedKey); !ok || v != "1" {
+		t.Fatalf("迁移完成后应写入标记, got %q ok=%v", v, ok)
+	}
+
+	// 再次调用：应短路。造一条新的旧数据，若真的又跑了一遍迁移它会被改写。
+	db, _, _ := storage.SQLBackend(store)
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO ania_kv (namespace, key_name, val) VALUES (?, ?, ?)`,
+		"__config:", "bot.admin_id", `"123"`); err != nil {
+		t.Fatalf("预置第二条数据失败: %v", err)
+	}
+	if err := migrateQQIDPrefixOnce(ctx, store, logger); err != nil {
+		t.Fatalf("第二次调用失败: %v", err)
+	}
+	var val string
+	if err := db.QueryRowContext(ctx,
+		`SELECT val FROM ania_kv WHERE namespace = ? AND key_name = ?`,
+		"__config:", "bot.admin_id").Scan(&val); err != nil {
+		t.Fatalf("读取失败: %v", err)
+	}
+	if val != `"123"` {
+		t.Fatalf("已有标记时应短路、不改写数据, got %q", val)
 	}
 }
 

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/base64"
+	"reflect"
 	"time"
 
 	"github.com/jeanhua/AniaBot/common/adapter"
@@ -76,10 +77,42 @@ func (ania *AniaBot) noticeDedupKey(e *adapterEntry, notice any) (string, bool) 
 	return ek.NoticeKey(noticeTypeOf(notice), notice)
 }
 
-// noticeTypeOf 从通知结构取 NoticeType（BasicNotice 字段值）。
+// noticeTypeOf 从通知结构取 NoticeType 字段值（各 *Notice 都内嵌 BasicNotice）。
+//
+// 不能靠 `notice.(interface{ GetNoticeType() string })` 断言：GetNoticeType 定义在
+// *BasicNotice 上（指针接收者），而 broadcastNotice 收到的是**值**（如
+// message.GroupUploadNotice），值类型的方法集不含该方法，断言恒失败、结果恒为空串。
+// 这里用反射读取内嵌结构体的字段，值/指针两种形态都能取到，且不引入额外依赖。
 func noticeTypeOf(notice any) string {
-	if n, ok := notice.(interface{ GetNoticeType() string }); ok {
-		return n.GetNoticeType()
+	if notice == nil {
+		return ""
+	}
+	v := reflect.ValueOf(notice)
+	if v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return ""
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return ""
+	}
+	// 先看当前结构体自身，再看内嵌的 BasicNotice（各 Notice 都内嵌它）
+	if f := v.FieldByName("NoticeType"); f.IsValid() && f.Kind() == reflect.String {
+		return f.String()
+	}
+	basic := v.FieldByName("BasicNotice")
+	if !basic.IsValid() {
+		return ""
+	}
+	if basic.Kind() == reflect.Pointer {
+		if basic.IsNil() {
+			return ""
+		}
+		basic = basic.Elem()
+	}
+	if f := basic.FieldByName("NoticeType"); f.IsValid() && f.Kind() == reflect.String {
+		return f.String()
 	}
 	return ""
 }

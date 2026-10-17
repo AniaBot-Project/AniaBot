@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -16,6 +17,28 @@ import (
 )
 
 var sessionScopePattern = regexp.MustCompile(`(^|:)([gf]):([0-9]+)`)
+
+// qidMigratedKey 迁移完成标记（ania_kv 的系统命名空间）。迁移是幂等的，但每次都
+// 要全表扫描 ania_kv 与各日志/会话表并把候选行读进内存——库大之后启动时间与峰值
+// 内存随数据量线性上升。完成后写下标记，后续启动直接短路。
+const qidMigratedKey = "qid_prefix_migrated"
+
+// migrateQQIDPrefixOnce 读标记决定是否需要迁移；迁移成功后落标记。
+// 标记读取/写入失败都按"未迁移"处理（迁移本身幂等，多跑一次没有副作用）。
+func migrateQQIDPrefixOnce(ctx context.Context, store storage.PersistentStorage, logger *slog.Logger) error {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	marker := store.Clone(base64.StdEncoding.EncodeToString([]byte("__core_meta")) + ":")
+	if v, ok := marker.GetString(ctx, qidMigratedKey); ok && v == "1" {
+		return nil
+	}
+	if err := migrateQQIDPrefix(ctx, store, logger); err != nil {
+		return err
+	}
+	marker.SetString(ctx, qidMigratedKey, "1")
+	return nil
+}
 
 // migrateQQIDPrefix 把旧版无前缀 QQ ID 迁移到 qq: 前缀。
 //

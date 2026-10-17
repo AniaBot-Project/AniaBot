@@ -36,22 +36,73 @@ func (m *memList) isExpired() bool {
 	return time.Now().After(m.expireAt)
 }
 
+// memCleanupInterval 过期键回收的扫描周期。惰性删除（读取时跳过过期项）只对
+// 调用方"看起来"正确，条目本身仍驻留 map 直到被同键覆盖——core 的幂等去重对
+// 每条入站消息写一个 TTL=10min 的键，永不回收会让内存随消息量单调上涨。
+const memCleanupInterval = 5 * time.Minute
+
 type AniaMemoryStorage struct {
 	prefix string
 	data   map[string]*memItem
 	lists  map[string]*memList
 	mu     *sync.RWMutex
 	logger *slog.Logger
+
+	// cleanupOnce 保证整个存储（含全部 Clone）只启动一个回收协程：
+	// Clone 共享 data/lists，多个协程重复全量扫描没有意义。
+	cleanupOnce sync.Once
 }
 
 func NewAniaMemoryStorage(logger *slog.Logger) *AniaMemoryStorage {
-	return &AniaMemoryStorage{
+	store := &AniaMemoryStorage{
 		data:   make(map[string]*memItem),
 		lists:  make(map[string]*memList),
 		mu:     &sync.RWMutex{},
 		logger: logger,
 	}
+	store.startCleanupLoop()
+	return store
 }
+
+// startCleanupLoop 启动过期键回收协程（进程内单例，随进程退出结束）。
+// 缓存存储没有 Stop 钩子（与 clockManager 自带 cron、会话回收 janitor 同惯例），
+// 因此这里不额外引入生命周期管理。
+func (store *AniaMemoryStorage) startCleanupLoop() {
+	store.cleanupOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(memCleanupInterval)
+			defer ticker.Stop()
+			for range ticker.C {
+				store.mu.Lock()
+				store.cleanExpired()
+				store.mu.Unlock()
+			}
+		}()
+	})
+}
+
+// reclaimExpiredLocked 若过期条目占比已过半则立即回收一次（调用方须持有写锁）。
+// 周期性扫描间隔较长，突发流量下（大量一次性去重键）需要更及时的回收，
+// 因此在写路径上做一个低成本的占比检查。
+func (store *AniaMemoryStorage) reclaimExpiredLocked() {
+	if len(store.data) < memReclaimMinEntries {
+		return
+	}
+	now := time.Now()
+	expired := 0
+	for _, v := range store.data {
+		if !v.expireAt.IsZero() && now.After(v.expireAt) {
+			expired++
+		}
+	}
+	if expired*2 >= len(store.data) {
+		store.cleanExpired()
+	}
+}
+
+// memReclaimMinEntries 触发写路径回收检查的最小条目数：小map全量扫描不划算，
+// 且短时间内不会造成可感知的内存压力。
+const memReclaimMinEntries = 1024
 
 func (store *AniaMemoryStorage) Clone(prefix string) storage.Storage {
 	return &AniaMemoryStorage{
@@ -60,6 +111,7 @@ func (store *AniaMemoryStorage) Clone(prefix string) storage.Storage {
 		lists:  store.lists,
 		mu:     store.mu, // 共享同一把锁，避免各 clone 持有独立锁而对共享 map 产生并发竞争
 		logger: store.logger,
+		// cleanupOnce 为独立零值：clone 不会再起协程（data/lists 已由根实例回收）
 	}
 }
 
@@ -115,6 +167,10 @@ func (store *AniaMemoryStorage) SetString(ctx context.Context, key, val string, 
 	if cfg.TTL > 0 {
 		expireAt = time.Now().Add(cfg.TTL)
 	}
+
+	// 写路径顺带回收：周期性扫描间隔较长，去重键这类"只写不读"的一次性条目
+	// 需要更及时的回收（见 reclaimExpiredLocked）
+	store.reclaimExpiredLocked()
 
 	store.data[fullKey] = &memItem{
 		val:      val,
