@@ -3,6 +3,7 @@ package aichat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -16,6 +17,8 @@ type fakeHistoryStore struct {
 	saved    []Message
 	cleared  bool
 	replaced int // Replace 调用次数（压缩/截断断言用）
+	// clearErr 非 nil 时 Clear 返回该错误（模拟 SQLite busy / MySQL 抖动）
+	clearErr error
 }
 
 func (f *fakeHistoryStore) Load(_ context.Context) ([]Message, error) {
@@ -41,9 +44,54 @@ func (f *fakeHistoryStore) Replace(_ context.Context, messages []Message) error 
 }
 
 func (f *fakeHistoryStore) Clear(_ context.Context) error {
+	if f.clearErr != nil {
+		return f.clearErr
+	}
 	f.saved = nil
 	f.cleared = true
 	return nil
+}
+
+// TestMessageWindowClearPropagatesStoreError clear 必须把存储层错误透出：
+// 调用方（#新对话 / 未@自动清空）需要知道"清空未真正生效"——否则内存窗口已空、
+// 日志写"清理成功"，但 DB 行仍在，会话淘汰/进程重启后 LoadHistory 会把旧上下文
+// 整段回放，用户看到"新对话没生效"。
+func TestMessageWindowClearPropagatesStoreError(t *testing.T) {
+	store := &fakeHistoryStore{clearErr: errors.New("db busy")}
+	w := newMessageWindow(1000, nil, nil, store)
+	w.append(TextMessage(RoleUser, "hi"))
+
+	if err := w.clear(context.Background()); err == nil {
+		t.Fatal("存储清空失败必须返回错误（否则上层误判为清理成功）")
+	}
+	// 内存窗口已清空（可接受），但错误必须可见
+	if len(w.history()) != 0 {
+		t.Fatalf("内存窗口应已清空, got %d 条", len(w.history()))
+	}
+}
+
+// TestClearHistoryPropagatesError ChatBot.ClearHistory 不得吞掉存储错误。
+func TestClearHistoryPropagatesError(t *testing.T) {
+	store := &fakeHistoryStore{clearErr: errors.New("db busy")}
+	bot, err := NewChatBot("http://127.0.0.1:1", "k", "m", "p", 1000, nil, store)
+	if err != nil {
+		t.Fatalf("NewChatBot: %v", err)
+	}
+	if err := bot.ClearHistory(context.Background()); err == nil {
+		t.Fatal("存储失败时 ClearHistory 应返回错误（旧实现恒返回 nil，上层错误分支是死代码）")
+	}
+
+	okStore := &fakeHistoryStore{}
+	bot2, err := NewChatBot("http://127.0.0.1:1", "k", "m", "p", 1000, nil, okStore)
+	if err != nil {
+		t.Fatalf("NewChatBot: %v", err)
+	}
+	if err := bot2.ClearHistory(context.Background()); err != nil {
+		t.Fatalf("正常清空不应报错: %v", err)
+	}
+	if !okStore.cleared {
+		t.Fatal("正常清空应调用存储 Clear")
+	}
 }
 
 func TestMessageWindowPersistAndLoad(t *testing.T) {
@@ -127,7 +175,9 @@ func TestMessageWindowClearDeletesStore(t *testing.T) {
 	w := newMessageWindow(1000, nil, nil, store)
 	w.append(TextMessage(RoleUser, "hi"))
 
-	w.clear()
+	if err := w.clear(context.Background()); err != nil {
+		t.Fatalf("clear 失败: %v", err)
+	}
 
 	if !store.cleared {
 		t.Fatal("clear 未触发存储删除")

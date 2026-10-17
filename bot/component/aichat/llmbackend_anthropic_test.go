@@ -75,6 +75,108 @@ func TestAnthropicTokenUsage(t *testing.T) {
 	}
 }
 
+// TestAnthropicThinkingBlocksReplayedThroughToolLoop 开启扩展思考后，带 tool_use
+// 的 assistant 轮在下一轮请求里必须带回 thinking 块。
+//
+// Anthropic 要求思考块原样回传，缺失时上游直接拒绝整轮请求。曾出现的缺陷是
+// GenerateResponse.ThinkingBlocks 由累积器产出却从未落到 Message 上（字段成了
+// 死字段），只有在做完整工具循环时才会暴露，故这里走 ExecuteWithTools 全链路。
+func TestAnthropicThinkingBlocksReplayedThroughToolLoop(t *testing.T) {
+	var bodies []map[string]any
+
+	toolStream := strings.Builder{}
+	toolStream.WriteString(anthropicStreamEvent("message_start",
+		`{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-test","content":[],"usage":`+anthropicUsageJSON(10, 2, 0, 0)+`}}`))
+	toolStream.WriteString(anthropicStreamEvent("content_block_start",
+		`{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`))
+	toolStream.WriteString(anthropicStreamEvent("content_block_delta",
+		`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"用户想知道时间"}}`))
+	toolStream.WriteString(anthropicStreamEvent("content_block_delta",
+		`{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_round1"}}`))
+	toolStream.WriteString(anthropicStreamEvent("content_block_stop", `{"type":"content_block_stop","index":0}`))
+	toolStream.WriteString(anthropicStreamEvent("content_block_start",
+		`{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_42","name":"now","input":{}}}`))
+	toolStream.WriteString(anthropicStreamEvent("content_block_delta",
+		`{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{}"}}`))
+	toolStream.WriteString(anthropicStreamEvent("content_block_stop", `{"type":"content_block_stop","index":1}`))
+	toolStream.WriteString(anthropicStreamEvent("message_delta",
+		`{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":5}}`))
+	toolStream.WriteString(anthropicStreamEvent("message_stop", `{"type":"message_stop"}`))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		if len(bodies) == 1 {
+			fmt.Fprint(w, toolStream.String())
+			return
+		}
+		fmt.Fprint(w, anthropicTextStream(`"现在是 12:00"`, anthropicUsageJSON(20, 4, 0, 0)))
+	}))
+	defer srv.Close()
+
+	client, err := NewLLMClient(srv.URL, "test-key", "claude-test", WithAPIFormat(APIFormatAnthropic))
+	if err != nil {
+		t.Fatalf("NewLLMClient 失败: %v", err)
+	}
+	orchestrator := NewToolOrchestrator(&stubToolExecutor{
+		tools: []llmtool.ToolDef{{Type: "function", Function: llmtool.FunctionDef{
+			Name: "now", Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
+		}}},
+		execute: func(llmtool.ToolCall) (string, error) { return "12:00", nil },
+	}, NewMessageBuilder("系统提示"))
+
+	if _, _, _, err := orchestrator.ExecuteWithTools(context.Background(),
+		client, []Message{TextMessage(RoleUser, "现在几点")}, llmtool.CallBackFuncs{}, ChatOptions{}); err != nil {
+		t.Fatalf("ExecuteWithTools 失败: %v", err)
+	}
+
+	if len(bodies) != 2 {
+		t.Fatalf("应有两次 LLM 请求（工具轮 + 收尾轮），实际 %d", len(bodies))
+	}
+	msgs := bodies[1]["messages"].([]any)
+	var asst map[string]any
+	for _, m := range msgs {
+		if mm, ok := m.(map[string]any); ok && mm["role"] == "assistant" {
+			asst = mm
+			break
+		}
+	}
+	if asst == nil {
+		t.Fatalf("第二轮请求缺少 assistant 消息: %v", msgs)
+	}
+	blocks := asst["content"].([]any)
+	if len(blocks) < 2 {
+		t.Fatalf("assistant 应含 thinking + tool_use 块, got %v", blocks)
+	}
+	b0 := blocks[0].(map[string]any)
+	if b0["type"] != "thinking" || b0["signature"] != "sig_round1" {
+		t.Fatalf("思考块未随 tool_use 轮回传（上游会拒绝该请求）: %v", b0)
+	}
+	if b0["thinking"] != "用户想知道时间" {
+		t.Fatalf("思考内容未回传: %v", b0)
+	}
+	if b1 := blocks[1].(map[string]any); b1["type"] != "tool_use" || b1["id"] != "toolu_42" {
+		t.Fatalf("tool_use 块不符: %v", b1)
+	}
+}
+
+// stubToolExecutor 固定返回同一批工具定义与结果，供编排层测试使用。
+type stubToolExecutor struct {
+	tools   []llmtool.ToolDef
+	execute func(llmtool.ToolCall) (string, error)
+}
+
+func (s *stubToolExecutor) Tools() []llmtool.ToolDef { return s.tools }
+
+func (s *stubToolExecutor) Execute(_ context.Context, call llmtool.ToolCall, _ llmtool.CallBackFuncs) (string, error) {
+	if s.execute == nil {
+		return "", nil
+	}
+	return s.execute(call)
+}
+
 // TestAnthropicGenerate 基本生成：system 走独立参数、文本解析与用量转换（含缓存命中）。
 func TestAnthropicGenerate(t *testing.T) {
 	var reqBody map[string]any

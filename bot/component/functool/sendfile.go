@@ -37,6 +37,10 @@ func NewSendFileTool() *SendFileTool {
 	}
 }
 
+// sendFileMaxBytes 单次发送文件的体积上限：base64 编码后峰值内存约为文件的
+// 2.33 倍，且内容要经回调进入平台上传链路，必须有上限。
+const sendFileMaxBytes = 64 << 20
+
 func (t *SendFileTool) Execute(ctx context.Context, params any, callbacks llmtool.CallBackFuncs) (string, error) {
 	p := params.(*SendFileParams)
 	log.Println("执行file... 参数:", p)
@@ -45,9 +49,28 @@ func (t *SendFileTool) Execute(ctx context.Context, params any, callbacks llmtoo
 		return "禁止发送aniabot数据库文件", errToolExecute
 	}
 
+	// 体积上限：内容要经 base64 编码（峰值内存 ≈ 文件大小 ×2.33）后走回调/上传
+	// 链路，GB 级文件会直接打爆进程内存。先 Stat 再读，避免"先读进内存再判断"。
+	info, err := os.Stat(p.Path)
+	if err != nil {
+		return fmt.Sprintf("读取文件失败: %v", err), errToolExecute
+	}
+	if info.IsDir() {
+		return "目标是目录，无法作为文件发送", errToolExecute
+	}
+	if info.Size() > sendFileMaxBytes {
+		return fmt.Sprintf("文件过大（%.1fMB，上限 %.1fMB），未发送",
+			float64(info.Size())/(1<<20), float64(sendFileMaxBytes)/(1<<20)), errToolExecute
+	}
+
 	data, err := os.ReadFile(p.Path)
 	if err != nil {
 		return fmt.Sprintf("读取文件失败: %v", err), errToolExecute
+	}
+	if len(data) > sendFileMaxBytes {
+		// Stat 与实际读取之间文件可能被写大，读后再兜一次
+		return fmt.Sprintf("文件过大（%.1fMB，上限 %.1fMB），未发送",
+			float64(len(data))/(1<<20), float64(sendFileMaxBytes)/(1<<20)), errToolExecute
 	}
 	_, err = callbacks.SendFile(p.Name, base64.StdEncoding.EncodeToString(data))
 	if err != nil {

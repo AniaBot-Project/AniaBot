@@ -316,6 +316,69 @@ func TestFileToolsRootJail(t *testing.T) {
 	}
 }
 
+// TestFileToolsRootJailSymlink root jail 必须挡住符号链接逃逸：纯词法校验
+// （Abs/Rel）挡不住 root 内一个指向外部的软链——read_file/write_file/edit_file/
+// glob/grep 会顺着它读写 jail 之外的路径，而面板文案承诺"所有路径必须位于该
+// 目录内"。目标不存在时对父目录复检，覆盖"写到软链目录下"的情形。
+func TestFileToolsRootJailSymlink(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("top-secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// root 内建软链：link.txt -> <outside>/secret.txt
+	link := filepath.Join(dir, "link.txt")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("当前环境不支持符号链接: %v", err)
+	}
+	// root 内建指向外部目录的软链：outdir -> outside
+	outDirLink := filepath.Join(dir, "outdir")
+	if err := os.Symlink(outside, outDirLink); err != nil {
+		t.Skipf("当前环境不支持目录符号链接: %v", err)
+	}
+
+	read, write, edit, glob, _ := newTestFileTools(t, dir)
+
+	// 经软链读文件：必须拒绝
+	if got, err := read.Execute(context.Background(), &ReadFileParams{Path: "link.txt"}, llmtool.CallBackFuncs{}); err == nil {
+		t.Fatalf("经符号链接读取 jail 外文件应被拒绝, got %q", got)
+	}
+	// 经软链写文件：必须拒绝
+	if _, err := write.Execute(context.Background(), &WriteFileParams{Path: "link.txt", Content: "pwned"}, llmtool.CallBackFuncs{}); err == nil {
+		t.Fatal("经符号链接写入应被拒绝")
+	}
+	// 经目录软链读外部文件：必须拒绝
+	if _, err := read.Execute(context.Background(), &ReadFileParams{Path: filepath.Join("outdir", "secret.txt")}, llmtool.CallBackFuncs{}); err == nil {
+		t.Fatal("经目录符号链接读取 jail 外文件应被拒绝")
+	}
+	// 经目录软链新建文件（目标不存在，走父目录复检）：必须拒绝
+	if _, err := write.Execute(context.Background(), &WriteFileParams{Path: filepath.Join("outdir", "new.txt"), Content: "x"}, llmtool.CallBackFuncs{}); err == nil {
+		t.Fatal("经目录符号链接写入新文件应被拒绝")
+	}
+	// 经软链 edit：必须拒绝
+	if _, err := edit.Execute(context.Background(), &EditFileParams{Path: "link.txt", OldString: "top", NewString: "x"}, llmtool.CallBackFuncs{}); err == nil {
+		t.Fatal("经符号链接编辑应被拒绝")
+	}
+	// 经目录软链 glob：必须拒绝
+	if _, err := glob.Execute(context.Background(), &GlobParams{Pattern: "**/*", Path: "outdir"}, llmtool.CallBackFuncs{}); err == nil {
+		t.Fatal("经目录符号链接搜索应被拒绝")
+	}
+
+	// 内容未被篡改
+	if data, err := os.ReadFile(secret); err != nil || string(data) != "top-secret" {
+		t.Fatalf("jail 外文件被改写: %q, %v", data, err)
+	}
+	// root 内普通文件仍可正常读写
+	if err := os.WriteFile(filepath.Join(dir, "plain.txt"), []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := read.Execute(context.Background(), &ReadFileParams{Path: "plain.txt"}, llmtool.CallBackFuncs{}); err != nil || !strings.Contains(got, "ok") {
+		t.Fatalf("root 内普通文件应可读: %q, %v", got, err)
+	}
+}
+
 func TestMatchGlob(t *testing.T) {
 	cases := []struct {
 		pattern, name string

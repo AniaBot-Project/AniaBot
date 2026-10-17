@@ -227,6 +227,24 @@ func TestBashTimeoutSec(t *testing.T) {
 	}
 }
 
+// TestBashWaitDelayConfigured 命令必须设置 WaitDelay。
+//
+// ctx 到期时 CommandContext 只 Kill 直接子进程；`cmd /C <命令>`（或 `sh -c`）
+// 派生的孙进程会继承 stdout/stderr 管道，管道写端未关闭时 Run() 会一直阻塞在
+// 等待 copy goroutine 上——工具调用挂死，编排层的 wg.Wait() 让整轮请求无法
+// 返回（5 分钟消息预算失效）。WaitDelay 是让 Run() 必然收敛的唯一保证，
+// 这里直接锁定该配置，避免后续重构把兜底删掉（该挂死场景依赖具体进程树，
+// 难以在单元测试里稳定复现）。
+func TestBashWaitDelayConfigured(t *testing.T) {
+	tool := mustBash(t, BashConfig{Whitelist: []string{`.*`}})
+	if got := tool.commandWaitDelay(); got != bashWaitDelay {
+		t.Fatalf("bash 命令必须设置 WaitDelay=%v, got %v", bashWaitDelay, got)
+	}
+	if bashWaitDelay <= 0 {
+		t.Fatal("WaitDelay 必须为正，否则等同未设置")
+	}
+}
+
 // TestBashEnv 自定义环境变量追加到继承环境：配置的变量生效，
 // 进程内已有的变量不丢失（回归 161b30a：重构时 env 应用逻辑被整体删除）。
 func TestBashEnv(t *testing.T) {

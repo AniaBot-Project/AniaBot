@@ -3,6 +3,7 @@ package functool
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -27,7 +28,21 @@ const (
 	bashCwdMarker = "__ANIABOT_CWD__"
 	// bashCwdFail 标记值：起始目录不存在（cd 失败）时回传，不更新 cwd
 	bashCwdFail = "FAIL"
+	// bashWaitDelay 命令结束后等待输出管道关闭的上限：ctx 到期只杀直接子进程，
+	// 派生出的孙进程若继承 stdout/stderr 管道，Run() 会一直阻塞在等待 copy
+	// goroutine 上（工具调用挂死 → 整轮请求无法返回）。设上限后超时即放弃管道，
+	// Run() 必然收敛（返回 exec.ErrWaitDelay，按成功处理，输出已收集完整）。
+	bashWaitDelay = 5 * time.Second
 )
+
+// applyCommandWaitDelay 为待执行的命令设置 WaitDelay 兜底。集中在一处设置便于
+// 测试锁定（该挂死场景依赖具体进程树，单元测试难以稳定复现，因此直接断言配置）。
+func applyCommandWaitDelay(cmd *exec.Cmd) {
+	cmd.WaitDelay = bashWaitDelay
+}
+
+// commandWaitDelay 返回当前生效的 WaitDelay（供测试断言兜底未被移除）。
+func (t *BashTool) commandWaitDelay() time.Duration { return bashWaitDelay }
 
 // BashConfig bash工具配置
 type BashConfig struct {
@@ -244,6 +259,13 @@ func (t *BashTool) Execute(ctx context.Context, params any, cbs llmtool.CallBack
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	// WaitDelay：ctx 到期/被取消时，CommandContext 只会 Kill 直接子进程；而
+	// `cmd /C <命令>`（或 `sh -c`）派生的**孙进程**会继承 stdout/stderr 管道，
+	// 管道写端未全部关闭时 Run() 仍会阻塞在等待 copy goroutine 上——即工具调用
+	// 挂死，并因编排层 wg.Wait() 让整轮请求无法返回（5 分钟消息预算失效）。
+	// 由 applyCommandWaitDelay 统一设置，保证 Run() 一定收敛。
+	applyCommandWaitDelay(cmd)
+
 	// 追加而非替换：直接赋值 cmd.Env 会丢弃进程继承的 PATH/HOME 等变量，
 	// 配置任意一个自定义变量就会破坏依赖继承环境的命令查找；同名变量以配置值为准
 	if len(t.env) > 0 {
@@ -266,6 +288,12 @@ func (t *BashTool) Execute(ctx context.Context, params any, cbs llmtool.CallBack
 
 	if r := []rune(result); len(r) > t.maxOutput {
 		result = truncateMiddle(string(r), t.maxOutput)
+	}
+
+	// ErrWaitDelay：命令本体已结束/已被杀，只是孙进程仍占着输出管道被强制放弃。
+	// 输出已收集完整，按成功返回，避免把「输出已拿到」误报为执行失败。
+	if errors.Is(err, exec.ErrWaitDelay) {
+		err = nil
 	}
 
 	if ctx.Err() == context.DeadlineExceeded {

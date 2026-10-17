@@ -148,13 +148,21 @@ func (w *messageWindow) history() []Message {
 	return w.messages
 }
 
-func (w *messageWindow) clear() {
+// clear 清空内存窗口，并删除持久化历史（重启后也不再恢复）。
+// 返回存储层的错误：调用方需要知道清空是否真正生效（内存已空但 DB 未清时，
+// 会话淘汰/进程重启会把旧上下文整段回放）。
+func (w *messageWindow) clear(ctx context.Context) error {
 	w.messages = nil
 	w.lastPromptTokens = 0
-	if w.store != nil {
-		// 删除持久化历史，重启后也不再恢复
-		_ = w.store.Clear(context.Background())
+	w.compressUsage = TokenUsage{}
+	w.forceCompress = false
+	if w.store == nil {
+		return nil
 	}
+	if err := w.store.Clear(ctx); err != nil {
+		return fmt.Errorf("清除持久化历史失败: %w", err)
+	}
+	return nil
 }
 
 func (w *messageWindow) RecordUsage(usage TokenUsage) {

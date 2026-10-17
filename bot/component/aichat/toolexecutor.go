@@ -107,6 +107,22 @@ func appendTruncationNote(content string) string {
 	return content + truncationNote
 }
 
+// appendAIMessage 把一次 LLM 响应作为 assistant 消息追加到消息数组，并回传
+// 应当采用的内容（content 由调用方算好：被截断时含截断说明，落盘/回放与
+// 真正展示给用户的那一份保持一致）。
+//
+// Anthropic 扩展思考的思考块必须随 assistant 消息原样回传：开启 thinking 后
+// 若带 tool_use 的轮次回放时缺 thinking/redacted_thinking 块，上游会直接拒绝
+// （types.go 与 llmbackend_anthropic.go 顶部注释均声明该约束）。这里统一把
+// resp.ThinkingBlocks 落到 Message 上，避免每个调用点各自遗漏。
+func appendAIMessage(messages []Message, b *MessageBuilder, resp GenerateResponse, content string) ([]Message, string) {
+	msg := b.BuildAIMessageWithReasoning(content, resp.ToolCalls, resp.ReasoningContent)
+	if len(resp.ThinkingBlocks) > 0 {
+		msg.ThinkingBlocks = resp.ThinkingBlocks
+	}
+	return append(messages, msg), content
+}
+
 func (o *ToolOrchestrator) ExecuteWithTools(
 	ctx context.Context,
 	llmClient *LLMClient,
@@ -134,7 +150,7 @@ func (o *ToolOrchestrator) ExecuteWithTools(
 		totalUsage.LastPromptTokens = usage.PromptTokens
 		totalUsage.Iterations = 1
 		content := resp.Content
-		messages = append(messages, o.msgBuilder.BuildAIMessageWithReasoning(content, nil, resp.ReasoningContent))
+		messages, content = appendAIMessage(messages, o.msgBuilder, resp, content)
 		return content, messages, totalUsage, nil
 	}
 
@@ -159,7 +175,7 @@ func (o *ToolOrchestrator) ExecuteWithTools(
 			if resp.Truncated {
 				content = appendTruncationNote(content)
 			}
-			messages = append(messages, o.msgBuilder.BuildAIMessageWithReasoning(content, nil, resp.ReasoningContent))
+			messages, content = appendAIMessage(messages, o.msgBuilder, resp, content)
 			return content, messages, totalUsage, nil
 		}
 
@@ -186,7 +202,7 @@ func (o *ToolOrchestrator) ExecuteWithTools(
 			}
 		}
 
-		messages = append(messages, o.msgBuilder.BuildAIMessageWithReasoning(resp.Content, resp.ToolCalls, resp.ReasoningContent))
+		messages, _ = appendAIMessage(messages, o.msgBuilder, resp, resp.Content)
 
 		// 流式模式下内容已通过 OnStreamDelta 增量发出，不再重复发送
 		content := RemoveThinkContent(resp.Content)
@@ -225,7 +241,7 @@ func (o *ToolOrchestrator) ExecuteWithTools(
 			if finalResp.Truncated {
 				finalContent = appendTruncationNote(finalContent)
 			}
-			messages = append(messages, o.msgBuilder.BuildAIMessageWithReasoning(finalContent, nil, finalResp.ReasoningContent))
+			messages, finalContent = appendAIMessage(messages, o.msgBuilder, finalResp, finalContent)
 			return finalContent, messages, totalUsage, nil
 		}
 	}

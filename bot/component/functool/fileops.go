@@ -54,6 +54,11 @@ func NewFileTools(config FileToolsConfig) []llmtool.Tool {
 
 // resolvePath 解析用户路径：绝对路径直接采用；相对路径基于 Root（未配置时为进程
 // 工作目录）。Root 非空时校验解析结果必须仍位于 Root 内。
+//
+// 校验对**已存在的目标**额外做一次符号链接解引用后的复检：纯词法校验（Abs/Rel）
+// 挡不住 root 内一个指向外部的软链——read_file/write_file/glob/grep 会顺着它读写
+// jail 之外的路径。目标不存在（如新建文件）时对其**父目录**复检，覆盖
+// "把文件写到软链目录下"的情况。
 func (c FileToolsConfig) resolvePath(path string) (string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -74,11 +79,48 @@ func (c FileToolsConfig) resolvePath(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("解析路径失败: %w", err)
 	}
-	rel, err := filepath.Rel(root, target)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if !withinRoot(root, target) {
 		return "", fmt.Errorf("路径 %q 超出工作根目录 %q，已拒绝", path, c.Root)
 	}
+	// 符号链接复检：解析到真实路径后必须仍在 root 内
+	if real, ok := resolveExistingSymlinks(target); ok {
+		// 真实路径可能位于 root 之外（软链逃逸），root 自身也需解引用后比较
+		realRoot := root
+		if rr, ok2 := resolveExistingSymlinks(root); ok2 {
+			realRoot = rr
+		}
+		if !withinRoot(realRoot, real) {
+			return "", fmt.Errorf("路径 %q 经符号链接指向工作根目录之外（%q），已拒绝", path, real)
+		}
+	}
 	return target, nil
+}
+
+// withinRoot 判断 target 是否位于 root 之内（含相等）。
+func withinRoot(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// resolveExistingSymlinks 解引用路径中已存在的部分，返回真实路径；完全无法解析
+// 时返回 ok=false（调用方退回词法校验结果）。
+func resolveExistingSymlinks(path string) (string, bool) {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real, true
+	}
+	// 目标不存在（新建文件）：解引用父目录
+	parent := filepath.Dir(path)
+	if parent == path {
+		return "", false
+	}
+	real, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return "", false
+	}
+	return filepath.Join(real, filepath.Base(path)), true
 }
 
 // checkFilePath 解析路径并拦截敏感文件（与 file 工具同一策略：禁止触碰机器人数据库）。

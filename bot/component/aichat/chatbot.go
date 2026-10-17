@@ -177,9 +177,12 @@ func (b *ChatBot) GetSingleImageDesc(ctx context.Context, userInput string, imag
 	return b.llmClient.GenerateSingleWithUsage(ctx, messages, opts)
 }
 
+// ClearHistory 清空内存窗口与持久化历史。
+// 存储层失败时返回错误：调用方（如 #新对话 / 未@自动清空）据此决定是否提示，
+// 且必须知道"清空未真正生效"——否则内存窗口已空、日志写"清理成功"，但 DB 行
+// 仍在，会话被淘汰或进程重启后 LoadHistory 会把旧上下文整段回放。
 func (b *ChatBot) ClearHistory(ctx context.Context) error {
-	b.window.clear()
-	return nil
+	return b.window.clear(ctx)
 }
 
 func (b *ChatBot) ClearDynamicTools() int {
