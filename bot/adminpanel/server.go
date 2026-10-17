@@ -519,7 +519,16 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var deleted []string
+	var rejected []string
 	for k, v := range updates {
+		// 内部元数据键（meta.*）一律拒绝：它们不是用户配置，删除 meta.initialized
+		// 会让下次启动重新执行 seedDefaults()——而它对模板里每个键都是无条件写入，
+		// 等于把全部用户配置覆盖回默认值。面板/预设本就不该触碰这些键。
+		if strings.HasPrefix(k, "meta.") || k == "" {
+			rejected = append(rejected, k)
+			delete(updates, k)
+			continue
+		}
 		// null 表示删除该键（可选参数清空=恢复未配置语义，不再向下游传）
 		if v == nil {
 			if s.opt.Config.Delete(k) {
@@ -538,6 +547,13 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 			if str, ok := v.(string); !ok || str == "" {
 				delete(updates, k)
 			}
+		}
+	}
+	if len(rejected) > 0 {
+		// 排序保证提示稳定（map 遍历顺序随机）
+		sort.Strings(rejected)
+		if s.opt.Logger != nil {
+			s.opt.Logger.Warn("面板配置写入包含内部元数据键，已拒绝", "keys", strings.Join(rejected, ","))
 		}
 	}
 	if len(updates) == 0 && len(deleted) == 0 {
