@@ -54,3 +54,24 @@ func (p *AIChatPlugin) drainPending(id message.QID, isGroup bool) []message.Mess
 	q.items = nil
 	return items
 }
+
+// isEmpty 当前队列是否为空（加锁读取，供淘汰路径判断）。
+func (q *pendingQueue) isEmpty() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.items) == 0
+}
+
+// reclaimSessionQueue 在会话淘汰时回收旁挂状态（队列、待注入上下文、未@计数标记）。
+// 队列非空时不删（可能有待消费消息，交由正常流程处理）；这些 sync.Map 若不回收
+// 会随历史会话数无界增长，且清扫器每 10s 都要 Range 全表扫描空条目。
+func (p *AIChatPlugin) reclaimSessionQueue(key string) {
+	if v, ok := p.pendingMsgs.Load(key); ok {
+		if q, isQueue := v.(*pendingQueue); isQueue && q.isEmpty() {
+			p.pendingMsgs.CompareAndDelete(key, q)
+		}
+	}
+	p.sessionInject.Delete(key)
+	// 未@计数标记一并复位：淘汰后重新加载会从持久层恢复，语义不变
+	p.noMentionLoaded.Delete(key)
+}

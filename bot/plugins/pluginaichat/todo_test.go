@@ -138,3 +138,73 @@ func TestTodoPendingReminderDedup(t *testing.T) {
 		t.Fatal("完成复位后新增任务应重新提醒")
 	}
 }
+
+// TestTodoReminderCommitsOnlyAfterSuccess 提醒哈希只在请求成功后提交：
+// 生成时即提交会让一次失败（超时/取消/报错）吞掉后续所有轮次的提醒——而清单
+// 未变时恰恰是最需要提醒的时候。
+func TestTodoReminderCommitsOnlyAfterSuccess(t *testing.T) {
+	m := newTodoManager()
+	const key = "g:1"
+	_ = m.replace(key, []todoItem{{Content: "编译并测试", Status: "pending"}})
+
+	// 生成提醒（未提交：模拟本轮请求尚未成功返回）
+	if got := m.pendingReminder(key); got == "" {
+		t.Fatal("首轮应生成提醒")
+	}
+	// 同一轮内重复调用不应重复注入
+	if got := m.pendingReminder(key); got != "" {
+		t.Fatalf("同一轮内重复调用不应重复注入, got %q", got)
+	}
+	m.commitReminder(key) // 请求成功 → 提交
+
+	// 已提交：清单未变则不再注入
+	if got := m.pendingReminder(key); got != "" {
+		t.Fatalf("已成功提醒后不应重复注入, got %q", got)
+	}
+
+	// 清单变化 → 重新提醒，再提交后再次静默
+	_ = m.replace(key, []todoItem{{Content: "编译并测试", Status: "in_progress"}})
+	if got := m.pendingReminder(key); got == "" {
+		t.Fatal("清单变化后应重新提醒")
+	}
+	if got := m.pendingReminder(key); got != "" {
+		t.Fatalf("提交前同一轮不应重复注入, got %q", got)
+	}
+	m.commitReminder(key)
+	if got := m.pendingReminder(key); got != "" {
+		t.Fatalf("提交后不应重复注入, got %q", got)
+	}
+
+	// 提交幂等：重复调用不改变状态、不 panic
+	m.commitReminder(key)
+	m.commitReminder(key)
+	if got := m.pendingReminder(key); got != "" {
+		t.Fatalf("重复提交后仍不应注入, got %q", got)
+	}
+
+	// 无待提交哈希时提交为无害空操作
+	m.commitReminder("g:不存在")
+}
+
+// TestTodoReminderResetsWhenAllCompleted 全部完成后哈希复位：新增任务能重新提醒，
+// 且 pending 归零时不得留下待提交残留导致下一轮静默。
+func TestTodoReminderResetsWhenAllCompleted(t *testing.T) {
+	m := newTodoManager()
+	const key = "g:1"
+	_ = m.replace(key, []todoItem{{Content: "任务A", Status: "pending"}})
+	if got := m.pendingReminder(key); got == "" {
+		t.Fatal("应生成提醒")
+	}
+	m.commitReminder(key)
+
+	// 全部完成 → 复位
+	_ = m.replace(key, []todoItem{{Content: "任务A", Status: "completed"}})
+	if got := m.pendingReminder(key); got != "" {
+		t.Fatalf("全部完成后不应提醒, got %q", got)
+	}
+	// 新增任务 → 即使内容与历史提醒完全相同（同文本哈希）也应重新提醒
+	_ = m.replace(key, []todoItem{{Content: "任务A", Status: "completed"}, {Content: "任务A", Status: "pending"}})
+	if got := m.pendingReminder(key); got == "" {
+		t.Fatal("复位后新增任务应重新提醒（哈希未复位会被静默吞掉）")
+	}
+}

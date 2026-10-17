@@ -30,17 +30,23 @@ const (
 
 // todoManager 任务清单（内存态，按会话隔离）：AI 通过 todo_write 以全量替换语义
 // 维护清单；不持久化——清单是单次工作流的临时状态，会话淘汰/重启后自动清空。
-// lastRemindHash 记录上次注入提醒的内容哈希，清单没变时不重复注入，避免每轮污染上下文。
+// lastRemindHash 记录已成功注入提醒的内容哈希，清单没变时不重复注入，避免每轮
+// 污染上下文；pendingRemind 为"已生成提醒、待请求成功后再提交"的暂存哈希
+// （失败轮次不得吞掉后续提醒，见 commitReminder）。
 type todoManager struct {
-	mu             sync.Mutex
-	lists          map[string][]todoItem // key = sessionKey
-	lastRemindHash map[string]uint64
+	mu    sync.Mutex
+	lists map[string][]todoItem // key = sessionKey
+	// committed 已成功注入提醒的内容哈希（清单没变则不重复注入）
+	committed map[string]uint64
+	// generated 已生成提醒、等待请求成功提交的哈希
+	generated map[string]uint64
 }
 
 func newTodoManager() *todoManager {
 	return &todoManager{
-		lists:          make(map[string][]todoItem),
-		lastRemindHash: make(map[string]uint64),
+		lists:     make(map[string][]todoItem),
+		committed: make(map[string]uint64),
+		generated: make(map[string]uint64),
 	}
 }
 
@@ -85,7 +91,8 @@ func (m *todoManager) clear(key string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.lists, key)
-	delete(m.lastRemindHash, key)
+	delete(m.committed, key)
+	delete(m.generated, key)
 }
 
 // pendingReminder 生成未完成事项提醒（尾部注入用）；清单无未完成项时返回空串。
@@ -105,19 +112,37 @@ func (m *todoManager) pendingReminder(key string) string {
 		fmt.Fprintf(&sb, "%d. [%s] %s\n", pending, todoStatusLabel(it.Status), it.Content)
 	}
 	if pending == 0 {
-		delete(m.lastRemindHash, key)
+		// 清单清空/全部完成：哈希复位，后续新增任务能重新提醒
+		delete(m.committed, key)
+		delete(m.generated, key)
 		return ""
 	}
 	text := sb.String()
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(text))
 	hash := h.Sum64()
-	if m.lastRemindHash[key] == hash {
+	// 已成功提醒过同样内容 → 不再注入（成功后由 commitReminder 提交哈希）；
+	// 已生成但尚未提交（同一轮内重复调用）也返回空串，避免一次请求里重复注入。
+	if m.committed[key] == hash || m.generated[key] == hash {
 		return ""
 	}
-	m.lastRemindHash[key] = hash
+	// 标记"提醒已生成"：避免生成失败或同一轮内被重复调用时反复注入同一段落。
+	// 真正抑制后续轮次的是 committed——它只在请求成功后提交，因此失败轮次不会
+	// 吞掉提醒（见 commitReminder）。
+	m.generated[key] = hash
 	return "<todo_reminder>当前任务清单还有 " + strconv.Itoa(pending) + " 项未完成：\n" + text +
 		"每完成一项请立即用 todo_write 更新状态；全部完成后清空清单。</todo_reminder>"
+}
+
+// commitReminder 在请求成功处理后正式提交提醒哈希：此后同样的清单内容不再
+// 注入，直到清单变化。失败轮次不调用，提醒会在下一轮重新注入。
+func (m *todoManager) commitReminder(key string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if hash, ok := m.generated[key]; ok {
+		m.committed[key] = hash
+		delete(m.generated, key)
+	}
 }
 
 // todoStatusLabel 状态的中文标签（结果文本与提醒共用）。

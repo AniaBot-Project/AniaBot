@@ -134,6 +134,9 @@ func (m *approvalManager) request(ctx context.Context, sKey, tool, summary strin
 	sendPrompt(m.formatPrompt(tool, summary, requester, wait))
 	m.logger.Info("发起工具审批", "session", sKey, "tool", tool, "requester", requester, "wait_sec", waitSeconds(wait))
 
+	// 定时器显式 Stop：回复/取消分支胜出后不再驻留 (wait 最长 240s)
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
 	select {
 	case v := <-req.resultCh:
 		if v.allow {
@@ -145,7 +148,7 @@ func (m *approvalManager) request(ctx context.Context, sKey, tool, summary strin
 	case <-ctx.Done():
 		// /stop 取消请求（同一 chatCtx）：不记审计（未形成决定）
 		return false, "审批等待已取消（请求被停止）"
-	case <-time.After(wait):
+	case <-timer.C:
 		m.audit(sKey, tool, summary, "超时自动拒绝", message.FromUint64(0))
 		return false, fmt.Sprintf("审批超时（%d 秒无回复），已自动拒绝", waitSeconds(wait))
 	}
@@ -181,8 +184,17 @@ func (m *approvalManager) tryHandleReply(id message.QID, isGroup bool, sender me
 		}
 		return true, "你没有权限批准本次操作（需请求发送者或管理员）"
 	}
-	// resultCh 带缓冲：即使等待方恰好超时退出，发送也不会阻塞
-	req.resultCh <- approvalVerdict{allow: allow, by: sender}
+	// resultCh 带缓冲且非阻塞发送：等待方可能已从超时/取消分支返回（pending 尚未
+	// 清除的窗口内），此时若缓冲区已被前一条回复占满，阻塞发送会永久挂住消息
+	// 分发协程（该用户后续消息都不再被处理）。
+	select {
+	case req.resultCh <- approvalVerdict{allow: allow, by: sender}:
+	default:
+		// 已有结论未取走或等待方已退出：本次回复丢弃（不阻断消息流程）
+		if m.logger != nil {
+			m.logger.Warn("审批回复未送达（等待方已结束或已有结论）", "session", sKey, "tool", req.tool)
+		}
+	}
 	m.logger.Info("审批回复", "session", sKey, "tool", req.tool, "allow", allow, "by", sender)
 	return true, ""
 }
@@ -257,6 +269,8 @@ func (m *approvalManager) requestAdminOnly(ctx context.Context, originSKey, tool
 	}
 	m.logger.Info("发起管理员审批", "session", originSKey, "tool", tool)
 
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
 	select {
 	case v := <-req.resultCh:
 		if v.allow {
@@ -268,7 +282,7 @@ func (m *approvalManager) requestAdminOnly(ctx context.Context, originSKey, tool
 	case <-ctx.Done():
 		// /stop 取消请求（同一 chatCtx）：不记审计（未形成决定）
 		return false, "审批等待已取消（请求被停止）"
-	case <-time.After(wait):
+	case <-timer.C:
 		m.audit(originSKey, tool, summary, "超时自动拒绝", message.FromUint64(0))
 		return false, fmt.Sprintf("审批超时（%d 秒无回复），已自动拒绝", waitSeconds(wait))
 	}

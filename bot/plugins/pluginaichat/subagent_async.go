@@ -313,10 +313,32 @@ func (p *AIChatPlugin) sweepPendingSessions() {
 		if !ok || b == nil {
 			return true
 		}
-		p.processPendingOnce(b, id, isGroup)
+		// 每个会话独立协程接管：processChatBatch 是长耗时操作，同步执行会让
+		// 10s 周期的 ticker 在接管期间不再触发，其余会话的滞留队列得不到兜底。
+		// 会话锁保证同一会话不会被重复接管（拿不到锁的协程会立即返回）。
+		pendingBot, pendingID, pendingGroup := b, id, isGroup
+		b.Go("pending-sweep:"+k, func() {
+			p.sweepSessionWithBudget(pendingBot, pendingID, pendingGroup)
+		})
 		return true
 	})
 }
+
+// sweepSessionWithBudget 清扫器路径的单会话接管：给每次接管一个远小于消息处理
+// 总预算的上限（pendingSweepPerSessionBudget），超时后由下一次 tick 继续，
+// 避免单个繁忙会话长期占住锁与清扫器协程。
+func (p *AIChatPlugin) sweepSessionWithBudget(b bot.Bot, id message.QID, isGroup bool) {
+	deadline := time.Now().Add(pendingSweepPerSessionBudget)
+	for {
+		p.processPendingOnceWithDeadline(b, id, isGroup, deadline)
+		if !p.hasPending(sessionKey(id, isGroup)) || time.Until(deadline) <= 0 {
+			return
+		}
+	}
+}
+
+// pendingSweepPerSessionBudget 单次清扫里每个会话允许占用的最长时长。
+const pendingSweepPerSessionBudget = 30 * time.Second
 
 // parseSessionKey 解析 g:<id> / f:<id> 会话键（见 sessionKey）。
 func parseSessionKey(key string) (message.QID, bool, bool) {
@@ -333,9 +355,15 @@ func parseSessionKey(key string) (message.QID, bool, bool) {
 }
 
 // processPendingOnce 尝试获取会话锁并处理排队消息；未拿到锁返回 false。
-// 后台触发不属于任何消息事件，上下文按 p.msgEventTimeout 独立预算；
+// 后台触发不属于任何消息事件，上下文按 p.msgEventTimeout 结算总预算（同主流程
+// 的 eventBudget 语义：单次接管不会无限延长）；
 // 队列为空时立即返回，不做任何事（等价于一次无消息触发的响应）。
 func (p *AIChatPlugin) processPendingOnce(b bot.Bot, id message.QID, isGroup bool) bool {
+	return p.processPendingOnceWithDeadline(b, id, isGroup, time.Now().Add(p.msgEventTimeout))
+}
+
+// processPendingOnceWithDeadline 按给定总预算截止时刻接管一次排队队列。
+func (p *AIChatPlugin) processPendingOnceWithDeadline(b bot.Bot, id message.QID, isGroup bool, deadline time.Time) bool {
 	lock := p.tryLock(id, isGroup)
 	if lock == nil {
 		return false
@@ -349,15 +377,21 @@ func (p *AIChatPlugin) processPendingOnce(b bot.Bot, id message.QID, isGroup boo
 		return true
 	}
 
-	// runCtx 承载 /stop 与锁丢失的取消信号；每批消息派生独立预算（同主流程）
+	// runCtx 承载 /stop 与锁丢失的取消信号；每批消息派生独立预算，累计受总预算约束
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
 	lock.attachCancel(cancelRun)
 
 	batch := p.drainPending(id, isGroup)
 	for len(batch) > 0 {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			// 总预算耗尽：丢回队列交由清扫器下一次接管（避免占住锁与清扫器）
+			p.Logger.Warn("后台接管总预算耗尽，剩余排队消息留待下次接管", "id", id, "is_group", isGroup, "pending", len(batch))
+			break
+		}
 		p.setActiveContext(id, isGroup, &activeRequest{cancel: cancelRun, requester: batchRequester(batch)})
-		batchCtx, cancelBatch := context.WithTimeout(runCtx, p.msgEventTimeout)
+		batchCtx, cancelBatch := context.WithTimeout(runCtx, min(p.msgEventTimeout, remaining))
 		ok := p.processChatBatch(batchCtx, b, id, isGroup, chat, batch)
 		cancelBatch()
 		p.clearActiveContext(id, isGroup)

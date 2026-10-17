@@ -141,6 +141,8 @@ func (p *AIChatPlugin) evictOneChat(key string, e *chatEntry) {
 			p.todoManager.clear(key)
 		}
 		p.sessionBots.Delete(key)
+		// 旁挂状态一并回收（队列为空才删；未@计数标记复位后由下次加载从持久层恢复）
+		p.reclaimSessionQueue(key)
 		p.Logger.Info("淘汰闲置会话", "key", key)
 	}
 }

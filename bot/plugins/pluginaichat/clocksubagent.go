@@ -46,6 +46,10 @@ type clockSubagentSet struct {
 	mu      sync.Mutex
 	seq     int
 	entries map[string]*clockSubagent
+	// launched 本次任务执行累计启动过的子代理数量：收尾是否需要 drain 的依据。
+	// 不能用 hasPending() 判断——子代理可能在任务 AI 自己的轮次结束前就已完成，
+	// 此时 pending 为 0 但结果仍待回喂（旧实现因此把结果整段丢弃）。
+	launched int
 }
 
 func newClockSubagentSet() *clockSubagentSet {
@@ -63,7 +67,16 @@ func (s *clockSubagentSet) nextID() string {
 func (s *clockSubagentSet) add(e *clockSubagent) {
 	s.mu.Lock()
 	s.entries[e.id] = e
+	s.launched++
 	s.mu.Unlock()
+}
+
+// hasLaunched 本次任务执行是否启动过子代理（无论是否已完成）。
+// 收尾判断用它而非 hasPending：全部完成时同样需要回喂结果。
+func (s *clockSubagentSet) hasLaunched() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.launched > 0
 }
 
 // markFinished 记录执行结果并关闭 done（等待方据此解除阻塞）
@@ -326,15 +339,23 @@ func (t *clockSubagentCancelTool) Execute(ctx context.Context, params any, callb
 // 由 makeClockCallback 的 SendText 丢弃）。
 func (m *clockManager) drainClockSubagents(ctx context.Context, task *ClockTask, chat *aichat.ChatBot, cbs llmtool.CallBackFuncs, set *clockSubagentSet, resp string, usage aichat.TokenUsage) (string, aichat.TokenUsage) {
 	p := m.plugin
-	for round := 0; round < clockSubagentMaxRounds && set.hasPending(); round++ {
-		set.waitAll(ctx, clockSubagentWaitReserve)
+	for round := 0; round < clockSubagentMaxRounds; round++ {
+		// 先取走已完成的结果：全部子代理都可能在任务 AI 自己的轮次结束前完成，
+		// 此时 set 内已无 pending，若先 waitAll 就会把结果整段丢弃。
 		finished := set.collectFinished()
 		if len(finished) == 0 {
-			// 预算耗尽仍无结果：取消剩余子代理，按已有回复收尾
-			set.cancelPending()
-			m.logger.Warn("定时任务等待子代理结果超时，取消剩余子代理并使用已有回复收尾",
-				"task", task.ID, "title", task.Title)
-			break
+			if !set.hasPending() {
+				break // 无待回喂结果且无运行中子代理
+			}
+			// 仍有运行中的：等它们结束（预算不足则提前返回）
+			set.waitAll(ctx, clockSubagentWaitReserve)
+			if finished = set.collectFinished(); len(finished) == 0 {
+				// 预算耗尽仍无结果：取消剩余子代理，按已有回复收尾
+				set.cancelPending()
+				m.logger.Warn("定时任务等待子代理结果超时，取消剩余子代理并使用已有回复收尾",
+					"task", task.ID, "title", task.Title)
+				break
+			}
 		}
 		pending := set.pendingCount()
 		m.logger.Info("定时任务子代理结果回喂", "task", task.ID, "finished", len(finished), "pending", pending, "round", round+1)

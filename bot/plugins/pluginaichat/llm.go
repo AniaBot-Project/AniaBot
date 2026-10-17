@@ -13,6 +13,10 @@ import (
 	"github.com/jeanhua/AniaBot/common/model/message"
 )
 
+// historyLoadTimeout 会话历史回放的超时：getChat 在持有会话锁时执行，
+// 必须避免 DB 卡住把会话永久占死。
+const historyLoadTimeout = 15 * time.Second
+
 // activeRequest 一个会话当前在跑的请求：取消函数 + 触发者（/stop 权限判定）。
 // 取消函数是整条请求（含后续排队批次）的总开关，/stop 与锁丢失都经它中止。
 type activeRequest struct {
@@ -299,8 +303,14 @@ func (p *AIChatPlugin) getChat(b bot.Bot, id message.QID, isGroup bool, prompt s
 		if p.hookManager != nil {
 			c.SetHookRunner(p.hookManager, key, agenthook.AgentKindMain)
 		}
-		// 回放持久化的历史，使对话跨重启延续
-		c.LoadHistory(context.Background())
+		// 回放持久化的历史，使对话跨重启延续。
+		// 带超时：getChat 在持有会话锁的调用栈内执行，无 deadline 的 DB 读若卡住
+		//（锁等待/连接半开）会让该会话被永久占住，后续消息全部入队且无人消费
+		//（清扫器同样拿不到锁）——表现为"会话卡死"。超时按空历史继续（load 本身
+		// 已有容错：加载失败不阻断对话）。
+		loadCtx, cancelLoad := context.WithTimeout(context.Background(), historyLoadTimeout)
+		c.LoadHistory(loadCtx)
+		cancelLoad()
 		p.chats.Store(key, newChatEntry(c, id, isGroup, prompt))
 		p.sessionBots.Store(key, b)
 		// SessionStart 钩子：会话（重）创建（首次发言或被淘汰后重建）；

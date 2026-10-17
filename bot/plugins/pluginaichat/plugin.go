@@ -155,6 +155,10 @@ const (
 	// 同值；按 promptConfigKey 先例在插件本地定义，避免 plugins → core 依赖
 	hooksConfigKey    = "files.hooks_json"
 	commandsConfigKey = "files.commands_json"
+
+	// sessionMaxIdleMinutes 闲置回收时长上限（分钟）：一年。配置极大值会让
+	// time.Duration 乘法溢出为负，导致闲置淘汰静默失效（见 Start）。
+	sessionMaxIdleMinutes = 365 * 24 * 60
 )
 
 func NewAIChatPlugin() *AIChatPlugin {
@@ -286,31 +290,107 @@ func (p *AIChatPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 	// 无论是否清空，@ 消息都会重置连续未@计数
 	p.applyNoMentionClear(ctx, msg.GroupId, chat)
 
-	// runCtx 只承载 /stop 与锁丢失的取消信号（不带事件 deadline），每批消息
-	// 各自派生预算：复用同一个 ctx 会让第二批及之后只剩首批消耗后的残额
-	// （长响应下几乎必然超时），而会话被淘汰重建/后台兜底触发的路径本来就是
-	// 按次独立预算。锁丢失时心跳经 attachCancel 取消 runCtx 中止整条请求。
-	// WithoutCancel 保留事件 ctx 的值（追踪等），仅剥离 deadline 与取消。
-	runCtx, cancelRun := context.WithCancel(context.WithoutCancel(ctx))
+	// runCtx 承载 /stop、锁丢失与框架关停（ania.ctx）的取消信号；每批消息各自
+	// 派生独立预算，但整个事件的累计时长受 eventBudget 结算——复用同一个 ctx
+	// 会让第二批及之后只剩首批消耗后的残额（长响应下几乎必然超时），而完全不
+	// 结算则让单次事件的时长无上界（见 bridgeRunContext / eventBudget）。
+	runCtx, eventDeadline, cancelRun := p.bridgeRunContext(ctx)
 	defer cancelRun()
 	lock.attachCancel(cancelRun)
 
-	// 先取出可能遗留的排队消息（上一响应结束瞬间到达、未来得及处理的），与本次消息合并；
-	// 之后每轮响应结束继续排空队列，直到没有新消息为止
+	// 先取出可能遗留的排队消息（上一响应结束瞬间到达、未来及处理的），与本次消息合并；
+	// 之后每轮响应结束继续排空队列，直到没有新消息或总预算耗尽
 	batch := append(p.drainPending(msg.GroupId, true), msg)
 	for len(batch) > 0 {
 		p.setActiveContext(msg.GroupId, true, &activeRequest{cancel: cancelRun, requester: batchRequester(batch)})
-		batchCtx, cancelBatch := context.WithTimeout(runCtx, p.msgEventTimeout)
-		ok := p.processChatBatch(batchCtx, bot, msg.GroupId, true, chat, batch)
-		cancelBatch()
+		next, ok := p.drainChatBatches(runCtx, eventDeadline, bot, msg.GroupId, true, chat, batch)
 		p.clearActiveContext(msg.GroupId, true)
 		if !ok {
 			return false, nil
 		}
-		batch = p.drainPending(msg.GroupId, true)
+		batch = next
 	}
 	return true, nil
 }
+
+// maxStreamPatchFails 连续 Patch 失败多少次后放弃流式、退化为一次性发送。
+// 偶发一次失败（网络抖动/节流）不必放弃，持续失败说明消息已不可编辑。
+const maxStreamPatchFails = 3
+
+// newConversationRequested 本批消息中是否有任何一条**自身的文本段**包含 #新对话。
+//
+// 只看原始消息段、不看 FriendlyText 渲染结果：后者会展开被引用消息与合并转发
+// 内容，引用一条含该字样的旧消息就会误触发历史清空（连同动态 MCP 工具卸载）。
+// 转发内容同样不算"用户当前输入"。
+func newConversationRequested(batch []message.Message) bool {
+	for i := range batch {
+		for _, seg := range batch[i].Message {
+			if seg.Type != message.SegmentText {
+				continue
+			}
+			var txt message.TextMessage
+			if !message.ParseText(seg, &txt) {
+				continue
+			}
+			if strings.Contains(txt.Text, "#新对话") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// drainChatBatches 排空一批（及后续陆续入队的）消息，是消息事件与后台接管共用的
+// 执行循环。返回下一批待处理消息与是否继续（false 表示请求被取消/出错，调用方应
+// 终止整条处理链：剩余排队消息已被丢弃，等待下一条消息重新触发）。
+//
+// 预算语义：
+//   - 每批派生独立预算 min(p.msgEventTimeout, 剩余总预算)：复用同一个 ctx 会让
+//     第二批及之后只剩首批消耗后的残额（长响应下几乎必然超时）；
+//   - 总预算以 eventDeadline 结算（框架事件 deadline，见 bridgeRunContext）：
+//     不做累计结算时，只要持续有新消息入队就能无限延长单次事件——旧实现即如此，
+//     bot.msg_event_timeout_sec 失去上界意义。eventDeadline 为零值时按配置逐批复位
+//     （兼容无 deadline 的后台路径）。
+func (p *AIChatPlugin) drainChatBatches(runCtx context.Context, eventDeadline time.Time, b bot.Bot, id message.QID, isGroup bool, chat *aichat.ChatBot, batch []message.Message) ([]message.Message, bool) {
+	remaining := p.msgEventTimeout
+	if !eventDeadline.IsZero() {
+		remaining = time.Until(eventDeadline)
+	}
+	if remaining <= 0 {
+		// 总预算耗尽：告知用户并丢弃剩余排队消息，避免无上界的连续响应。
+		// 先声明由插件收尾，让框架的同刻超时不再以「AI 响应已被停止」覆盖本条提示。
+		claimEventTimeout(runCtx)
+		p.reportEventBudgetExhausted(b, id, isGroup, len(p.drainPending(id, isGroup))+len(batch))
+		return nil, true
+	}
+	batchCtx, cancelBatch := batchContext(runCtx, min(p.msgEventTimeout, remaining))
+	ok := p.processChatBatch(batchCtx, b, id, isGroup, chat, batch)
+	cancelBatch()
+	if !ok {
+		// 本批被取消：可能是 /stop、锁丢失，也可能是框架事件 deadline 到期
+		//（父取消桥接在截止时刻取消了 runCtx）。后者属于「总预算耗尽」，
+		// 必须由插件自己说明，否则用户只看到框架统一的取消文案、且剩余排队
+		// 消息会静默滞留到下一次触发。
+		if parentExpiredByDeadline(runCtx) {
+			p.reportEventBudgetExhausted(b, id, isGroup, len(p.drainPending(id, isGroup)))
+		}
+		return nil, false
+	}
+	return p.drainPending(id, isGroup), true
+}
+
+// reportEventBudgetExhausted 总预算耗尽时统一向用户说明并丢弃剩余排队消息。
+// pending <= 0 表示没有滞留消息（用户已收到本批回复），只需静默收尾。
+func (p *AIChatPlugin) reportEventBudgetExhausted(b bot.Bot, id message.QID, isGroup bool, pending int) {
+	if pending <= 0 {
+		return
+	}
+	p.Logger.Warn("消息事件总预算耗尽，丢弃剩余排队消息", "id", id, "is_group", isGroup, "pending", pending)
+	p.drainPending(id, isGroup)
+	p.sendPlainText(b, id, isGroup, "本次处理已达时间上限，请重新发送消息")
+}
+
+// parentExpiredByDeadline 见 lock.go（运行上下文是否因框架事件 deadline 到期被取消）。
 
 func (p *AIChatPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command.Command, msg message.Message) (bool, error) {
 	// 未完成初始化（如未配置 API KEY）时跳过全部处理，交由后续插件
@@ -404,25 +484,23 @@ func (p *AIChatPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command
 		return true, nil
 	}
 
-	// runCtx 只承载 /stop 与锁丢失的取消信号（不带事件 deadline），每批消息
-	// 各自派生独立预算（见 OnGroupMsg 同处注释）
-	runCtx, cancelRun := context.WithCancel(context.WithoutCancel(ctx))
+	// runCtx 承载 /stop、锁丢失与框架关停（ania.ctx）的取消信号；总预算结算
+	// 同 OnGroupMsg（见 bridgeRunContext / eventBudget）
+	runCtx, eventDeadline, cancelRun := p.bridgeRunContext(ctx)
 	defer cancelRun()
 	lock.attachCancel(cancelRun)
 
 	// 先取出可能遗留的排队消息（上一响应结束瞬间到达、未来得及处理的），与本次消息合并；
-	// 之后每轮响应结束继续排空队列，直到没有新消息为止
+	// 之后每轮响应结束继续排空队列，直到没有新消息或总预算耗尽（见 drainChatBatches）
 	batch := append(p.drainPending(msg.Sender.UserId, false), msg)
 	for len(batch) > 0 {
 		p.setActiveContext(msg.Sender.UserId, false, &activeRequest{cancel: cancelRun, requester: batchRequester(batch)})
-		batchCtx, cancelBatch := context.WithTimeout(runCtx, p.msgEventTimeout)
-		ok := p.processChatBatch(batchCtx, bot, msg.Sender.UserId, false, chat, batch)
-		cancelBatch()
+		next, ok := p.drainChatBatches(runCtx, eventDeadline, bot, msg.Sender.UserId, false, chat, batch)
 		p.clearActiveContext(msg.Sender.UserId, false)
 		if !ok {
 			return false, nil
 		}
-		batch = p.drainPending(msg.Sender.UserId, false)
+		batch = next
 	}
 	return true, nil
 }
@@ -447,7 +525,11 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 		extraText = sb.String()
 	}
 
-	if strings.Contains(extraText, "#新对话") {
+	// #新对话 只认「本批消息自身的文本段」：extraText 经 FriendlyText 渲染，会把
+	// 被引用消息正文（<reply>…</reply>）与合并转发节点内容一并展开——只要引用了
+	// 任何含该字样的旧消息（例如机器人复述过的帮助文本）就会误清空历史，用户
+	// 无法归因。这里改为扫描原始消息段的文本。
+	if newConversationRequested(batch) {
 		if err := chat.ClearHistory(ctx); err != nil {
 			p.Logger.Error("无法清理AI聊天信息", "error", err)
 			return false
@@ -514,6 +596,10 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	var streamBuf strings.Builder
 	streaming := false
 	streamUnsupported := false
+	// streamPatchFails 累计 Patch 失败次数：平台撤回消息/限流/编辑被拒时 Patch 会
+	// 持续失败，而成功路径只以 streaming 为条件直接 return，不再走一次性兜底——
+	// 用户会只看到半截内容。达到阈值后放弃流式，交由一次性发送补全整段回复。
+	streamPatchFails := 0
 	mentionPending := isGroup
 	if p.cfg.Stream.Enable && !p.cfg.Reply.SplitBlankLine {
 		if ss, ok := b.(bot.StreamSender); ok {
@@ -523,7 +609,19 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 				}
 				streamBuf.WriteString(delta)
 				if streamHandle != nil {
-					streamHandle.Patch(aichat.RemoveThinkContent(streamBuf.String()))
+					if err := streamHandle.Patch(aichat.RemoveThinkContent(streamBuf.String())); err != nil {
+						streamPatchFails++
+						if streamPatchFails >= maxStreamPatchFails {
+							// 放弃流式：结束当前消息并标记为不支持，后续增量忽略，
+							// 由下方一次性发送路径补全完整回复
+							p.Logger.Warn("流式回复更新连续失败，退化为一次性发送",
+								"id", id, "is_group", isGroup, " fails", streamPatchFails, "error", err.Error())
+							streamHandle.End()
+							streamHandle = nil
+							streaming = false
+							streamUnsupported = true
+						}
+					}
 					return
 				}
 				// 首个增量：创建流式消息（初始内容即当前已积累文本）
@@ -650,6 +748,11 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	if streamHandle != nil {
 		streamHandle.End()
 		streamHandle = nil
+	}
+	// 待办提醒哈希仅在请求成功后提交：失败轮次不消耗提醒，下一轮仍会注入
+	//（清单未变时恰恰是最需要提醒的时候）
+	if err == nil && p.cfg.Todo.Enable && p.todoManager != nil {
+		p.todoManager.commitReminder(sessionKey(id, isGroup))
 	}
 	p.finishQuery(recorder, chat, usage, resp, err)
 	// 主对话消耗计入会话与全局配额（子代理/团队/定时任务在其各自调用点累加）
@@ -1113,8 +1216,12 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	}
 
 	// 会话内存回收：闲置淘汰 + LRU 容量上限，防止活跃会话增多导致内存线性增长。
-	// 淘汰只丢弃内存对象，持久化历史保留，下次发言自动重建并回放
-	maxIdle := time.Duration(max(p.cfg.Session.MaxIdleMinutes, 0)) * time.Minute
+	// 淘汰只丢弃内存对象，持久化历史保留，下次发言自动重建并回放。
+	// 换算前限幅：先转 int64 再乘 time.Minute，超大配置值会溢出为负 duration，
+	// 而 evictChats 里 `if maxIdle > 0` 为假 → 闲置淘汰静默失效（与 clock 超时
+	// 的显式限幅保持一致）。
+	maxIdleMinutes := min(max(p.cfg.Session.MaxIdleMinutes, 0), sessionMaxIdleMinutes)
+	maxIdle := time.Duration(maxIdleMinutes) * time.Minute
 	maxSessions := max(p.cfg.Session.MaxSessions, 0)
 	if maxIdle > 0 || maxSessions > 0 {
 		p.startChatJanitor(maxIdle, maxSessions)

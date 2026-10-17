@@ -790,8 +790,10 @@ func (m *clockManager) executeTask(ctx context.Context, task *ClockTask, rec *ta
 		return "", mergeTokenUsage(usage, extra.take()), err
 	}
 	// 若任务 AI 委派了异步子代理：等待全部子代理返回，把结果回喂给 AI 合成
-	// 最终回复——只有这最后一轮输出才会推送，子代理返回前的中间回复不推送
-	if subagents.hasPending() {
+	// 最终回复——只有这最后一轮输出才会推送，子代理返回前的中间回复不推送。
+	// 判断用 hasLaunched 而非 hasPending：子代理可能在任务 AI 自己的轮次结束前
+	// 就已完成，用 pending 判断会让这些已产出的结果被静默丢弃（token 已消耗）。
+	if subagents.hasLaunched() {
 		resp, usage = m.drainClockSubagents(ctx, task, chat, cbs, subagents, resp, usage)
 	}
 	// 子代理在 drain 期间完成并把用量计入 extra；此处统一并入。

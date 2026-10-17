@@ -10,6 +10,7 @@ import (
 	"image/jpeg"  // JPEG 解码注册 + baseline 重编码输出
 
 	"image/png" // PNG 解码注册 + 转码输出
+	"io"
 	"strings"
 	"time"
 
@@ -51,15 +52,31 @@ func fetchImageDataURI(ctx context.Context, ref string) (string, error) {
 	default:
 		client := resty.New().
 			SetTimeout(imageFetchTimeout).
-			SetHeader("User-Agent", imageFetchUserAgent)
+			SetHeader("User-Agent", imageFetchUserAgent).
+			// 不自动解析响应体：先按上限流式读取，避免恶意/异常 URL 在体积检查
+			//（下方的 imageFetchMaxBytes）之前就把数百 MB 读进内存造成 OOM
+			SetDoNotParseResponse(true)
 		resp, err := client.R().SetContext(ctx).Get(ref)
 		if err != nil {
 			return "", fmt.Errorf("下载图片失败: %w", err)
 		}
+		body := resp.RawBody()
+		if body == nil {
+			return "", fmt.Errorf("下载图片失败: 响应体为空")
+		}
+		defer body.Close()
 		if !resp.IsSuccess() {
 			return "", fmt.Errorf("下载图片失败: HTTP %d", resp.StatusCode())
 		}
-		data = resp.Body()
+		// 多读 1 字节以区分"恰好等于上限"与"超过上限"
+		limited, err := io.ReadAll(io.LimitReader(body, imageFetchMaxBytes+1))
+		if err != nil {
+			return "", fmt.Errorf("读取图片失败: %w", err)
+		}
+		if int64(len(limited)) > imageFetchMaxBytes {
+			return "", fmt.Errorf("图片过大（超过上限 %.1fMB）", float64(imageFetchMaxBytes)/(1<<20))
+		}
+		data = limited
 	}
 	if len(data) == 0 {
 		return "", fmt.Errorf("图片内容为空")

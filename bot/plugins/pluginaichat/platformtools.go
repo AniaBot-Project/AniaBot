@@ -68,8 +68,12 @@ func (p *AIChatPlugin) registerPlatformTools(sessionExecutor *llmtool.SessionToo
 			continue
 		}
 		seen[name] = struct{}{}
-		if p.toolExecutor.Has(name) {
-			skipLog("平台工具 %s 与内置工具重名", name)
+		// 判重必须覆盖共享层与会话层：clock_*/memory_*/kb_*/skill_*/mcp_*/todo_write/
+		// subagent_*/team_* 都注册在会话层（RegisterSession 是裸赋值，会静默覆盖），
+		// 只查共享层会让平台同名工具顶掉这些会话级工具（例如顶掉已绑定
+		// g:<id> scope 的记忆工具）。
+		if p.toolExecutor.Has(name) || sessionExecutor.HasSession(name) {
+			skipLog("平台工具 %s 与内置/会话工具重名", name)
 			continue
 		}
 		// 副作用声明（SideEffector）收集进插件级集合，供计划模式门禁按名阻断

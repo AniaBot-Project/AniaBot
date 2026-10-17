@@ -409,23 +409,32 @@ func chunkText(content string) []string {
 	lines := strings.Split(content, "\n")
 	chunks := make([]string, 0, len(runes)/kbChunkSize+1)
 	buf := make([]rune, 0, kbChunkSize)
+	// keepTail 以 buf 末尾 kbChunkOverlap 个 rune 作为下一块的前缀（块间重叠，
+	// 避免切点处语义被腰斩）。注意保留的是"已发出块的末尾"而不是"未发出的正文"。
+	keepTail := func() {
+		keep := min(len(buf), kbChunkOverlap)
+		buf = append(buf[:0], buf[len(buf)-keep:]...)
+	}
 	for _, line := range lines {
 		lr := []rune(line)
 		if len(buf) > 0 && len(buf)+len(lr)+1 > kbChunkSize {
 			// 当前块已满，落盘并携带末尾 overlap 作为下一块前缀
 			chunks = append(chunks, string(buf))
-			keep := min(len(buf), kbChunkOverlap)
-			buf = append(buf[:0], buf[len(buf)-keep:]...)
+			keepTail()
 			buf = append(buf, '\n')
 		} else if len(buf) > 0 {
 			buf = append(buf, '\n')
 		}
 		buf = append(buf, lr...)
-		// 单行（超长段落）硬切
+		// 单行（超长段落）硬切：每块只取前 kbChunkSize 个 rune，其余滑入下一块，
+		// 循环消费直到 buf 收敛到 kbChunkSize 以内。
+		//
+		// 旧实现在这里把 buf 重置为"末尾 kbChunkOverlap 个 rune"，等于把中间
+		// 待发出的正文整段丢弃：>600 rune 的单行只留下"首 600 + 末 60"，
+		// 且检索路径用同一个函数重新切片，丢失内容永远检索不到。
 		for len(buf) > kbChunkSize {
 			chunks = append(chunks, string(buf[:kbChunkSize]))
-			keep := min(len(buf), kbChunkOverlap)
-			buf = append(buf[:0], buf[len(buf)-keep:]...)
+			buf = append(buf[:0], buf[kbChunkSize-kbChunkOverlap:]...)
 		}
 	}
 	if len(buf) > 0 {

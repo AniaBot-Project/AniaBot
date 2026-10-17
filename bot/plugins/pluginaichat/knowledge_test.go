@@ -3,6 +3,7 @@ package pluginaichat
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -322,6 +323,46 @@ func TestKbChunkText(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(chunks, ""), "这是一个很长的段落内容。") {
 		t.Fatal("切片丢失了原文内容")
+	}
+}
+
+// TestKbChunkTextLongLineKeepsMiddle 单行超过 kbChunkSize 时必须完整切分：
+// 旧实现把 buf 重置为"末尾 overlap"，中间待发出的正文被整段丢弃，
+// 只留下"首 600 + 末 60"，且检索路径用同一函数重新切片 → 丢失内容永远检索不到。
+func TestKbChunkTextLongLineKeepsMiddle(t *testing.T) {
+	// 构造可定位的单行长文本：每 6 个 rune 一个序号标记，便于断言中段存在。
+	const markers = 300
+	var sb strings.Builder
+	for i := 0; i < markers; i++ {
+		fmt.Fprintf(&sb, "%06d", i) // 每个标记 6 rune
+	}
+	line := sb.String()
+	if len([]rune(line)) <= kbChunkSize*2 {
+		t.Fatalf("测试文本过短: %d", len([]rune(line)))
+	}
+
+	chunks := chunkText(line)
+	if len(chunks) < 3 {
+		t.Fatalf("单行长文本应切成多块，实际 %d 块: %v", len(chunks), chunks)
+	}
+	joined := strings.Join(chunks, "")
+	// 每个序号标记都必须能在切片结果中找到（重叠允许重复，但不允许丢失）
+	for i := 0; i < 300; i++ {
+		marker := fmt.Sprintf("%06d", i)
+		if !strings.Contains(joined, marker) {
+			t.Fatalf("序号标记 %s 在切片中丢失（中段内容被丢弃）", marker)
+		}
+	}
+	for i, c := range chunks {
+		if len([]rune(c)) > kbChunkSize {
+			t.Fatalf("块 %d 超长: %d", i, len([]rune(c)))
+		}
+	}
+
+	// 长行 + 后续行混合：后续行也必须保留
+	mixed := chunkText(line + "\n尾部内容")
+	if !strings.Contains(strings.Join(mixed, ""), "尾部内容") {
+		t.Fatal("长行之后的普通行被丢弃")
 	}
 }
 

@@ -150,20 +150,21 @@ func (s *sqlHistoryStore) Append(ctx context.Context, messages []aichat.Message)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		s.logger.Error("追加对话历史失败：开启事务", "session", s.session, "error", err)
-		return nil
+		return err
 	}
 	defer tx.Rollback()
 	base, err := s.allocSeqTx(ctx, tx, len(rows))
 	if err != nil {
 		s.logger.Error("追加对话历史失败：分配序号", "session", s.session, "error", err)
-		return nil
+		return err
 	}
 	if err := s.bulkInsertTx(ctx, tx, base, rows); err != nil {
 		s.logger.Error("追加对话历史失败：写入消息", "session", s.session, "error", err)
-		return nil
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		s.logger.Error("追加对话历史失败：提交事务", "session", s.session, "error", err)
+		return err
 	}
 	return nil
 }
@@ -173,7 +174,7 @@ func (s *sqlHistoryStore) Replace(ctx context.Context, messages []aichat.Message
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		s.logger.Error("覆盖对话历史失败：开启事务", "session", s.session, "error", err)
-		return nil
+		return err
 	}
 	defer tx.Rollback()
 	// 同事务内先删后插：seq 从 0 重排不会撞主键；崩溃只会整体回滚，
@@ -181,18 +182,19 @@ func (s *sqlHistoryStore) Replace(ctx context.Context, messages []aichat.Message
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM ania_chat_message WHERE session_id = ?`, s.session); err != nil {
 		s.logger.Error("覆盖对话历史失败：清理旧消息", "session", s.session, "error", err)
-		return nil
+		return err
 	}
 	if err := s.setCountTx(ctx, tx, len(rows)); err != nil {
 		s.logger.Error("覆盖对话历史失败：重置计数", "session", s.session, "error", err)
-		return nil
+		return err
 	}
 	if err := s.bulkInsertTx(ctx, tx, 0, rows); err != nil {
 		s.logger.Error("覆盖对话历史失败：写入消息", "session", s.session, "error", err)
-		return nil
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		s.logger.Error("覆盖对话历史失败：提交事务", "session", s.session, "error", err)
+		return err
 	}
 	return nil
 }
@@ -201,22 +203,23 @@ func (s *sqlHistoryStore) Clear(ctx context.Context) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		s.logger.Error("清除对话历史失败：开启事务", "session", s.session, "error", err)
-		return nil
+		return err
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM ania_chat_message WHERE session_id = ?`, s.session); err != nil {
 		s.logger.Error("清除对话历史失败：删除消息", "session", s.session, "error", err)
-		return nil
+		return err
 	}
 	// 会话行一并删除：会话表只保留仍有历史的会话，下次 Append 自动重建
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM ania_chat_session WHERE session_id = ?`, s.session); err != nil {
 		s.logger.Error("清除对话历史失败：删除会话", "session", s.session, "error", err)
-		return nil
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		s.logger.Error("清除对话历史失败：提交事务", "session", s.session, "error", err)
+		return err
 	}
 	return nil
 }
