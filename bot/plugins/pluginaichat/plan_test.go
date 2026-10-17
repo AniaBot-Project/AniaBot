@@ -2,6 +2,7 @@ package pluginaichat
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"testing"
@@ -62,6 +63,124 @@ func TestPlanGateBlocking(t *testing.T) {
 	p.planManager.Set(key, false)
 	if blocked, _ := call("bash"); blocked {
 		t.Fatal("退出计划模式后 bash 应恢复放行")
+	}
+}
+
+// TestPlanGateBlocksMCPToolPrefixes 计划模式必须覆盖 MCP 的发现/加载入口。
+//
+// MCP 工具集合在运行时变化（服务器可增删、工具可懒加载），具体工具名无法静态
+// 枚举；`mcp_load` / `mcp_discover` 是「执行任意 MCP 工具」的入口，若放行则
+// 先 load 再调用即可完全绕过计划模式这道门禁。
+func TestPlanGateBlocksMCPToolPrefixes(t *testing.T) {
+	p := &AIChatPlugin{planManager: newPlanManager()}
+	p.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	const key = "g:1"
+
+	gate := p.buildPreToolGate(key, agenthook.AgentKindMain, message.FromUint64(1), func(string) {}, nil)
+	call := func(name string) (bool, string) {
+		return gate(context.Background(), llmtool.ToolCall{Name: name, Arguments: "{}"})
+	}
+
+	if blocked, _ := call("mcp_load_demo"); blocked {
+		t.Fatal("未开启计划模式时不应阻断 mcp_load")
+	}
+
+	p.planManager.Set(key, true)
+	for _, name := range []string{"mcp_load_demo", "mcp_discover_demo", "mcp_add", "mcp_remove", "mcp_reconnect"} {
+		if blocked, _ := call(name); !blocked {
+			t.Fatalf("计划模式下 MCP 入口工具 %s 必须被阻断（否则可 load 后执行任意副作用）", name)
+		}
+	}
+	// 只读的 MCP 状态查询仍放行
+	if blocked, _ := call("mcp_list"); blocked {
+		t.Fatal("计划模式下 mcp_list（只读）不应被阻断")
+	}
+}
+
+// TestIsMCPToolNameCoversRegisteredMCPTools 已注册的 MCP 工具实例（eager 模式在
+// 共享层、懒加载模式在会话层）都必须被识别为 MCP 工具，门禁才能按名阻断。
+func TestIsMCPToolNameCoversRegisteredMCPTools(t *testing.T) {
+	exec := llmtool.NewToolExecuter()
+	exec.Register(functool.NewSendFileTool())
+	if exec.IsMCPToolName("file") {
+		t.Fatal("内置工具不应被判为 MCP 工具")
+	}
+	if exec.IsMCPToolName("not_exist") {
+		t.Fatal("不存在的工具不应被判为 MCP 工具")
+	}
+	session := exec.NewSessionExecutor()
+	if session.IsMCPToolName("not_exist") {
+		t.Fatal("会话层不存在的工具不应被判为 MCP 工具")
+	}
+	if session.HasSession("not_exist") {
+		t.Fatal("会话层未注册时 HasSession 应为 false")
+	}
+}
+
+// TestNewConversationRequestedOnlyOwnText #新对话 只认消息自身的文本段：
+// 引用消息正文与合并转发内容（FriendlyText 会展开）不得触发历史清空。
+func TestNewConversationRequestedOnlyOwnText(t *testing.T) {
+	textMsg := func(s string) message.Message {
+		return message.Message{
+			Message: []message.OB11Segment{
+				{Type: message.SegmentText, Data: map[string]any{"text": s}},
+			},
+		}
+	}
+	// 引用一条"含 #新对话 的旧消息"：reply 段 + 自身普通文本
+	quoted := message.Message{
+		Message: []message.OB11Segment{
+			{Type: message.SegmentReply, Data: map[string]any{"id": "qq:1"}},
+			{Type: message.SegmentText, Data: map[string]any{"text": "你看这条 #新对话 是干嘛的"}},
+		},
+	}
+
+	cases := []struct {
+		name  string
+		batch []message.Message
+		want  bool
+	}{
+		{"自身文本含标记", []message.Message{textMsg("#新对话")}, true},
+		{"自身文本含标记（混在句子里）", []message.Message{textMsg("帮我 #新对话 一下")}, true},
+		{"普通消息", []message.Message{textMsg("你好")}, false},
+		// reply 段本身不含 text，其正文由 FriendlyText 展开——不在本判定范围内
+		{"仅引用段（正文在展开里）", []message.Message{
+			{Message: []message.OB11Segment{{Type: message.SegmentReply, Data: map[string]any{"id": "qq:1"}}}},
+		}, false},
+		{"引用+自身普通文本", []message.Message{quoted}, true}, // 自身文本里确实有该标记
+		{"批量中任一条命中", []message.Message{textMsg("你好"), textMsg("#新对话")}, true},
+		{"批量全不命中", []message.Message{textMsg("你好"), textMsg("在吗")}, false},
+		{"非文本段", []message.Message{
+			{Message: []message.OB11Segment{{Type: message.SegmentImage, Data: map[string]any{"file": "x"}}}},
+		}, false},
+		{"空批次", nil, false},
+	}
+	for _, c := range cases {
+		if got := newConversationRequested(c.batch); got != c.want {
+			t.Errorf("%s: newConversationRequested = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestNewConversationIgnoresForwardContent 合并转发节点内的 #新对话 不应触发清空：
+// FriendlyText 会展开转发内容，旧实现按渲染文本判定，转发一条含该字样的消息
+// 就会误清空历史（并卸载动态 MCP 工具）。
+func TestNewConversationIgnoresForwardContent(t *testing.T) {
+	var inner []message.Message
+	inner = append(inner, message.Message{
+		Message: []message.OB11Segment{
+			{Type: message.SegmentText, Data: map[string]any{"text": "#新对话"}},
+		},
+	})
+	content, _ := json.Marshal(inner)
+
+	forward := message.Message{
+		Message: []message.OB11Segment{
+			{Type: message.SegmentForward, Data: map[string]any{"content": string(content)}},
+		},
+	}
+	if newConversationRequested([]message.Message{forward}) {
+		t.Fatal("合并转发内容里的 #新对话 不应触发历史清空")
 	}
 }
 

@@ -31,10 +31,9 @@ import (
 func (p *AIChatPlugin) buildPreToolGate(sKey, agentKind string, requester message.QID, sendPrompt func(text string), sendAdminPrompt func(text string) bool) func(context.Context, llmtool.ToolCall) (bool, string) {
 	return func(ctx context.Context, call llmtool.ToolCall) (bool, string) {
 		// 1. 计划模式：副作用工具直接阻断，AI 只输出计划
-		//（planBlockedTools 静态清单 + 平台注入工具的 SideEffector 动态声明，
-		// 后者见 platformtools.go）
+		//（静态清单 + 平台注入工具的 SideEffector 动态声明 + MCP 动态腿，见 isPlanBlockedTool）
 		if p.planManager != nil && p.planManager.IsOn(sKey) {
-			if _, blocked := planBlockedTools[call.Name]; blocked || p.platformToolBlocked(call.Name) {
+			if p.isPlanBlockedTool(call.Name) {
 				return true, "【计划模式】当前处于计划模式（/plan on），工具 " + call.Name + " 已被阻止。请只做分析并输出详细实施计划，不要尝试执行，等待用户发送 /plan off 批准。"
 			}
 		}

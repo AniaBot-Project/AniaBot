@@ -270,7 +270,7 @@ func (t *MCPTool) GetMCPToolDefinition() *mcp.Tool {
 // MCPToolManager 管理 MCP 工具的延迟加载
 type MCPToolManager struct {
 	client          *MCPClient
-	mu              sync.Mutex // 保护 toolCache：多个并发 AI 会话共享同一个 manager
+	mu              sync.Mutex // 保护 toolCache 与 client/toolDefinitions（Reconnect 会整体替换）
 	toolCache       map[string]*MCPTool
 	toolDefinitions []*mcp.Tool
 }
@@ -283,19 +283,52 @@ func NewMCPToolManager(client *MCPClient) *MCPToolManager {
 	}
 }
 
+// clientSnapshot 取当前客户端引用。Reconnect 会替换 m.client，读侧必须持锁取值
+// （直接读 m.client 与 Reconnect 的写并发构成数据竞争）。
+func (m *MCPToolManager) clientSnapshot() *MCPClient {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.client
+}
+
+// serverInfo 取服务器展示信息（名称、描述）。Reconnect 替换 m.client 时读侧同样
+// 需要持锁，否则可能读到半更新的指针。
+func (m *MCPToolManager) serverInfo() (name, description string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.client == nil || m.client.config == nil {
+		return "", ""
+	}
+	return m.client.config.Name, m.client.config.Description
+}
+
+// toolDefinitionCount 当前已发现的工具数量（持锁读取，供 mcp_list 展示）。
+func (m *MCPToolManager) toolDefinitionCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.toolDefinitions)
+}
+
 // Initialize 初始化管理器，连接并获取工具列表
 func (m *MCPToolManager) Initialize(ctx context.Context) error {
-	if err := m.client.Connect(ctx); err != nil {
+	m.mu.Lock()
+	client := m.client
+	m.mu.Unlock()
+	if err := client.Connect(ctx); err != nil {
 		return err
 	}
-	m.toolDefinitions = m.client.GetTools()
-	log.Printf("[MCP:%s] 发现 %d 个工具（延迟加载模式）", m.client.config.Name, len(m.toolDefinitions))
+	defs := client.GetTools()
+	m.mu.Lock()
+	m.toolDefinitions = defs
+	m.mu.Unlock()
+	log.Printf("[MCP:%s] 发现 %d 个工具（延迟加载模式）", client.config.Name, len(defs))
 	return nil
 }
 
-// Name 返回该管理器对应的 MCP 服务器名称
+// Name 返回该管理器对应的 MCP 服务器名称（持锁读取，与 Reconnect 的替换互斥）
 func (m *MCPToolManager) Name() string {
-	return m.client.config.Name
+	name, _ := m.serverInfo()
+	return name
 }
 
 // Reconnect 重建客户端连接并刷新工具列表与工具缓存。
@@ -317,10 +350,15 @@ func (m *MCPToolManager) Reconnect(ctx context.Context) error {
 	return nil
 }
 
-// GetToolNames 获取所有工具名称和简短描述
+// GetToolNames 获取所有工具名称和简短描述。
+// 在锁内取快照后在锁外组装：读侧不加锁与 Reconnect 的替换并发构成数据竞争
+// （slice header 三字被撕裂时 range 可越界 panic）。
 func (m *MCPToolManager) GetToolNames() []map[string]string {
-	result := make([]map[string]string, 0, len(m.toolDefinitions))
-	for _, tool := range m.toolDefinitions {
+	m.mu.Lock()
+	defs := m.toolDefinitions
+	m.mu.Unlock()
+	result := make([]map[string]string, 0, len(defs))
+	for _, tool := range defs {
 		result = append(result, map[string]string{
 			"name":        tool.Name,
 			"description": tool.Description,
@@ -420,11 +458,13 @@ func NewMCPDiscoveryTool(manager *MCPToolManager) *MCPDiscoveryTool {
 }
 
 func (t *MCPDiscoveryTool) Name() string {
-	return fmt.Sprintf("mcp_discover_%s", t.manager.client.config.Name)
+	name, _ := t.manager.serverInfo()
+	return fmt.Sprintf("mcp_discover_%s", name)
 }
 
 func (t *MCPDiscoveryTool) Description() string {
-	return fmt.Sprintf("发现 %s MCP 服务器提供的所有可用工具。返回工具名称和简短描述列表。使用此工具了解有哪些工具可用，然后使用 mcp_load 工具加载具体工具。", t.manager.client.config.Description)
+	_, description := t.manager.serverInfo()
+	return fmt.Sprintf("发现 %s MCP 服务器提供的所有可用工具。返回工具名称和简短描述列表。使用此工具了解有哪些工具可用，然后使用 mcp_load 工具加载具体工具。", description)
 }
 
 func (t *MCPDiscoveryTool) Params() any {
@@ -432,16 +472,16 @@ func (t *MCPDiscoveryTool) Params() any {
 }
 
 func (t *MCPDiscoveryTool) Execute(ctx context.Context, params any, callbacks CallBackFuncs) (string, error) {
-	log.Printf("[MCP:%s] 🔍 模型正在发现可用工具...", t.manager.client.config.Name)
+	log.Printf("[MCP:%s] 🔍 模型正在发现可用工具...", t.manager.Name())
 
 	tools := t.manager.GetToolNames()
 	data, err := json.MarshalIndent(tools, "", "  ")
 	if err != nil {
-		log.Printf("[MCP:%s] ❌ 工具发现失败: %v", t.manager.client.config.Name, err)
+		log.Printf("[MCP:%s] ❌ 工具发现失败: %v", t.manager.Name(), err)
 		return "", err
 	}
 
-	log.Printf("[MCP:%s] ✅ 工具发现完成，共 %d 个工具", t.manager.client.config.Name, len(tools))
+	log.Printf("[MCP:%s] ✅ 工具发现完成，共 %d 个工具", t.manager.Name(), len(tools))
 	return string(data), nil
 }
 
@@ -463,11 +503,13 @@ func NewMCPLoaderTool(manager *MCPToolManager, sessionExecutor *SessionToolExecu
 }
 
 func (t *MCPLoaderTool) Name() string {
-	return fmt.Sprintf("mcp_load_%s", t.manager.client.config.Name)
+	name, _ := t.manager.serverInfo()
+	return fmt.Sprintf("mcp_load_%s", name)
 }
 
 func (t *MCPLoaderTool) Description() string {
-	return fmt.Sprintf("加载 %s MCP 服务器的指定工具。加载后该工具将可用于后续调用。参数: tool_name - 要加载的工具名称（从 mcp_discover 获取）", t.manager.client.config.Description)
+	_, description := t.manager.serverInfo()
+	return fmt.Sprintf("加载 %s MCP 服务器的指定工具。加载后该工具将可用于后续调用。参数: tool_name - 要加载的工具名称（从 mcp_discover 获取）", description)
 }
 
 func (t *MCPLoaderTool) Params() any {

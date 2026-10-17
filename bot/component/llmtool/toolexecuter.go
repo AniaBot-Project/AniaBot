@@ -56,6 +56,42 @@ func (e *ToolExecuter) Has(name string) bool {
 	return ok
 }
 
+// IsMCPToolName 判断共享层中该名字是否为 MCP 工具（eager 模式直接注册在共享层；
+// 懒加载模式的具体工具在会话层，由 SessionToolExecutor.IsMCPToolName 判定）。
+// 供计划模式门禁阻断 MCP 工具——MCP 工具集合运行时可变，无法靠静态清单覆盖。
+func (e *ToolExecuter) IsMCPToolName(name string) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	tool, ok := e.tools[name]
+	if !ok {
+		return false
+	}
+	_, isMCP := tool.(*MCPTool)
+	return isMCP
+}
+
+// IsMCPToolName 判断本会话已加载的工具是否为 MCP 工具。
+func (s *SessionToolExecutor) IsMCPToolName(name string) bool {
+	s.mu.RLock()
+	tool, ok := s.sessionTools[name]
+	s.mu.RUnlock()
+	if ok {
+		if _, isMCP := tool.(*MCPTool); isMCP {
+			return true
+		}
+	}
+	return s.shared.IsMCPToolName(name)
+}
+
+// HasSession 判断本会话层是否已注册该工具名（供平台工具注入前的判重，
+// 共享层的 Has 查不到会话层注册的 clock_*/memory_*/kb_* 等工具）。
+func (s *SessionToolExecutor) HasSession(name string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.sessionTools[name]
+	return ok
+}
+
 func (e *ToolExecuter) Tools() []ToolDef {
 	return e.toolsWithSession(nil)
 }
@@ -300,7 +336,7 @@ func (e *ToolExecuter) RemoveMCP(name string) error {
 	// 懒加载（发现模式）：移除 manager 与发现工具
 	for i, manager := range e.mcpManagers {
 		if manager.Name() == name {
-			closing = append(closing, manager.client)
+			closing = append(closing, manager.clientSnapshot())
 			delete(e.tools, NewMCPDiscoveryTool(manager).Name())
 			e.mcpManagers = append(e.mcpManagers[:i], e.mcpManagers[i+1:]...)
 			e.mu.Unlock()
@@ -408,7 +444,10 @@ func (e *ToolExecuter) ReconnectMCP(ctx context.Context, name string) error {
 		}
 	}
 	for _, toolDef := range fresh.GetTools() {
-		e.tools[toolDef.Name] = NewMCPTool(fresh, toolDef)
+		// 经 registerLocked 而非直接赋值：重连同样必须遵守重名保护，否则一个
+		// 暴露 bash/read_file 等同名工具的 MCP server 会在重连后静默顶掉所有
+		// 会话共享的内置工具（启动路径与 mcp_add 都会被拦下）。
+		e.registerLocked(NewMCPTool(fresh, toolDef))
 	}
 	e.mu.Unlock()
 
@@ -426,10 +465,11 @@ func (e *ToolExecuter) MCPServerInfos() []MCPServerInfo {
 
 	infos := make([]MCPServerInfo, 0, len(e.mcpManagers))
 	for _, manager := range e.mcpManagers {
+		name, description := manager.serverInfo()
 		infos = append(infos, MCPServerInfo{
-			Name:        manager.Name(),
-			Description: manager.client.config.Description,
-			ToolCount:   len(manager.toolDefinitions),
+			Name:        name,
+			Description: description,
+			ToolCount:   manager.toolDefinitionCount(),
 			Lazy:        true,
 		})
 	}
