@@ -937,7 +937,8 @@ func (m *clockManager) sendFinalOutput(task *ClockTask, resp string, skipped boo
 }
 
 // sendText 向任务目标发送文本。按空行拆分开关开启时拆成多条逐条发送
-// （群聊仅首条携带 @ 提醒），与主对话回复的拆分语义保持一致。
+// （群聊仅首条携带 @ 提醒），与主对话回复的拆分语义保持一致；群聊片段过多
+// 且平台支持合并转发（QQ）时改为一条合并转发消息，避免刷屏。
 func (m *clockManager) sendText(task *ClockTask, text string) bool {
 	if m.bot == nil {
 		return false
@@ -946,6 +947,14 @@ func (m *clockManager) sendText(task *ClockTask, text string) bool {
 	segments := replySegments(text, split)
 	targetQID := parseQID(task.TargetID)
 	if task.TargetType == clockTargetGroup {
+		var mentions []message.QID
+		if task.CreatedBy != "" {
+			mentions = append(mentions, task.CreatedBy)
+		}
+		// 后台路径没有事件来源，self_id 未知：节点发送者交给平台按自身身份兜底
+		if shouldMergeGroupReply(segments) && sendGroupForwardReply(m.bot, targetQID, segments, mentions, "", m.logger) {
+			return true
+		}
 		for i, seg := range segments {
 			builder := msgchain.Builder().Group()
 			if i == 0 && task.CreatedBy != "" {

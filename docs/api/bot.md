@@ -135,6 +135,24 @@ type GroupUserInfo struct {
 }
 ```
 
+## 群聊合并转发（bot.GroupForwardSender，可选接口）
+
+合并转发同样是 QQ 专属能力，但单独成接口 `bot.GroupForwardSender`：事件回调里断言成功表示当前平台支持；**后台路径**（没有事件来源，如定时任务、面板触发的推送）持有的 core 也能断言成功——调用时按目标群 ID 前缀路由到对应适配器。适配器不支持（非 QQ 平台）时返回 `("", false)`，插件应退化为逐条发送：
+
+```go
+if fs, ok := b.(bot.GroupForwardSender); ok {
+    fwd := msgchain.Builder().GroupForward()
+    // 每个节点一条记录：node 的 user_id/nickname 是记录里显示的发送者（机器人自身）
+    fwd.Message(msg.SelfId, "AI助手", msgchain.Builder().Group().Text("第一段").Build())
+    fwd.Message(msg.SelfId, "AI助手", msgchain.Builder().Group().Text("第二段").Build())
+    if _, success := fs.SendGroupForwardMsg(msg.GroupId, fwd.Build()); !success {
+        // 平台不支持或发送失败 → 逐条发送
+    }
+}
+```
+
+节点内容支持普通消息段（文本/图片/@ 等），QQ 客户端展开「聊天记录」后可见。
+
 ## 内联按钮交互（bot.Interactive，可选接口）
 
 Telegram 等平台支持在消息上渲染可点击按钮（inline keyboard）：点击不产生新消息，而是回调事件送回插件，适合翻页、菜单等交互。插件先断言 `bot.Interactive` 探测平台能力，支持时在消息链中附加 keyboard 段：

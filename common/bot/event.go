@@ -66,6 +66,16 @@ type StreamSender interface {
 	SendFriendStream(userId message.QID, chain msgchain.FriendChain) (StreamHandle, bool)
 }
 
+// GroupForwardSender 群聊合并转发能力，可选接口（与 bot.QQ 同模式）。
+// 平台支持发送合并转发（QQ 的 NapCat/Luckylilia）时，事件回调收到的 bot.Bot
+// 可断言为 GroupForwardSender；core 自身也实现该接口，按目标群 ID 前缀路由到
+// 对应适配器——后台路径（如 AI 定时任务）没有事件来源，用 core 即可。路由到的
+// 适配器不具备合并转发能力时返回 ("", false)，调用方应退化为逐条发送。
+type GroupForwardSender interface {
+	// SendGroupForwardMsg 发送群聊合并转发消息
+	SendGroupForwardMsg(groupId message.QID, chain msgchain.GroupForwardChain) (msgId message.QID, success bool)
+}
+
 // MsgEditor 消息编辑能力，可选接口（与 bot.QQ 同模式）。
 // 平台支持「先发后改」（如 Telegram editMessageText、Discord 消息编辑、
 // 飞书卡片 Patch）时，事件回调收到的 bot.Bot 可断言为 bot.MsgEditor，

@@ -57,7 +57,7 @@ func TestReplySegments(t *testing.T) {
 // 仅首条带 @ 提及，发送失败时返回错误。
 func TestGroupCallbackSplitSend(t *testing.T) {
 	fb := &recordBot{}
-	cbs := MakeGroupCallback(fb, message.FromUint64(1), message.FromUint64(2), slog.Default(), true)
+	cbs := MakeGroupCallback(fb, message.FromUint64(1), message.FromUint64(2), message.FromUint64(3), slog.Default(), true)
 	if _, err := cbs.SendText("第一段\n\n第二段\n\n第三段"); err != nil {
 		t.Fatalf("发送失败: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestGroupCallbackSplitSend(t *testing.T) {
 	}
 
 	fb2 := &recordBot{}
-	cbs2 := MakeGroupCallback(fb2, message.FromUint64(1), message.FromUint64(2), slog.Default(), false)
+	cbs2 := MakeGroupCallback(fb2, message.FromUint64(1), message.FromUint64(2), message.FromUint64(3), slog.Default(), false)
 	if _, err := cbs2.SendText("第一段\n\n第二段"); err != nil {
 		t.Fatalf("发送失败: %v", err)
 	}

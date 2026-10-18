@@ -805,6 +805,21 @@ func (ania *AniaBot) SendFriendMsg(userID message.QID, chain msgchain.FriendChai
 	return a.SendFriendMsg(userID, chain)
 }
 
+// SendGroupForwardMsg 实现 bot.GroupForwardSender：按群 ID 前缀路由到对应适配器；
+// 合并转发是 QQ 平台专属能力（NapCat/Luckylilia），其余适配器返回 false
+// （调用方退化为逐条发送，与 SendGroupStream 的语义一致）。
+func (ania *AniaBot) SendGroupForwardMsg(groupId message.QID, chain msgchain.GroupForwardChain) (msgId message.QID, success bool) {
+	a := ania.route(groupId)
+	if a == nil {
+		return "", false
+	}
+	qq, ok := a.(adapter.QQExt)
+	if !ok {
+		return "", false
+	}
+	return qq.SendGroupForwardMsg(groupId, chain)
+}
+
 // SendGroupStream 实现 bot.StreamSender：按群 ID 前缀路由，适配器不支持时返回 false。
 func (ania *AniaBot) SendGroupStream(groupId message.QID, chain msgchain.GroupChain) (bot.StreamHandle, bool) {
 	a := ania.route(groupId)

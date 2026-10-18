@@ -100,6 +100,8 @@ flowchart TB
   点击经 `TriggerWrapper.OnInteraction` 进 core 按「插件名:载荷」前缀路由）等可选接口
 - `adapter.WrapBot(base, src)` 按事件来源适配器把公共 `bot.Bot` 包装成带专属能力的扩展外观
 - 插件侧 `if qb, ok := b.(bot.QQ); ok` 类型断言探测，断言失败即平台不支持，优雅退化
+- core 自身也实现部分可选能力接口并按目标 ID 前缀路由（`bot.StreamSender`、`bot.GroupForwardSender` 的
+  `SendGroupForwardMsg`）：后台路径（定时任务、面板推送）没有事件来源，直接用 core 即可；路由到的适配器不具备该能力时返回 false，调用方退化为普通发送
 
 ```go
 // 框架在 addAdapter 时完成包装，事件分发时把包装后的外观传给插件

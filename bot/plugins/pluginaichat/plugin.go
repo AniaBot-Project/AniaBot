@@ -544,7 +544,7 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	ctx = context.WithValue(ctx, imageRegistryKey{}, imageReg)
 	var msgFuncs llmtool.CallBackFuncs
 	if isGroup {
-		msgFuncs = MakeGroupCallback(b, id, lastMsg.Sender.UserId, p.Logger, p.cfg.Reply.SplitBlankLine)
+		msgFuncs = MakeGroupCallback(b, id, lastMsg.Sender.UserId, batchSelfID(batch), p.Logger, p.cfg.Reply.SplitBlankLine)
 	} else {
 		msgFuncs = MakeFriendCallback(b, id, p.Logger, p.cfg.Reply.SplitBlankLine)
 	}
@@ -721,12 +721,16 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	}
 
 	// 最终回复片段（流式未生效时才会走到这里，如平台不支持流式或流式已退化）：
-	// 默认整段一条消息；开启按空行拆分时拆成多条逐条发送。
+	// 默认整段一条消息；开启按空行拆分时拆成多条逐条发送，片段过多
+	//（> forwardSegThreshold）时平台支持合并转发（QQ）则改为一条合并转发，避免刷屏。
 	segments := replySegments(resp, p.cfg.Reply.SplitBlankLine)
 	if isGroup {
 		// 群聊中 @ 本批所有发言者（去重），让排队消息的每个人都收到回应；
-		// 拆分发送时仅首条携带 @ 提及，避免每条回复都提醒
+		// 拆分发送时仅首条携带 @ 提及（合并转发为首节点），避免每条回复都提醒
 		mentions := batchMentions(batch)
+		if shouldMergeGroupReply(segments) && sendGroupForwardReply(b, id, segments, mentions, batchSelfID(batch), p.Logger) {
+			return true
+		}
 		for i, seg := range segments {
 			builder := msgchain.Builder().Group()
 			if i == 0 {

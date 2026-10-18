@@ -66,3 +66,37 @@ func TestRouteEmptyAdapter(t *testing.T) {
 		t.Fatalf("无适配器时发送应失败")
 	}
 }
+
+// forwardTestAdapter 支持群聊合并转发的假 QQ 适配器：只覆写合并转发并记录调用，
+// 其余 QQExt 方法由嵌入的接口桩满足（测试不会调用）。
+type forwardTestAdapter struct {
+	fakeAdapter
+	adapter.QQExt
+	calls int
+}
+
+func (f *forwardTestAdapter) SendGroupForwardMsg(message.QID, msgchain.GroupForwardChain) (message.QID, bool) {
+	f.calls++
+	return "fw:1", true
+}
+
+// TestSendGroupForwardMsgRouting 验证 core 的 bot.GroupForwardSender 实现按群 ID
+// 前缀路由：QQ 适配器（含 QQExt）转发成功，非 QQ 适配器返回 false（调用方退化）。
+func TestSendGroupForwardMsgRouting(t *testing.T) {
+	a := &AniaBot{}
+	qq := &forwardTestAdapter{fakeAdapter: fakeAdapter{name: "napcat", platform: "qq"}}
+	fs := &fakeAdapter{name: "feishu", platform: "feishu"}
+	a.adapters = []*adapterEntry{
+		{def: adapter.Definition{Name: "napcat", Platform: "qq", IDPrefix: message.QQIDPrefix}, adapter: qq},
+		{def: adapter.Definition{Name: "feishu", Platform: "feishu", IDPrefix: "fs:"}, adapter: fs},
+	}
+
+	fwd := msgchain.Builder().GroupForward()
+	fwd.Message(message.FromUint64(1), "AI助手", msgchain.Builder().Group().Text("一").Build())
+	if _, ok := a.SendGroupForwardMsg("qq:123", fwd.Build()); !ok || qq.calls != 1 {
+		t.Fatalf("QQ 群应路由到适配器的合并转发, ok=%v calls=%d", ok, qq.calls)
+	}
+	if _, ok := a.SendGroupForwardMsg("fs:oc_1", fwd.Build()); ok || qq.calls != 1 {
+		t.Fatalf("非 QQ 适配器不支持合并转发，应返回 false 且不误发, ok=%v calls=%d", ok, qq.calls)
+	}
+}
