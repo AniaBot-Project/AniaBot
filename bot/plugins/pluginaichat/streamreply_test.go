@@ -88,6 +88,44 @@ func (s *fakeStreamSender) SendFriendStream(_ message.QID, chain msgchain.Friend
 	return s.handle, true
 }
 
+// streamBot 同时具备 bot.Bot（经 recordBot）与 bot.StreamSender 能力的测试 bot。
+type streamBot struct {
+	*recordBot
+	sender *fakeStreamSender
+}
+
+func (b *streamBot) SendGroupStream(id message.QID, chain msgchain.GroupChain) (bot.StreamHandle, bool) {
+	return b.sender.SendGroupStream(id, chain)
+}
+
+func (b *streamBot) SendFriendStream(id message.QID, chain msgchain.FriendChain) (bot.StreamHandle, bool) {
+	return b.sender.SendFriendStream(id, chain)
+}
+
+// TestStreamReplyGate 两个开关共存：开启「按空行拆分回复」不再关闭流式（拆分只作用于
+// 非流式发送）；流式开关关闭、或平台未实现 bot.StreamSender 时才不启用流式。
+func TestStreamReplyGate(t *testing.T) {
+	p := &AIChatPlugin{}
+	p.Logger = slog.Default()
+	p.cfg.Stream.Enable = true
+	p.cfg.Reply.SplitBlankLine = true
+
+	// 平台不支持流式（QQ/OneBot v11）：走一次性发送，拆分在那里生效
+	if s := p.newStreamReplyFor(&recordBot{}, message.FromUint64(1), true, nil); s != nil {
+		t.Fatal("平台不支持流式能力时不应启用流式")
+	}
+	// 支持流式的平台：拆分开关开启也不影响流式启用
+	sb := &streamBot{recordBot: &recordBot{}, sender: &fakeStreamSender{ok: true}}
+	if s := p.newStreamReplyFor(sb, message.FromUint64(1), true, nil); s == nil {
+		t.Fatal("拆分开关开启不应关闭流式（两者共存）")
+	}
+	// 流式开关关闭：不启用流式
+	p.cfg.Stream.Enable = false
+	if s := p.newStreamReplyFor(sb, message.FromUint64(1), true, nil); s != nil {
+		t.Fatal("流式开关关闭时不应启用流式")
+	}
+}
+
 // TestStreamReplyOverwritesSingleMessage 全程只创建一条流式消息：工具轮文本先展示，
 // 轮次结束后缓冲清空，下一轮文本整体覆盖同一条消息（既不新建消息，也不拼接旧文本），
 // 收尾后消息停留在最后一轮的最终回复上。

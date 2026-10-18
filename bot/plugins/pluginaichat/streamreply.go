@@ -57,6 +57,22 @@ func newStreamReply(sender bot.StreamSender, logger *slog.Logger, target message
 	}
 }
 
+// newStreamReplyFor 构造本次请求的流式状态机：流式开关关闭、或平台未实现
+// bot.StreamSender（QQ/OneBot v11 无消息编辑 API）时返回 nil，调用方走一次性发送。
+//
+// 与「按空行拆分回复」无关：拆分只作用于非流式发送（流式是单条消息逐字更新，
+// 本身无法拆成多条），两个开关可同时开启、互不影响。
+func (p *AIChatPlugin) newStreamReplyFor(b bot.Bot, id message.QID, isGroup bool, batch []message.Message) *streamReply {
+	if !p.cfg.Stream.Enable {
+		return nil
+	}
+	ss, ok := b.(bot.StreamSender)
+	if !ok {
+		return nil
+	}
+	return newStreamReply(ss, p.Logger, id, isGroup, batchMentions(batch))
+}
+
 // batchMentions 本批消息发言者去重后的 @ 提及列表（保持发言先后顺序）。
 // 跳过无发送者的合成消息（如子代理结果回灌），避免 @ 到无效用户。
 // 流式首条消息与一次性发送路径共用同一份提及集。

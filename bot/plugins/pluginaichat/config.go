@@ -245,16 +245,17 @@ type fallbackConfig struct {
 }
 
 // streamConfig 流式回复配置：平台支持「先发后改」时逐字展示回复
-// （如飞书卡片/Telegram 消息实时更新）；平台不支持或出错时自动退化为一次性回复。
+// （如飞书卡片/Telegram 消息实时更新），全程只维持一条消息、后续轮次整体覆盖；
+// 平台不支持或出错时自动退化为一次性回复（只发最终回复，此时按空行拆分生效）。
 type streamConfig struct {
-	Enable bool `cfg:"enable" label:"启用流式回复" group:"AI 对话 · 回复" help:"平台支持时逐字展示回复（飞书卡片/Telegram/Discord 消息实时更新）；不支持或出错时自动退化为一次性回复" default:"true"`
+	Enable bool `cfg:"enable" label:"启用流式回复" group:"AI 对话 · 回复" help:"平台支持时逐字展示回复（飞书卡片/Telegram/Discord 消息实时更新）：全程只维持一条消息，工具轮的中间文本会被后续轮次整体覆盖，最终留下最后一轮的回复；不支持或出错时自动退化为一次性回复（只发最终回复，此时按空行拆分生效）。与「按空行拆分回复」互不影响，流式生效时不做拆分" default:"true"`
 }
 
 // replyConfig 回复拆分配置：把 AI 回复中的空行作为消息边界，拆成多条消息
-// 逐条发送（默认关闭，保持整段一条）。与流式回复互斥：流式是「单条消息
-// 逐字更新」，无法按空行拆成多条，故拆分开启时该轮退化为一次性发送。
+// 逐条发送（默认关闭，保持整段一条）。只作用于非流式发送：流式是「单条消息
+// 逐字更新」，本身无法拆成多条，流式生效时拆分不参与（两个开关可同时开启）。
 type replyConfig struct {
-	SplitBlankLine bool `cfg:"split_blank_line" label:"按空行拆分回复" group:"AI 对话 · 回复" help:"开启后 AI 回复中的空行（连续换行）作为消息边界，拆成多条消息逐条发送，适合模型习惯用空行分段的回复；与流式回复互斥（开启时不再走流式，改一次性发送后拆分）；默认关闭" default:"false"`
+	SplitBlankLine bool `cfg:"split_blank_line" label:"按空行拆分回复" group:"AI 对话 · 回复" help:"开启后 AI 回复中的空行（连续换行）作为消息边界，拆成多条消息逐条发送，适合模型习惯用空行分段的回复；只作用于非流式发送（平台不支持流式、流式已关闭或已退化时），流式生效时仍是单条消息；也只发送最终回复，工具轮的中间文本不发送；默认关闭" default:"false"`
 }
 
 // quotaConfig 每日 Token 配额限制配置：按会话与全局两个维度限制每日消耗。

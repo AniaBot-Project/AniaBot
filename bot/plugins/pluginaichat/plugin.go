@@ -587,16 +587,13 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	// 全程只维持一条消息：工具轮的中间文本先展示，随后被下一轮文本整体覆盖
 	//（见 streamreply.go），最终留下的就是最后一轮的最终回复；群聊首条消息
 	// 携带本批全部发言者的 @ 提及（与一次性路径的提及集一致）。
-	// 按空行拆分回复与流式互斥（流式是单条消息逐字更新，无法拆成多条），
-	// 拆分开启时跳过流式、走一次性发送后按空行拆分。
-	var stream *streamReply
-	if p.cfg.Stream.Enable && !p.cfg.Reply.SplitBlankLine {
-		if ss, ok := b.(bot.StreamSender); ok {
-			stream = newStreamReply(ss, p.Logger, id, isGroup, batchMentions(batch))
-			chatOpts.OnStreamDelta = stream.OnDelta
-			chatOpts.OnStreamRoundEnd = stream.OnRoundEnd
-			chatOpts.OnStreamRestart = stream.OnRestart
-		}
+	// 「按空行拆分回复」只作用于非流式发送：流式是单条消息逐字更新，本身无法
+	// 拆成多条，故流式生效时拆分不参与（两个开关可同时开启，互不冲突）。
+	stream := p.newStreamReplyFor(b, id, isGroup, batch)
+	if stream != nil {
+		chatOpts.OnStreamDelta = stream.OnDelta
+		chatOpts.OnStreamRoundEnd = stream.OnRoundEnd
+		chatOpts.OnStreamRestart = stream.OnRestart
 	}
 
 	recorder := p.beginQuery(chat, id, isGroup, batch, extraText)
@@ -723,7 +720,8 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 		return true
 	}
 
-	// 最终回复片段：默认整段一条消息；开启按空行拆分时拆成多条逐条发送。
+	// 最终回复片段（流式未生效时才会走到这里，如平台不支持流式或流式已退化）：
+	// 默认整段一条消息；开启按空行拆分时拆成多条逐条发送。
 	segments := replySegments(resp, p.cfg.Reply.SplitBlankLine)
 	if isGroup {
 		// 群聊中 @ 本批所有发言者（去重），让排队消息的每个人都收到回应；
