@@ -84,7 +84,8 @@ type ChatOptions struct {
 	// 回调收到的 delta 尚未去除 <think> 块（由调用方在缓冲上统一处理）。
 	OnStreamDelta func(string)
 	// OnStreamRoundEnd 工具调用轮结束回调（toolexecutor 在工具边界调用）：
-	// 调用方应 End 当前流式消息；下一轮首个增量创建新消息。
+	// 调用方应清空已展示内容的累积缓冲，让下一轮的增量从零开始、整体覆盖
+	// 同一条流式消息（覆盖语义见 OnStreamDelta 的使用方）；回调本身不发送内容。
 	OnStreamRoundEnd func()
 	// OnStreamRestart 流式中途失败后重试/切换备用模型前的重启回调（可选）：
 	// 调用方应重置已展示的流式缓冲，让重试从头生成的内容整体覆盖旧输出

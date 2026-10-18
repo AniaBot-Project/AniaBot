@@ -313,10 +313,6 @@ func (p *AIChatPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 	return true, nil
 }
 
-// maxStreamPatchFails 连续 Patch 失败多少次后放弃流式、退化为一次性发送。
-// 偶发一次失败（网络抖动/节流）不必放弃，持续失败说明消息已不可编辑。
-const maxStreamPatchFails = 3
-
 // newConversationRequested 本批消息中是否有任何一条**自身的文本段**包含 #新对话。
 //
 // 只看原始消息段、不看 FriendlyText 渲染结果：后者会展开被引用消息与合并转发
@@ -588,90 +584,18 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 
 	// 流式回复：平台支持「先发后改」（如飞书卡片/Telegram/Discord 消息 Patch）时逐字展示；
 	// 平台不支持或流式创建失败时自动退化为一次性回复（下方原发送路径）。
-	// 群聊首条流式消息携带本批全部发言者的 @ 提及（与一次性路径的提及集一致）；
-	// 工具轮边界后续轮次的新消息不再重复 @，避免一次回复多次提醒用户。
+	// 全程只维持一条消息：工具轮的中间文本先展示，随后被下一轮文本整体覆盖
+	//（见 streamreply.go），最终留下的就是最后一轮的最终回复；群聊首条消息
+	// 携带本批全部发言者的 @ 提及（与一次性路径的提及集一致）。
 	// 按空行拆分回复与流式互斥（流式是单条消息逐字更新，无法拆成多条），
 	// 拆分开启时跳过流式、走一次性发送后按空行拆分。
-	var streamHandle bot.StreamHandle
-	var streamBuf strings.Builder
-	streaming := false
-	streamUnsupported := false
-	// streamPatchFails 累计 Patch 失败次数：平台撤回消息/限流/编辑被拒时 Patch 会
-	// 持续失败，而成功路径只以 streaming 为条件直接 return，不再走一次性兜底——
-	// 用户会只看到半截内容。达到阈值后放弃流式，交由一次性发送补全整段回复。
-	streamPatchFails := 0
-	mentionPending := isGroup
+	var stream *streamReply
 	if p.cfg.Stream.Enable && !p.cfg.Reply.SplitBlankLine {
 		if ss, ok := b.(bot.StreamSender); ok {
-			chatOpts.OnStreamDelta = func(delta string) {
-				if delta == "" || streamUnsupported {
-					return
-				}
-				streamBuf.WriteString(delta)
-				if streamHandle != nil {
-					if err := streamHandle.Patch(aichat.RemoveThinkContent(streamBuf.String())); err != nil {
-						streamPatchFails++
-						if streamPatchFails >= maxStreamPatchFails {
-							// 放弃流式：结束当前消息并标记为不支持，后续增量忽略，
-							// 由下方一次性发送路径补全完整回复
-							p.Logger.Warn("流式回复更新连续失败，退化为一次性发送",
-								"id", id, "is_group", isGroup, " fails", streamPatchFails, "error", err.Error())
-							streamHandle.End()
-							streamHandle = nil
-							streaming = false
-							streamUnsupported = true
-						}
-					}
-					return
-				}
-				// 首个增量：创建流式消息（初始内容即当前已积累文本）
-				if isGroup {
-					builder := msgchain.Builder().Group()
-					text := aichat.RemoveThinkContent(streamBuf.String())
-					if mentionPending {
-						mentionPending = false
-						seen := make(map[message.QID]struct{}, len(batch))
-						for i := range batch {
-							uid := batch[i].Sender.UserId
-							if uid == message.FromUint64(0) {
-								continue // 跳过子代理结果等合成消息，避免 @ 到无效用户
-							}
-							if _, ok := seen[uid]; ok {
-								continue
-							}
-							seen[uid] = struct{}{}
-							builder.Mention(uid)
-						}
-						text = " " + text
-					}
-					builder.Text(text)
-					streamHandle, streaming = ss.SendGroupStream(id, builder.Build())
-				} else {
-					builder := msgchain.Builder().Friend()
-					builder.Text(aichat.RemoveThinkContent(streamBuf.String()))
-					streamHandle, streaming = ss.SendFriendStream(id, builder.Build())
-				}
-				if !streaming {
-					// 平台不支持流式：忽略后续增量，走一次性兜底
-					streamUnsupported = true
-					streamHandle = nil
-				}
-			}
-			// 工具调用轮结束：结束当前流式消息；下一轮首个增量创建新消息
-			chatOpts.OnStreamRoundEnd = func() {
-				if streamHandle != nil {
-					streamHandle.End()
-					streamHandle = nil
-				}
-				// 清空已发出的累积缓冲：新消息只携带新一轮文本，
-				// 否则会以「历史各轮全文 + 新文本」开头，重复发送中间内容
-				streamBuf.Reset()
-			}
-			// 流式中途失败后的重试/切备用：清空已展示缓冲，让重试从头生成的
-			// 内容整体覆盖旧输出（Patch 为覆盖语义，不会拼接重复文本）
-			chatOpts.OnStreamRestart = func() {
-				streamBuf.Reset()
-			}
+			stream = newStreamReply(ss, p.Logger, id, isGroup, batchMentions(batch))
+			chatOpts.OnStreamDelta = stream.OnDelta
+			chatOpts.OnStreamRoundEnd = stream.OnRoundEnd
+			chatOpts.OnStreamRestart = stream.OnRestart
 		}
 	}
 
@@ -744,10 +668,9 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	chatOpts.PersistUserText = userText
 
 	resp, usage, err := chat.Chat(ctx, extraText, msgFuncs, chatOpts)
-	// 流式回复收尾：Chat 返回后结束流式消息（幂等；工具轮边界已由 OnStreamRoundEnd 处理）
-	if streamHandle != nil {
-		streamHandle.End()
-		streamHandle = nil
+	// 流式回复收尾：Chat 返回后结束流式消息（幂等）
+	if stream != nil {
+		stream.End()
 	}
 	// 待办提醒哈希仅在请求成功后提交：失败轮次不消耗提醒，下一轮仍会注入
 	//（清单未变时恰恰是最需要提醒的时候）
@@ -796,7 +719,7 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	p.Logger.Info("AI请求token消耗", "id", id, "is_group", isGroup, "batch", len(batch), "prompt_tokens", usage.PromptTokens, "completion_tokens", usage.CompletionTokens, "total_tokens", usage.TotalTokens)
 
 	// 流式已发出回复时不再走一次性发送（内容已逐字展示在流式消息中）
-	if streaming {
+	if stream != nil && stream.Streaming() {
 		return true
 	}
 
@@ -805,19 +728,7 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	if isGroup {
 		// 群聊中 @ 本批所有发言者（去重），让排队消息的每个人都收到回应；
 		// 拆分发送时仅首条携带 @ 提及，避免每条回复都提醒
-		seen := make(map[message.QID]struct{}, len(batch))
-		mentions := make([]message.QID, 0, len(batch))
-		for i := range batch {
-			uid := batch[i].Sender.UserId
-			if uid == message.FromUint64(0) {
-				continue // 跳过子代理结果等合成消息，避免 @ 到无效用户
-			}
-			if _, ok := seen[uid]; ok {
-				continue
-			}
-			seen[uid] = struct{}{}
-			mentions = append(mentions, uid)
-		}
+		mentions := batchMentions(batch)
 		for i, seg := range segments {
 			builder := msgchain.Builder().Group()
 			if i == 0 {

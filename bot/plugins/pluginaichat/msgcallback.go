@@ -15,8 +15,10 @@ import (
 //（aitool.NewMsgHistoryTool，经 platformtools.go 注入）替代，图片登记经
 // Context.OnMessages + 请求上下文中的 imageRegistryKey 完成。
 //
-// splitBlankLine 为「按空行拆分回复」开关：工具轮中间文本的发送同样遵循，
-// 开关开启时一段文本按空行拆成多条消息（仅首条 @ 用户）。
+// splitBlankLine 为「按空行拆分回复」开关：SendText 同样遵循，开关开启时一段
+// 文本按空行拆成多条消息（仅首条 @ 用户）。框架不再自动调用 SendText 发送工具轮
+// 中间文本（非流式平台只发最终回复，流式平台由 streamReply 覆盖式展示），
+// 该回调保留给工具/宿主显式发送消息。
 
 func MakeGroupCallback(bot bot.Bot, groupId, userId message.QID, logger *slog.Logger, splitBlankLine bool) llmtool.CallBackFuncs {
 	msgFuncs := llmtool.CallBackFuncs{

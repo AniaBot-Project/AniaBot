@@ -469,7 +469,7 @@ X-Proxy-Route: team-a
 
 | 配置键 | 默认值 | 说明 |
 | --- | --- | --- |
-| `plugin.ai_chat_bot.stream.enable` | `true` | 平台支持「先发后改」时（飞书卡片 / Telegram / Discord 消息实时更新）逐字展示回复；不支持或出错时自动退化为一次性回复 |
+| `plugin.ai_chat_bot.stream.enable` | `true` | 平台支持「先发后改」时（飞书卡片 / Telegram / Discord 消息实时更新）逐字展示回复；不支持或出错时自动退化为一次性回复。全程只维持一条消息：工具轮的中间文本先展示，随后被下一轮文本整体覆盖，最终留下最后一轮的回复（不会一轮一条地刷屏） |
 
 ### 回复拆分（reply）
 

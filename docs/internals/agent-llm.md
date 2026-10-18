@@ -119,7 +119,7 @@ flowchart TB
     C -->|是| E[追加 assistant 消息<br/>含 tool_calls + 推理内容]
     E --> F[并行执行全部工具<br/>先过门禁,按 index 回填结果]
     F --> G[追加 tool 结果消息]
-    G --> H[流式模式: 结束当前消息]
+    G --> H[流式模式: 清空本轮缓冲<br/>下一轮文本覆盖同一条消息]
     H --> I{还有下一轮?}
     I -->|是, i < maxIterations| B
     I -->|否, 达上限| J["追加「工具已达上限」指令<br/>去掉工具定义再调一次"]
@@ -131,9 +131,9 @@ flowchart TB
 - **并行执行**：同一轮的多个工具调用并发执行（goroutine + WaitGroup），结果按 `index` 预分配回填，保证 tool 结果消息与 assistant 消息中 `tool_calls` 的顺序一一对应（OpenAI API 要求）；单个工具 panic 转为错误文本回填，不传染进程
 - **工具门禁**：每个工具在 goroutine 内、真正执行前先过请求级门禁（`ChatOptions.PreToolGate`：计划模式 → PreToolUse 钩子 → 人工审批），被拦时门禁文本作为该工具的结果回填、循环继续；执行完成后触发 `PostToolUse` 钩子（仅通知）。详见 [AI 引擎（三）](/internals/agent-tools#工具门禁管线)；用户消息进入对话前还会触发 `UserPromptSubmit` 钩子（可阻断/注入上下文）
 - **回调串行化**：工具回调（发消息、图片加载队列等）内部可能修改共享状态，`lockedCallbacks` 用同一把互斥锁串行化；发送顺序可能不再等于调用顺序，但结果回填顺序不受影响
-- **流式边界**：流式模式下每轮增量直接发到平台；工具边界调用 `OnStreamRoundEnd` 结束当前流式消息，下一轮首个增量创建新消息
+- **流式边界**：流式模式下每轮增量直接发到平台，**全程只维持一条消息**；工具边界调用 `OnStreamRoundEnd` 清空本轮累积缓冲，下一轮文本从零累积并整体覆盖这条消息（Patch 是覆盖语义），最终留下的就是最后一轮的最终回复
 - **迭代上限**：达到 `maxIterations` 后追加一条「工具调用已达限制，请直接回答」的用户消息，并**移除工具定义**再调一次——否则模型可能继续发起工具调用而被静默丢弃，导致空响应
-- **中间轮文本**：非流式模式下，每轮 assistant 文本经 `callbacks.SendText` 发送（主对话）；定时任务/子代理的 SendText 回调则丢弃（仅记日志），见 [AI 引擎（三）](/internals/agent-tools)
+- **中间轮文本**：非流式模式下工具轮的 assistant 文本**不发送**——只发送最后一轮的最终回复（中间轮常是「边想边说」的草稿，发出去会与最终回复重复刷屏）；`callbacks.SendText` 保留给工具/宿主显式发送消息，定时任务/子代理的 SendText 回调则丢弃（仅记日志），见 [AI 引擎（三）](/internals/agent-tools)
 
 ### 图片加载的注入时机
 

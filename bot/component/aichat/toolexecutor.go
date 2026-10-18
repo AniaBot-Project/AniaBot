@@ -204,12 +204,10 @@ func (o *ToolOrchestrator) ExecuteWithTools(
 
 		messages, _ = appendAIMessage(messages, o.msgBuilder, resp, resp.Content)
 
-		// 流式模式下内容已通过 OnStreamDelta 增量发出，不再重复发送
-		content := RemoveThinkContent(resp.Content)
-		if !useStream && callbacks.SendText != nil && len(content) > 0 {
-			callbacks.SendText(content)
-		}
-
+		// 工具轮的 assistant 文本不在此发送：非流式平台只发送最后一轮的最终回复
+		// （中间轮往往是「边想边说」的草稿，发出去会与最终回复重复刷屏）；流式
+		// 平台由 OnStreamDelta 把每轮文本整体覆盖到同一条消息上（见
+		// ChatOptions.OnStreamRoundEnd）。SendText 保留给工具/宿主显式发送。
 		toolResults, err := o.executeToolCalls(ctx, resp.ToolCalls, callbacks, opts.PreToolGate, skipTruncated)
 		if err != nil {
 			return "", messages, totalUsage, err

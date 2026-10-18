@@ -283,7 +283,7 @@ func TestExecuteToolCallsPostToolUse(t *testing.T) {
 }
 
 // TestStreamToolRoundBoundary 流式模式下：工具边界触发 OnStreamRoundEnd、增量回调收到内容、
-// inter-round SendText 被跳过（内容已流式发出，避免重复）。
+// 工具轮文本不由框架自动发送（流式由调用方经增量覆盖展示，SendText 一律不碰）。
 func TestStreamToolRoundBoundary(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -333,6 +333,52 @@ func TestStreamToolRoundBoundary(t *testing.T) {
 	}
 	if sendTextCalls.Load() != 0 {
 		t.Fatalf("流式模式下不应调用 SendText, got %d", sendTextCalls.Load())
+	}
+}
+
+// TestNonStreamToolRoundTextNotSent 非流式模式下工具轮的 assistant 文本不自动发送：
+// 中间轮常是「边想边说」的草稿，发出去会与最终回复重复刷屏；只有最后一轮（无工具
+// 调用）的内容作为最终回复返回，由调用方发送。
+func TestNonStreamToolRoundTextNotSent(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if calls.Add(1) == 1 {
+			// 第一轮：带草稿文本 + 工具调用
+			fmt.Fprint(w, `{"id":"chatcmpl-test","object":"chat.completion","created":1,"model":"test",`+
+				`"choices":[{"index":0,"message":{"role":"assistant","content":"先看看这张图，回个短的","tool_calls":[`+
+				`{"id":"call_1","type":"function","function":{"name":"tool_a","arguments":"{}"}}`+
+				`]},"finish_reason":"tool_calls"}],`+
+				`"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`)
+			return
+		}
+		fmt.Fprint(w, `{"id":"chatcmpl-test","object":"chat.completion","created":1,"model":"test",`+
+			`"choices":[{"index":0,"message":{"role":"assistant","content":"最终回答"},"finish_reason":"stop"}],`+
+			`"usage":{"prompt_tokens":9,"completion_tokens":2,"total_tokens":11}}`)
+	}))
+	defer srv.Close()
+
+	exec := &fakeToolExecutor{}
+	exec.tools = []llmtool.ToolDef{{Function: llmtool.FunctionDef{Name: "tool_a"}}}
+	o := newTestOrchestrator(exec)
+	o.SetMaxIterations(5)
+
+	var sent []string
+	content, _, _, err := o.ExecuteWithTools(context.Background(), newTestClient(srv.URL),
+		[]Message{TextMessage(RoleUser, "看看图")},
+		llmtool.CallBackFuncs{SendText: func(s string) (string, error) {
+			sent = append(sent, s)
+			return "发送成功", nil
+		}},
+		ChatOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteWithTools 失败: %v", err)
+	}
+	if content != "最终回答" {
+		t.Fatalf("最终内容不符: %q", content)
+	}
+	if len(sent) != 0 {
+		t.Fatalf("非流式模式下工具轮文本不应自动发送, got %q", sent)
 	}
 }
 
