@@ -143,8 +143,8 @@ type GroupUserInfo struct {
 if fs, ok := b.(bot.GroupForwardSender); ok {
     fwd := msgchain.Builder().GroupForward()
     // 每个节点一条记录：node 的 user_id/nickname 是记录里显示的发送者（机器人自身）
-    fwd.Message(msg.SelfId, "AI助手", msgchain.Builder().Group().Text("第一段").Build())
-    fwd.Message(msg.SelfId, "AI助手", msgchain.Builder().Group().Text("第二段").Build())
+    fwd.Message(msg.SelfId, "AniaBot", msgchain.Builder().Group().Text("第一段").Build())
+    fwd.Message(msg.SelfId, "AniaBot", msgchain.Builder().Group().Text("第二段").Build())
     if _, success := fs.SendGroupForwardMsg(msg.GroupId, fwd.Build()); !success {
         // 平台不支持或发送失败 → 逐条发送
     }

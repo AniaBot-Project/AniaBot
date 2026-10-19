@@ -92,7 +92,7 @@ func TestSendGroupForwardMsgRouting(t *testing.T) {
 	}
 
 	fwd := msgchain.Builder().GroupForward()
-	fwd.Message(message.FromUint64(1), "AI助手", msgchain.Builder().Group().Text("一").Build())
+	fwd.Message(message.FromUint64(1), "AniaBot", msgchain.Builder().Group().Text("一").Build())
 	if _, ok := a.SendGroupForwardMsg("qq:123", fwd.Build()); !ok || qq.calls != 1 {
 		t.Fatalf("QQ 群应路由到适配器的合并转发, ok=%v calls=%d", ok, qq.calls)
 	}

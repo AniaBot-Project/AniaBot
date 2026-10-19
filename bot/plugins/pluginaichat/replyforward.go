@@ -19,7 +19,7 @@ const (
 	forwardSegThreshold = 3
 	// forwardNodeNickname 合并转发节点的发送者昵称。节点发送者是机器人自身：
 	// 平台能识别传入的机器人 ID 时显示该昵称，识别不了则用机器人真实昵称兜底
-	forwardNodeNickname = "AI助手"
+	forwardNodeNickname = "AniaBot"
 )
 
 // shouldMergeGroupReply 群聊回复是否改用合并转发：拆分出的片段数超过阈值。
