@@ -175,7 +175,7 @@ func TestSessionLockRenewToleratesTransientFailure(t *testing.T) {
 // TestStopRequestAuthorization 只有触发请求的用户或管理员能停止；被拒时不动请求。
 func TestStopRequestAuthorization(t *testing.T) {
 	p := newEvictTestPlugin()
-	p.SystemConfig.AdminId = message.FromUint64(900)
+	p.SystemConfig.AdminIds = []message.QID{message.FromUint64(900)}
 
 	requester := message.FromUint64(100)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -244,7 +244,7 @@ func TestBatchRequester(t *testing.T) {
 // 保证超时被拒后仍有预算向用户说明结论。
 func TestApprovalWaitBudgetShrinksToContext(t *testing.T) {
 	logger := testLogger()
-	m := newApprovalManager(nil, 120, message.FromUint64(0), logger)
+	m := newApprovalManager(nil, 120, nil, logger)
 
 	// 无 deadline：用配置超时
 	if got := m.approvalWaitBudget(context.Background()); got != 120*time.Second {
@@ -269,7 +269,7 @@ func TestApprovalWaitBudgetShrinksToContext(t *testing.T) {
 // TestApprovalRequestWithoutBudget 剩余预算不足时直接拒绝且不登记待批请求。
 func TestApprovalRequestWithoutBudget(t *testing.T) {
 	logger := testLogger()
-	m := newApprovalManager(nil, 120, message.FromUint64(0), logger)
+	m := newApprovalManager(nil, 120, nil, logger)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -293,7 +293,7 @@ func TestApprovalRequestWithoutBudget(t *testing.T) {
 // （收缩后不能让用户以为还有完整 120s）。
 func TestApprovalRequestPromptShowsActualWait(t *testing.T) {
 	logger := testLogger()
-	m := newApprovalManager(nil, 120, message.FromUint64(0), logger)
+	m := newApprovalManager(nil, 120, nil, logger)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel() // 预算 = 60s - 20s = 40s

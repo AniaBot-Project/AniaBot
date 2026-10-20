@@ -5,7 +5,7 @@
 ## 权限控制：仅管理员
 
 ```go
-if msg.Sender.UserId != p.SystemConfig.AdminId {
+if !p.SystemConfig.IsAdmin(msg.Sender.UserId) {
     chain := msgchain.Builder().Group()
     chain.Text("你没有权限哦")
     b.SendGroupMsg(msg.GroupId, chain.Build())
@@ -13,6 +13,8 @@ if msg.Sender.UserId != p.SystemConfig.AdminId {
 }
 // 管理员逻辑...
 ```
+
+`bot.admin_ids` 支持配置多个管理员，`IsAdmin` 对列表中任意一个都返回 true。
 
 群管理员判断则通过 `msg.Sender.Role`（`owner` / `admin` / `member`）：
 

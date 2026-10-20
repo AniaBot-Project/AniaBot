@@ -22,7 +22,7 @@ func newTestApprovalManager(tools []string, timeout time.Duration) *approvalMana
 	return &approvalManager{
 		tools:        set,
 		timeout:      timeout,
-		admin:        message.FromUint64(999),
+		admins:       []message.QID{message.FromUint64(999)},
 		logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		pending:      make(map[string]*approvalRequest),
 		adminPending: make(map[string]*approvalRequest),
@@ -403,6 +403,79 @@ func TestAdminApprovalViaPrivateChat(t *testing.T) {
 	if len(originPrompts) != 1 || !strings.Contains(originPrompts[0], "已通知管理员") {
 		t.Fatalf("发起会话应收到已通知提示: %v", originPrompts)
 	}
+}
+
+// TestAdminApprovalAnyAdminCanApprove 配置多个管理员时审批提示发给全部管理员，
+// 任一管理员在私聊中回复「允许」均可批准。
+func TestAdminApprovalAnyAdminCanApprove(t *testing.T) {
+	am := newTestApprovalManager(nil, time.Second*5)
+	am.admins = []message.QID{message.FromUint64(999), message.FromUint64(888)}
+	p := &AIChatPlugin{approvalManager: am}
+
+	var adminPrompts []string
+	var mu sync.Mutex
+	gate := p.buildPreToolGate(testSKey, agenthook.AgentKindMain, message.FromUint64(123),
+		func(string) {},
+		func(text string) bool {
+			mu.Lock()
+			adminPrompts = append(adminPrompts, text)
+			mu.Unlock()
+			return true
+		})
+
+	done := make(chan struct{})
+	var blocked bool
+	go func() {
+		blocked, _ = gate(context.Background(), llmtool.ToolCall{Name: "config_set", Arguments: `{}`})
+		close(done)
+	}()
+
+	adminKeys := []string{
+		sessionKey(message.FromUint64(999), false),
+		sessionKey(message.FromUint64(888), false),
+	}
+	for range 100 {
+		ok := true
+		am.mu.Lock()
+		for _, key := range adminKeys {
+			if _, exists := am.adminPending[key]; !exists {
+				ok = false
+			}
+		}
+		am.mu.Unlock()
+		if ok {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// 第二位管理员批准（第一位未回复）
+	if consumed, _ := am.tryHandleReply(message.FromUint64(888), false, message.FromUint64(888), "允许"); !consumed {
+		t.Fatal("任一管理员私聊中的「允许」应被消费")
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("审批未结束")
+	}
+	if blocked {
+		t.Fatal("任一管理员批准后应放行")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	// 提示闭包只调用一次（由闭包自身分发给全部管理员）
+	if len(adminPrompts) != 1 || !strings.Contains(adminPrompts[0], "config_set") {
+		t.Fatalf("审批提示应发给管理员通道: %v", adminPrompts)
+	}
+	am.mu.Lock()
+	for _, key := range adminKeys {
+		if _, ok := am.adminPending[key]; ok {
+			am.mu.Unlock()
+			t.Fatalf("审批结束后应清理管理员私聊索引 %s", key)
+		}
+	}
+	am.mu.Unlock()
 }
 
 // TestAdminApprovalOriginReplyStillWorks 提示发给管理员私聊后，管理员在发起

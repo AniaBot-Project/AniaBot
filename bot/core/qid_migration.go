@@ -212,7 +212,7 @@ func migrateConfigValue(key string, v any) (any, bool) {
 		}
 		return next, true
 	}
-	if key == "bot.admin_id" {
+	if key == configstore.LegacyAdminIDKey {
 		s, ok := v.(string)
 		if !ok {
 			return nil, false
@@ -222,6 +222,24 @@ func migrateConfigValue(key string, v any) (any, bool) {
 			return nil, false
 		}
 		return next, true
+	}
+	if key == configstore.AdminIDsKey {
+		items, ok := asStringSlice(v)
+		if !ok {
+			return nil, false
+		}
+		changed := false
+		for i, item := range items {
+			next := message.NormalizeQQID(item)
+			if next != item {
+				items[i] = next
+				changed = true
+			}
+		}
+		if !changed {
+			return nil, false
+		}
+		return items, true
 	}
 	if strings.HasSuffix(key, ".groups") || strings.HasSuffix(key, ".friends") {
 		items, ok := asStringSlice(v)

@@ -150,7 +150,43 @@ type InteractionHandler interface {
 }
 
 type SystemConfig struct {
+	// AdminId 首位管理员 ID，等价于 AdminIds[0]（保留给只认识单管理员的旧插件；
+	// 新代码请用 AdminIds / IsAdmin）。未配置管理员时为空。
 	AdminId message.QID
+	// AdminIds 全部管理员 ID（配置键 bot.admin_ids，可配置多个，按配置顺序）。
+	AdminIds []message.QID
+}
+
+// Admins 返回全部管理员 ID：AdminIds 为空时回退为 AdminId，兼容只设置单值的
+// 旧用法；均未配置时返回 nil。
+func (c SystemConfig) Admins() []message.QID {
+	if len(c.AdminIds) > 0 {
+		out := make([]message.QID, 0, len(c.AdminIds))
+		for _, id := range c.AdminIds {
+			if id != "" {
+				out = append(out, id)
+			}
+		}
+		return out
+	}
+	if c.AdminId != "" {
+		return []message.QID{c.AdminId}
+	}
+	return nil
+}
+
+// IsAdmin 判断给定 ID 是否为管理员（bot.admin_ids 中的任意一个）。
+func (c SystemConfig) IsAdmin(id message.QID) bool {
+	if id == "" {
+		return false
+	}
+	for _, admin := range c.AdminIds {
+		if admin == id {
+			return true
+		}
+	}
+	// 兼容只设置了单值 AdminId 的旧用法
+	return len(c.AdminIds) == 0 && c.AdminId == id
 }
 
 // ConfigRegistrar 可选接口：插件实现后，框架启动时会收集其声明的配置字段

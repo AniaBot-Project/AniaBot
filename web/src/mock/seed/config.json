@@ -5,7 +5,7 @@
   "bot.adapter.ws.address": "ws://localhost:4455",
   "bot.adapter.ws.worker_count": 0,
   "bot.adapter.ws.worker_queue_size": 1024,
-  "bot.admin_id": "qq:10000",
+  "bot.admin_ids": ["qq:10000"],
   "bot.admin_panel.enable": true,
   "bot.admin_panel.listen": "127.0.0.1:7700",
   "bot.balance.cache_sec": 300,

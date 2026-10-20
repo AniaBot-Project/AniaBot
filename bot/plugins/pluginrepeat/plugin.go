@@ -43,7 +43,7 @@ func (p *RepeatPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 
 	if cmd.Mention {
 		if cmd.Name == "close" && len(cmd.Args) >= 1 && cmd.Args[0] == "repeat" {
-			if msg.Sender.UserId == p.SystemConfig.AdminId {
+			if p.SystemConfig.IsAdmin(msg.Sender.UserId) {
 				p.enable.Store(false)
 				builder := msgchain.Builder().Group()
 				builder.Text("已关闭复读机")
@@ -56,7 +56,7 @@ func (p *RepeatPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 				return false, nil
 			}
 		} else if cmd.Name == "enable" && len(cmd.Args) >= 1 && cmd.Args[0] == "repeat" {
-			if msg.Sender.UserId == p.SystemConfig.AdminId {
+			if p.SystemConfig.IsAdmin(msg.Sender.UserId) {
 				p.enable.Store(true)
 				builder := msgchain.Builder().Group()
 				builder.Text("已开启复读机")

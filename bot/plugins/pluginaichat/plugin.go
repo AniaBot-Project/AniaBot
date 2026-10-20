@@ -210,7 +210,7 @@ func (p *AIChatPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 	}
 
 	if cmd.Name == "stop" {
-		isAdmin := msg.Sender.UserId == p.SystemConfig.AdminId
+		isAdmin := p.SystemConfig.IsAdmin(msg.Sender.UserId)
 		stopped, denied := p.stopRequest(msg.GroupId, true, msg.Sender.UserId, isAdmin)
 		if denied != "" {
 			builder := msgchain.Builder().Group()
@@ -409,7 +409,7 @@ func (p *AIChatPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command
 	}
 
 	if cmd.Name == "stop" {
-		isAdmin := msg.Sender.UserId == p.SystemConfig.AdminId
+		isAdmin := p.SystemConfig.IsAdmin(msg.Sender.UserId)
 		stopped, denied := p.stopRequest(msg.Sender.UserId, false, msg.Sender.UserId, isAdmin)
 		if denied != "" {
 			builder := msgchain.Builder().Friend()
@@ -770,20 +770,25 @@ func (p *AIChatPlugin) sendPlainText(b bot.Bot, id message.QID, isGroup bool, te
 	}
 }
 
-// buildAdminPromptSender 构造把管理员审批提示私聊发给管理员的闭包（配置修改类
-// 工具的管理员审批提示默认发到管理员私聊，管理员在私聊中回复「允许/拒绝」）。
-// 管理员 ID 未设置时返回 nil；发送失败（如管理员未加机器人好友）返回 false，
+// buildAdminPromptSender 构造把管理员审批提示私聊发给全部管理员的闭包（配置修改类
+// 工具的管理员审批提示默认发到管理员私聊，任一管理员在私聊中回复「允许/拒绝」均可）。
+// 未配置管理员时返回 nil；全部发送失败（如管理员均未加机器人好友）返回 false，
 // 审批管理器会回退到在发起会话内提示。
 func (p *AIChatPlugin) buildAdminPromptSender(b bot.Bot) func(text string) bool {
-	admin := p.SystemConfig.AdminId
-	if admin == message.FromUint64(0) {
+	admins := p.SystemConfig.Admins()
+	if len(admins) == 0 {
 		return nil
 	}
 	return func(text string) bool {
-		builder := msgchain.Builder().Friend()
-		builder.Text(text)
-		_, ok := b.SendFriendMsg(admin, builder.Build())
-		return ok
+		sent := false
+		for _, admin := range admins {
+			builder := msgchain.Builder().Friend()
+			builder.Text(text)
+			if _, ok := b.SendFriendMsg(admin, builder.Build()); ok {
+				sent = true
+			}
+		}
+		return sent
 	}
 }
 
@@ -940,7 +945,7 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 		approvalToolNames = strings.Split(p.cfg.Approval.Tools, ",")
 	}
 	if p.cfg.Approval.Enable || p.cfg.ConfigTool.Enable {
-		p.approvalManager = newApprovalManager(approvalToolNames, p.cfg.Approval.TimeoutSec, p.SystemConfig.AdminId, p.Logger)
+		p.approvalManager = newApprovalManager(approvalToolNames, p.cfg.Approval.TimeoutSec, p.SystemConfig.Admins(), p.Logger)
 		if p.cfg.Approval.Enable {
 			p.Logger.Info("已启用工具审批", "tools", p.approvalManager.tools, "timeout_sec", p.cfg.Approval.TimeoutSec)
 		} else {

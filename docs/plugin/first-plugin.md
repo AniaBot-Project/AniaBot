@@ -168,7 +168,7 @@ func (p *DicePlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 p.Logger.Info("有人掷骰子", "user", msg.Sender.UserId)   // 结构化日志
 p.Storage.SetString(ctx, "last", "4", storage.WithTTL(time.Hour)) // 缓存
 resp, _ := p.RestyClient.R().Get("https://api.example.com")        // HTTP
-if msg.Sender.UserId == p.SystemConfig.AdminId { /* 管理员专属 */ }
+if p.SystemConfig.IsAdmin(msg.Sender.UserId) { /* 管理员专属 */ }
 ```
 
 ## 完整代码

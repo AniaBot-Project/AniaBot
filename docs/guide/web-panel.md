@@ -51,7 +51,7 @@ ANIA_BOT_ADMIN_PANEL_ENABLE=true ./AniaBot
 
 全新安装的**首次登录**会自动进入设置向导，引导完成最基本的配置（其余配置可随时在面板中完善）：
 
-1. **平台接入** —— 勾选要启用的平台：QQ(NapCat，默认勾选，填写连接地址与 Access Token) 和/或 QQ 官方（填写 AppID / AppSecret，可选沙箱环境）和/或 飞书（填写 App ID / Secret 与事件订阅方式）和/或 Telegram（填写 Bot Token，可选代理）和/或 Discord（填写 Bot Token，需在 Developer Portal 开启 Message Content Intent，可选代理）和/或 微信（无需填写连接配置，重启后在「配置管理」页扫码登录），以及管理员 ID（QQ 为 `qq:QQ号`，其他平台为带前缀的 ID）
+1. **平台接入** —— 勾选要启用的平台：QQ(NapCat，默认勾选，填写连接地址与 Access Token) 和/或 QQ 官方（填写 AppID / AppSecret，可选沙箱环境）和/或 飞书（填写 App ID / Secret 与事件订阅方式）和/或 Telegram（填写 Bot Token，可选代理）和/或 Discord（填写 Bot Token，需在 Developer Portal 开启 Message Content Intent，可选代理）和/或 微信（无需填写连接配置，重启后在「配置管理」页扫码登录），以及管理员 ID（QQ 为 `qq:QQ号`，其他平台为带前缀的 ID，可填写多个，每行一个）
 2. **AI 对话模型** —— Base URL、API Key、模型
 3. **完成** —— 保存到数据库后一键「重启 Bot 生效」
 

@@ -276,7 +276,7 @@ func (ania *AniaBot) Run() {
 	}
 
 	// 旧版 QQ ID 为裸数字，升级后统一迁移到 qq: 前缀。
-	// 必须在配置中心读取前执行，保证 admin_id、插件配置和 AI 持久化数据
+	// 必须在配置中心读取前执行，保证管理员 ID、插件配置和 AI 持久化数据
 	// 都以新 ID 格式加载。迁移成功后落标记，后续启动不再全表扫描。
 	if err := migrateQQIDPrefixOnce(context.Background(), ania.persistent, Logger().WithGroup("Migration")); err != nil {
 		Logger().Error("QQ ID 前缀迁移失败，部分旧数据可能仍是无前缀格式", "error", err)
@@ -322,6 +322,11 @@ func (ania *AniaBot) Run() {
 			os.Exit(1)
 		}
 		ania.configStore = cs
+
+		// 旧版单管理员键 bot.admin_id → 管理员列表 bot.admin_ids（幂等）
+		if err := cs.MigrateAdminIDs(); err != nil {
+			Logger().Error("迁移管理员配置失败", "error", err)
+		}
 
 		// 补齐缺失的默认值后再构建 viper，保证插件 Start 读到的配置已含默认值。
 		cs.EnsureDefaults(pluginconfig.Defaults())
@@ -374,6 +379,12 @@ func (ania *AniaBot) Run() {
 
 	// 初始化事件
 	Logger().Info("开始初始化插件...")
+	// 管理员列表（bot.admin_ids 可配置多个；兼容旧版单值 bot.admin_id）
+	admins := adminIDsFromConfig(ania.cfg)
+	adminCfg := plugin.SystemConfig{AdminIds: admins}
+	if len(admins) > 0 {
+		adminCfg.AdminId = admins[0]
+	}
 	for _, p := range ania.plugins {
 		Logger().Info("初始化插件: ", "name", p.GetMeta().Name)
 		safeExecute("初始化", p, func(p plugin.Plugin) {
@@ -383,9 +394,7 @@ func (ania *AniaBot) Run() {
 			p.SetPersistentStorage(ania.persistent.Clone(encodeName))
 			p.SetRestyClient(ania.restyClient)
 			p.SetLogger(Logger().WithGroup(p.GetMeta().Name))
-			p.SetConfig(plugin.SystemConfig{
-				AdminId: message.FromString(ania.cfg.GetString("bot.admin_id")),
-			})
+			p.SetConfig(adminCfg)
 			// 配置中心读写能力（AI 配置管理工具等场景）；持久化存储不可用时保持 nil
 			if ania.configStore != nil {
 				p.SetConfigEditor(ania.configStore)

@@ -60,7 +60,7 @@ type ConfigGetTool struct {
 
 func NewConfigGetTool(store ConfigStore) *ConfigGetTool {
 	return &ConfigGetTool{
-		BaseTool: llmtool.MakeBaseTool("config_get", "查看 Bot 框架配置。留空 key 时列出全部配置项（键、当前值、说明）；指定 key 时返回该配置项的当前值。敏感字段（API Key/Token 等）已掩码。配置键为点分格式，如 plugin.ai_chat_bot.model、bot.admin_id", ConfigGetParams{}),
+		BaseTool: llmtool.MakeBaseTool("config_get", "查看 Bot 框架配置。留空 key 时列出全部配置项（键、当前值、说明）；指定 key 时返回该配置项的当前值。敏感字段（API Key/Token 等）已掩码。配置键为点分格式，如 plugin.ai_chat_bot.model、bot.admin_ids", ConfigGetParams{}),
 		store:    store,
 	}
 }

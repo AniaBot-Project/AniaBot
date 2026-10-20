@@ -1,8 +1,8 @@
 # AniaBot 默认配置（首次启动时写入数据库，之后请在 Web 控制面板中修改）
 # 持久化存储位置由环境变量引导（ANIABOT_STORE_DRIVER / ANIABOT_SQLITE_PATH / ANIABOT_MYSQL_DSN），不在此处配置
 bot:
-  # 管理员信息（QQ 为 qq:QQ号；其他平台为带前缀的 ID，如 fs:ou_xxx）
-  admin_id:
+  # 管理员 ID 列表（可配置多个，每行一个；QQ 为 qq:QQ号，其他平台为带前缀的 ID，如 fs:ou_xxx）
+  admin_ids:
 
   # Web 控制面板
   admin_panel:

@@ -98,7 +98,7 @@ func (s *Store) seedDefaults() error {
 	return nil
 }
 
-// flatten 将嵌套的 map 递归拍平为点分键。nil 叶子跳过（如空的 admin_id）。
+// flatten 将嵌套的 map 递归拍平为点分键。nil 叶子跳过（如空的 admin_ids）。
 func flatten(m map[string]any, prefix string, out map[string]any) {
 	for k, v := range m {
 		key := k

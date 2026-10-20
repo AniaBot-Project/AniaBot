@@ -46,15 +46,17 @@ func NewPluginSys() *PluginSys {
 func (p *PluginSys) Awake(ctx context.Context, bot bot.Bot) error {
 	// 未配置管理员 ID（首次启动设置向导期间是正常状态）跳过启动通知，
 	// 避免向空目标发送而刷错误日志
-	if p.SystemConfig.AdminId == "" {
+	admins := p.SystemConfig.Admins()
+	if len(admins) == 0 {
 		p.Logger.Info("未配置管理员 ID，跳过启动成功通知")
 		return nil
 	}
-	builder := msgchain.Builder().Friend()
-	builder.Text("AniaBot启动成功，发送 /help 查看插件加载信息")
-	_, ok := bot.SendFriendMsg(p.SystemConfig.AdminId, builder.Build())
-	if !ok {
-		p.Logger.Warn("启动成功消息发送失败（管理员不在线或所在平台未启用？）")
+	for _, admin := range admins {
+		builder := msgchain.Builder().Friend()
+		builder.Text("AniaBot启动成功，发送 /help 查看插件加载信息")
+		if _, ok := bot.SendFriendMsg(admin, builder.Build()); !ok {
+			p.Logger.Warn("启动成功消息发送失败（管理员不在线或所在平台未启用？）", "admin", admin)
+		}
 	}
 	return nil
 }
@@ -66,10 +68,10 @@ func (p *PluginSys) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command.Co
 		pluginInfo.WriteString("欢迎使用AniaBot，已加载插件:")
 		idx := 1
 		for _, info := range plugins {
-			if info.AdminOnly && msg.Sender.UserId != p.SystemConfig.AdminId {
+			if info.AdminOnly && !p.SystemConfig.IsAdmin(msg.Sender.UserId) {
 				continue
 			}
-			if msg.Sender.UserId != p.SystemConfig.AdminId && info.ShowFor&plugininfo.ShowForFriend == 0 {
+			if !p.SystemConfig.IsAdmin(msg.Sender.UserId) && info.ShowFor&plugininfo.ShowForFriend == 0 {
 				continue
 			}
 			pName := info.Name
@@ -84,7 +86,7 @@ func (p *PluginSys) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command.Co
 			p.Logger.Error("Bot消息发送失败，无法响应 /help")
 		}
 		return false, nil
-	} else if cmd.Name == "exit" && msg.Sender.UserId == p.SystemConfig.AdminId {
+	} else if cmd.Name == "exit" && p.SystemConfig.IsAdmin(msg.Sender.UserId) {
 		builder := msgchain.Builder().Friend()
 		builder.Text("AniaBot已退出")
 		_, ok := bot.SendFriendMsg(msg.Sender.UserId, builder.Build())
@@ -95,7 +97,7 @@ func (p *PluginSys) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command.Co
 		os.Exit(0)
 		return false, nil
 	} else if cmd.Name == "reboot" {
-		if msg.Sender.UserId != p.SystemConfig.AdminId {
+		if !p.SystemConfig.IsAdmin(msg.Sender.UserId) {
 			builder := msgchain.Builder().Friend()
 			builder.Text("没有权限，只有管理员才能重启 AniaBot")
 			_, ok := bot.SendFriendMsg(msg.Sender.UserId, builder.Build())
@@ -128,7 +130,7 @@ func (p *PluginSys) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.Com
 		pluginInfo.WriteString("\n欢迎使用AniaBot，已加载插件:")
 		idx := 1
 		for _, info := range plugins {
-			if info.AdminOnly && msg.Sender.UserId != p.SystemConfig.AdminId {
+			if info.AdminOnly && !p.SystemConfig.IsAdmin(msg.Sender.UserId) {
 				continue
 			}
 			if info.ShowFor&plugininfo.ShowForGroup == 0 {
@@ -150,7 +152,7 @@ func (p *PluginSys) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.Com
 	} else if cmd.Name == "reboot" && cmd.Mention {
 		c := msgchain.Builder().Group()
 		c.Mention(msg.Sender.UserId)
-		if msg.Sender.UserId != p.SystemConfig.AdminId {
+		if !p.SystemConfig.IsAdmin(msg.Sender.UserId) {
 			c.Text(" 没有权限，只有管理员才能重启 AniaBot")
 			_, ok := bot.SendGroupMsg(msg.GroupId, c.Build())
 			if !ok {
@@ -184,11 +186,12 @@ func (p *PluginSys) OnPanic(ctx context.Context, bot bot.Bot, name string, err a
 	}
 	p.panicMu.Unlock()
 	if shouldNotify {
-		builder := msgchain.Builder().Friend()
-		builder.Text(fmt.Sprintf("线程 %s 运行时panic: %v", name, err))
-		_, ok := bot.SendFriendMsg(p.SystemConfig.AdminId, builder.Build())
-		if !ok {
-			p.Logger.Error("Bot消息发送失败，无法通知管理员")
+		for _, admin := range p.SystemConfig.Admins() {
+			builder := msgchain.Builder().Friend()
+			builder.Text(fmt.Sprintf("线程 %s 运行时panic: %v", name, err))
+			if _, ok := bot.SendFriendMsg(admin, builder.Build()); !ok {
+				p.Logger.Error("Bot消息发送失败，无法通知管理员", "admin", admin)
+			}
 		}
 	}
 }

@@ -258,8 +258,8 @@
           </div>
 
           <div>
-            <label class="block text-xs font-medium text-slate-600 mb-1.5">管理员 ID</label>
-            <input v-model="form.adminId" type="text" placeholder="QQ 为 qq:QQ号，其他平台为带前缀的 ID（如 fs:ou_xxx），接收启动/异常通知" :class="inputClass" />
+            <label class="block text-xs font-medium text-slate-600 mb-1.5">管理员 ID（可多个）</label>
+            <textarea v-model="form.adminIds" rows="3" placeholder="每行一个；QQ 为 qq:QQ号，其他平台为带前缀的 ID（如 fs:ou_xxx）。管理员接收启动/异常通知，并可执行 /reboot 等管理命令" :class="inputClass + ' font-mono'" />
           </div>
         </div>
 
@@ -358,7 +358,7 @@ const form = reactive({
   discordToken: '',
   discordProxy: '',
   enableWeixin: false,
-  adminId: '',
+  adminIds: '',
   baseUrl: '',
   apiKey: '',
   model: '',
@@ -394,8 +394,13 @@ onMounted(async () => {
     form.enableWeixin = cfg['bot.platform.weixin.enable'] === true
     form.baseUrl = cfg['plugin.ai_chat_bot.base_url'] || ''
     form.model = cfg['plugin.ai_chat_bot.model'] || ''
-    const adminId = cfg['bot.admin_id']
-    if (adminId) form.adminId = String(adminId)
+    // 管理员 ID 列表（可多个）；兼容旧版单值键 bot.admin_id
+    const adminIds = cfg['bot.admin_ids']
+    if (Array.isArray(adminIds) && adminIds.length > 0) {
+      form.adminIds = adminIds.join('\n')
+    } else if (cfg['bot.admin_id']) {
+      form.adminIds = String(cfg['bot.admin_id'])
+    }
   } catch { /* 忽略，使用空表单 */ }
 })
 
@@ -485,8 +490,9 @@ async function onSave() {
     if (form.discordProxy.trim()) updates['bot.discord.proxy'] = form.discordProxy.trim()
   }
 
-  // 管理员 ID（字符串，可带平台前缀）
-  if (form.adminId.trim()) updates['bot.admin_id'] = form.adminId.trim()
+  // 管理员 ID 列表（每行一个，可多个）
+  const adminIds = form.adminIds.split('\n').map((s) => s.trim()).filter(Boolean)
+  if (adminIds.length > 0) updates['bot.admin_ids'] = adminIds
 
   // AI 对话
   if (form.baseUrl.trim()) updates['plugin.ai_chat_bot.base_url'] = form.baseUrl.trim()

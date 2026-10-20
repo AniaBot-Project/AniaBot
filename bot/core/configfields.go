@@ -10,7 +10,7 @@ import (
 // （含 bot.platform.<name>.enable 启用开关），面板动态展示。
 var frameworkConfigFields = []pluginconfig.Field{
 	// Bot 基础
-	{Key: "bot.admin_id", Label: "管理员 ID", Type: "string", Group: "Bot 基础", Help: "接收启动/异常通知的管理员 ID。QQ 为 qq:QQ号（如 qq:123456789）；其他平台为带平台前缀的 ID（如飞书 fs:ou_xxx、Telegram tg:123456、Discord dc:123456）"},
+	{Key: "bot.admin_ids", Label: "管理员 ID（可多个）", Type: "strings", Group: "Bot 基础", Help: "管理员 ID 列表，每行一个，可配置多个；任一管理员均拥有最高权限（/reboot、/exit、查看全部定时任务、接收启动/异常通知、审批 AI 配置修改等）。QQ 为 qq:QQ号（如 qq:123456789）；其他平台为带平台前缀的 ID（如飞书 fs:ou_xxx、Telegram tg:123456、Discord dc:123456）"},
 	{Key: "bot.msg_event_timeout_sec", Label: "消息处理超时(秒)", Type: "int", Group: "Bot 基础", Help: "单条消息事件（如一次 AI 回复）的最大执行时长，超时强制中止；AI 执行复杂任务（多轮工具调用/子代理）被超时中断时调大，0 或负数回退默认 300 秒", Default: 300},
 
 	// Web 面板

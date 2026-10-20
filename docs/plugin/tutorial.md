@@ -94,7 +94,7 @@ func (p *DailyBriefPlugin) OnGroupMsg(ctx context.Context, b bot.Bot, cmd comman
 	}
 
 	// /brief 内容：仅管理员可设置
-	if msg.Sender.UserId != p.SystemConfig.AdminId {
+	if !p.SystemConfig.IsAdmin(msg.Sender.UserId) {
 		p.reply(b, msg, "只有管理员才能设置早报内容哦")
 		return false, nil
 	}
@@ -117,7 +117,7 @@ func (p *DailyBriefPlugin) reply(b bot.Bot, msg message.Message, text string) {
 要点：
 
 - `cmd` 由框架预解析：`/brief 今天有雨` → `cmd.Name = "brief"`, `cmd.Args = ["今天","有雨"]`
-- `p.SystemConfig.AdminId` 是 DI 注入的管理员 ID（`bot.admin_id`，可能带平台前缀），用于权限控制；群管理员判断用 `msg.Sender.Role`
+- `p.SystemConfig.IsAdmin(msg.Sender.UserId)` 判断发送者是否为管理员（`bot.admin_ids` 可配置多个，ID 可能带平台前缀），用于权限控制；群管理员判断用 `msg.Sender.Role`
 - 返回 `false` 阻断传播——消息不会继续走到 AI 对话插件
 - `p.Logger` 是带插件名 group 的结构化日志，正式插件应使用它而不是 `fmt.Println`
 

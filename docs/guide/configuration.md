@@ -32,7 +32,7 @@ AniaBot 的全部配置存储在**数据库**中（持久化存储的 `ania_kv` 
 | `bot.adapter.ws.address` | `ANIA_BOT_ADAPTER_WS_ADDRESS` |
 | `plugin.ai_chat_bot.api_key` | `ANIA_PLUGIN_AI_CHAT_BOT_API_KEY` |
 
-非字符串类型（int / bool / 数组等）按 JSON 解析，如 `ANIA_BOT_ADMIN_ID=qq:123456789`。覆盖生效时启动日志会打印 `环境变量覆盖配置 key=...`。
+非字符串类型（int / bool / 数组等）按 JSON 解析，如 `ANIA_BOT_MSG_EVENT_TIMEOUT_SEC=600`。覆盖生效时启动日志会打印 `环境变量覆盖配置 key=...`。
 
 ::: tip 典型用途：恢复被关闭的面板
 如果在面板中误将 `bot.admin_panel.enable` 关闭导致面板无法访问，可用 `ANIA_BOT_ADMIN_PANEL_ENABLE=true` 启动临时拉起面板，改回后再正常启动。详见 [Web 控制面板](/guide/web-panel#启用与访问)。
@@ -42,11 +42,11 @@ AniaBot 的全部配置存储在**数据库**中（持久化存储的 `ania_kv` 
 
 面板位置：**配置编辑 → Bot 配置**
 
-### admin_id —— 管理员
+### admin_ids —— 管理员
 
 | 配置键 | 默认值 | 说明 |
 | --- | --- | --- |
-| `bot.admin_id` | `qq:123456789` | 管理员 ID。QQ 为 `qq:QQ号`（如 `qq:123456789`），其他平台为带前缀的 ID（如飞书 `fs:ou_xxx`）。拥有最高权限：远程 `/exit` 退出、强制执行定时推送、查看全部定时任务、接收 panic 告警与启动通知等 |
+| `bot.admin_ids` | 空 | 管理员 ID 列表（每行一个，**可配置多个**）。QQ 为 `qq:QQ号`（如 `qq:123456789`），其他平台为带前缀的 ID（如飞书 `fs:ou_xxx`）。任一管理员均拥有最高权限：远程 `/exit` 退出、强制执行定时推送、查看全部定时任务、接收 panic 告警与启动通知、审批 AI 配置修改等。旧版单值键 `bot.admin_id` 会在启动时自动迁移为列表 |
 | `bot.msg_event_timeout_sec` | `300` | 单条消息事件（如一次 AI 回复）的最大执行时长（秒），超时强制中止。AI 执行复杂任务（多轮工具调用/子代理）被超时中断时调大 |
 
 ### admin_panel —— Web 控制面板

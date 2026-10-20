@@ -22,6 +22,7 @@ func TestMigrateQQIDPrefixKV(t *testing.T) {
 		ns, key, val string
 	}{
 		{"__config:", "bot.admin_id", `"123"`},
+		{"__config:", "bot.admin_ids", `["123","456"]`},
 		{"__config:", "plugin.dailynews.groups", `["123","456"]`},
 		{"__config:", "plugin.custom.groups", `[123,456]`},
 		{"__config:", "plugin.interceptor.group_users", `["123:456"]`},
@@ -62,6 +63,7 @@ func TestMigrateQQIDPrefixKV(t *testing.T) {
 	}
 
 	check("__config:", "bot.admin_id", `"qq:123"`)
+	check("__config:", "bot.admin_ids", `["qq:123","qq:456"]`)
 	check("__config:", "plugin.dailynews.groups", `["qq:123","qq:456"]`)
 	check("__config:", "plugin.custom.groups", `["qq:123","qq:456"]`)
 	check("__config:", "plugin.interceptor.group_users", `["qq:123:qq:456"]`)

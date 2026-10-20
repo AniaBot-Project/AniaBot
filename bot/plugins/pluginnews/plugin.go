@@ -93,7 +93,7 @@ func (p *NewsPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command.C
 	if !p.cfg.Enable {
 		return true, nil
 	}
-	if msg.Sender.UserId == p.SystemConfig.AdminId && cmd.Name == "news" && len(cmd.Args) > 0 && cmd.Args[0] == "force" {
+	if p.SystemConfig.IsAdmin(msg.Sender.UserId) && cmd.Name == "news" && len(cmd.Args) > 0 && cmd.Args[0] == "force" {
 		p.sendNews(bot)
 		return false, nil
 	}

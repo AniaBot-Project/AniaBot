@@ -118,7 +118,7 @@
       "time": "2026-10-08T15:31:49.9680563+08:00",
       "category": "config",
       "action": "config_update",
-      "detail": "面板更新配置（7 项）: bot.admin_id, bot.marketplace.enable, plugin.ai_chat_bot.api_key, plugin.ai_chat_bot.multimodal, plugin.ai_chat_bot.quota.daily_tokens, plugin.ai_chat_bot.quota.enable, plugin.ai_chat_bot.quota.global_daily_tokens"
+      "detail": "面板更新配置（7 项）: bot.admin_ids, bot.marketplace.enable, plugin.ai_chat_bot.api_key, plugin.ai_chat_bot.multimodal, plugin.ai_chat_bot.quota.daily_tokens, plugin.ai_chat_bot.quota.enable, plugin.ai_chat_bot.quota.global_daily_tokens"
     },
     {
       "id": "3",

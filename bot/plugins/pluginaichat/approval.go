@@ -15,8 +15,9 @@ import (
 // 工具审批：危险工具（默认 file，bash 另有命令级审批）执行前向会话
 // 发送确认消息，由请求发送者或机器人管理员回复「允许/拒绝」授权；超时自动拒绝。
 // 配置修改类工具（adminApprovalTools）为管理员审批：requester 强制为 0，
-// 仅管理员可批，且与 approval.enable 开关无关——启用配置管理工具即生效；
-// 审批提示优先直接私聊发给管理员（requestAdminOnly），管理员在私聊中回复。
+// 仅管理员可批（bot.admin_ids 可配置多个，任一管理员均可），且与 approval.enable
+// 开关无关——启用配置管理工具即生效；审批提示优先直接私聊发给全部管理员
+// （requestAdminOnly），任一管理员在私聊中回复即可。
 
 // approvalVerdict 审批结论（含操作者，供审计）
 type approvalVerdict struct {
@@ -36,16 +37,16 @@ type approvalRequest struct {
 type approvalManager struct {
 	tools   map[string]struct{} // 需审批的工具名（工具级门）
 	timeout time.Duration
-	admin   message.QID
+	admins  []message.QID // 管理员 ID（可配置多个，任一人均可批准；空表示未配置）
 	logger  *slog.Logger
 
 	mu           sync.Mutex
 	pending      map[string]*approvalRequest // sessionKey → 当前待批
-	adminPending map[string]*approvalRequest // 管理员私聊会话键 → 正在等待管理员确认的请求（requestAdminOnly 登记）
+	adminPending map[string]*approvalRequest // 管理员私聊会话键 → 正在等待管理员确认的请求（requestAdminOnly 登记，每个管理员各登记一份）
 	locks        sync.Map                    // sessionKey → *sync.Mutex：同会话多个审批串行（并行工具调用逐个提示，不并发刷屏）
 }
 
-func newApprovalManager(tools []string, timeoutSec int, admin message.QID, logger *slog.Logger) *approvalManager {
+func newApprovalManager(tools []string, timeoutSec int, admins []message.QID, logger *slog.Logger) *approvalManager {
 	set := make(map[string]struct{}, len(tools))
 	for _, t := range tools {
 		if t = strings.TrimSpace(t); t != "" {
@@ -54,14 +55,53 @@ func newApprovalManager(tools []string, timeoutSec int, admin message.QID, logge
 	}
 	// 限幅：过短会来不及回复，过长会吃光消息处理预算（bot.msg_event_timeout_sec）
 	timeoutSec = min(max(timeoutSec, 10), 240)
+	valid := make([]message.QID, 0, len(admins))
+	for _, admin := range admins {
+		if adminIDValid(admin) {
+			valid = append(valid, admin)
+		}
+	}
 	return &approvalManager{
 		tools:        set,
 		timeout:      time.Duration(timeoutSec) * time.Second,
-		admin:        admin,
+		admins:       valid,
 		logger:       logger,
 		pending:      make(map[string]*approvalRequest),
 		adminPending: make(map[string]*approvalRequest),
 	}
+}
+
+// adminIDValid 管理员 ID 是否有效：空值与占位 0（qq:0）都视为未配置。
+func adminIDValid(id message.QID) bool {
+	return id != "" && id != message.FromUint64(0)
+}
+
+// isAdmin 判断 ID 是否为已配置的管理员。
+func (m *approvalManager) isAdmin(id message.QID) bool {
+	if !adminIDValid(id) {
+		return false
+	}
+	for _, admin := range m.admins {
+		if admin == id {
+			return true
+		}
+	}
+	return false
+}
+
+// adminSessionKeys 全部管理员的私聊会话键（去重）。
+func (m *approvalManager) adminSessionKeys() []string {
+	keys := make([]string, 0, len(m.admins))
+	seen := make(map[string]struct{}, len(m.admins))
+	for _, admin := range m.admins {
+		key := sessionKey(admin, false)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 func (m *approvalManager) needsApproval(tool string) bool {
@@ -165,9 +205,10 @@ func (m *approvalManager) tryHandleReply(id message.QID, isGroup bool, sender me
 	sKey := sessionKey(id, isGroup)
 	m.mu.Lock()
 	req, ok := m.pending[sKey]
-	if !ok && sender == m.admin && sKey == adminSessionKey(m.admin) {
-		// 管理员在其私聊中回复：按索引查找等待管理员确认的请求
-		req, ok = m.adminPending[adminSessionKey(m.admin)]
+	if !ok && m.isAdmin(sender) && sKey == sessionKey(sender, false) {
+		// 管理员在其私聊中回复：按索引查找等待管理员确认的请求（多个管理员
+		// 各自私聊键都指向同一待批请求，任一管理员回复即可）
+		req, ok = m.adminPending[sKey]
 	}
 	m.mu.Unlock()
 	if !ok {
@@ -177,7 +218,7 @@ func (m *approvalManager) tryHandleReply(id message.QID, isGroup bool, sender me
 	if !isReply {
 		return false, ""
 	}
-	if sender != req.requester && sender != m.admin {
+	if sender != req.requester && !m.isAdmin(sender) {
 		// 无权发送者的审批回复：消费掉并提示，避免落入正常聊天流程让 AI 误答
 		if req.requester == message.FromUint64(0) {
 			return true, "该操作需要管理员审批，只有管理员可以回复「允许/拒绝」"
@@ -199,30 +240,30 @@ func (m *approvalManager) tryHandleReply(id message.QID, isGroup bool, sender me
 	return true, ""
 }
 
-// adminSessionKey 管理员私聊会话键；管理员 ID 未设置时为空。
-func adminSessionKey(admin message.QID) string {
-	if admin == message.FromUint64(0) {
-		return ""
-	}
-	return sessionKey(admin, false)
-}
+// adminApprovalLockKey 管理员审批腿的全局串行锁键（与消息会话键空间区分）。
+const adminApprovalLockKey = "\x00admin-approval"
 
 // requestAdminOnly 发起配置修改类工具的审批（仅管理员可批）：提示优先直接
-// 私聊发给管理员，管理员在私聊中回复「允许/拒绝」（管理员在发起会话中的回复
-// 同样有效，因待批请求同时登记在发起会话键下）；管理员 ID 未设置、发起会话
-// 即管理员私聊、或私聊发送失败时，提示改发到发起会话。
-// sendAdminPrompt 把提示发给管理员私聊并返回是否成功（nil 视为无管理员通道）；
-// sendOriginPrompt 在发起会话发送提示/通知。originSKey 用于审计与发起会话的
-// 回复识别。
+// 私聊发给全部管理员，任一管理员在私聊中回复「允许/拒绝」即可（管理员在发起
+// 会话中的回复同样有效，因待批请求同时登记在发起会话键下）；未配置管理员、
+// 发起会话即某个管理员私聊、或全部私聊发送失败时，提示改发到发起会话。
+// sendAdminPrompt 把提示发给全部管理员私聊并返回是否至少有一处成功（nil 视为
+// 无管理员通道）；sendOriginPrompt 在发起会话发送提示/通知。originSKey 用于
+// 审计与发起会话的回复识别。
 func (m *approvalManager) requestAdminOnly(ctx context.Context, originSKey, tool, summary string, sendAdminPrompt func(text string) bool, sendOriginPrompt func(text string)) (bool, string) {
-	adminSKey := adminSessionKey(m.admin)
-	if sendAdminPrompt == nil || adminSKey == "" || adminSKey == originSKey {
+	adminKeys := make([]string, 0, len(m.admins))
+	for _, key := range m.adminSessionKeys() {
+		if key != originSKey {
+			adminKeys = append(adminKeys, key)
+		}
+	}
+	if sendAdminPrompt == nil || len(adminKeys) == 0 {
 		return m.request(ctx, originSKey, tool, summary, message.FromUint64(0), sendOriginPrompt)
 	}
 
-	// 锁顺序固定为 管理员私聊会话 → 发起会话：多个会话并发发起的管理员审批
-	// 按序逐个提示；与发起会话锁同取可避免同会话并行工具调用覆盖待批登记
-	lockAny, _ := m.locks.LoadOrStore(adminSKey, &sync.Mutex{})
+	// 锁顺序固定为 管理员审批腿 → 发起会话：多个会话并发发起的管理员审批
+	// 逐个提示；与发起会话锁同取可避免同会话并行工具调用覆盖待批登记
+	lockAny, _ := m.locks.LoadOrStore(adminApprovalLockKey, &sync.Mutex{})
 	lock := lockAny.(*sync.Mutex)
 	lock.Lock()
 	defer lock.Unlock()
@@ -238,16 +279,20 @@ func (m *approvalManager) requestAdminOnly(ctx context.Context, originSKey, tool
 	}
 
 	// 待批请求登记在发起会话键（管理员在发起会话回复也可批），
-	// 另在管理员私聊键登记索引（管理员私聊回复时查找）
+	// 另在各管理员私聊键登记索引（任一管理员私聊回复时查找）
 	req := &approvalRequest{tool: tool, summary: summary, requester: message.FromUint64(0), resultCh: make(chan approvalVerdict, 1)}
 	m.mu.Lock()
 	m.pending[originSKey] = req
-	m.adminPending[adminSKey] = req
+	for _, key := range adminKeys {
+		m.adminPending[key] = req
+	}
 	m.mu.Unlock()
 	defer func() {
 		m.mu.Lock()
-		if cur, ok := m.adminPending[adminSKey]; ok && cur == req {
-			delete(m.adminPending, adminSKey)
+		for _, key := range adminKeys {
+			if cur, ok := m.adminPending[key]; ok && cur == req {
+				delete(m.adminPending, key)
+			}
 		}
 		if cur, ok := m.pending[originSKey]; ok && cur == req {
 			delete(m.pending, originSKey)
@@ -257,17 +302,19 @@ func (m *approvalManager) requestAdminOnly(ctx context.Context, originSKey, tool
 
 	prompt := m.formatPrompt(tool, summary, message.FromUint64(0), wait)
 	if !sendAdminPrompt(prompt) {
-		// 管理员私聊发送失败（如未加好友）：改在发起会话提示，等待管理员在该会话回复
+		// 管理员私聊全部发送失败（如未加好友）：改在发起会话提示，等待管理员在该会话回复
 		m.mu.Lock()
-		if cur, ok := m.adminPending[adminSKey]; ok && cur == req {
-			delete(m.adminPending, adminSKey)
+		for _, key := range adminKeys {
+			if cur, ok := m.adminPending[key]; ok && cur == req {
+				delete(m.adminPending, key)
+			}
 		}
 		m.mu.Unlock()
 		sendOriginPrompt(prompt)
 	} else {
 		sendOriginPrompt(fmt.Sprintf("「%s」需要管理员审批，已通知管理员；仅管理员可批准，操作会在管理员确认后执行（超时自动拒绝）", tool))
 	}
-	m.logger.Info("发起管理员审批", "session", originSKey, "tool", tool)
+	m.logger.Info("发起管理员审批", "session", originSKey, "tool", tool, "admins", len(m.admins))
 
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
@@ -298,7 +345,7 @@ func (m *approvalManager) formatPrompt(tool, summary string, requester message.Q
 		sb.WriteString("\n参数摘要：" + summary)
 	}
 	if requester == message.FromUint64(0) {
-		fmt.Fprintf(&sb, "\n请管理员在 %d 秒内回复「允许」或「拒绝」（超时自动拒绝）", waitSeconds(wait))
+		fmt.Fprintf(&sb, "\n请管理员（任一即可）在 %d 秒内回复「允许」或「拒绝」（超时自动拒绝）", waitSeconds(wait))
 	} else {
 		fmt.Fprintf(&sb, "\n请消息发送者（%s）或管理员在 %d 秒内回复「允许」或「拒绝」（超时自动拒绝）",
 			requester.String(), waitSeconds(wait))

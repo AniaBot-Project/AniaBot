@@ -141,8 +141,20 @@ func (s *Store) ApplyPreset(name string) (int, error) {
 	if !ok {
 		return 0, fmt.Errorf("预设不存在: %s", name)
 	}
-	n := 0
+	cfg := make(map[string]any, len(p.Config))
 	for k, v := range p.Config {
+		cfg[k] = v
+	}
+	// 兼容旧版预设：快照里的单管理员键 bot.admin_id 转换为列表键 bot.admin_ids
+	// （快照已含列表键时以列表为准，丢弃旧键）。
+	if legacy, ok := cfg[LegacyAdminIDKey]; ok {
+		delete(cfg, LegacyAdminIDKey)
+		if _, hasList := cfg[AdminIDsKey]; !hasList {
+			cfg[AdminIDsKey] = legacyAdminIDs(legacy)
+		}
+	}
+	n := 0
+	for k, v := range cfg {
 		if k == "bot.admin_panel.listen" {
 			if str, isStr := v.(string); !isStr || str == "" {
 				continue

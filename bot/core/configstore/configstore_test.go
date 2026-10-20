@@ -116,8 +116,8 @@ func TestSeedDefaults(t *testing.T) {
 	if !v.GetBool("bot.admin_panel.enable") {
 		t.Fatal("bot.admin_panel.enable should default to true")
 	}
-	if v.IsSet("bot.admin_id") {
-		t.Fatal("admin_id 为空时不应被写入（IsSet 语义）")
+	if v.IsSet("bot.admin_ids") {
+		t.Fatal("admin_ids 为空时不应被写入（IsSet 语义）")
 	}
 	// 全新安装应标记待完成设置向导
 	if !s.SetupPending() {

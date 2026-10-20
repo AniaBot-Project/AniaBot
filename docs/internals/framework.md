@@ -302,7 +302,7 @@ AddPlugin() → 按 Order 排序
 | `PersistentStorage` | `storage.PersistentStorage` | 持久化 KV，同样按插件名隔离 |
 | `RestyClient` | `*resty.Client` | HTTP 客户端 |
 | `Logger` | `*slog.Logger` | 结构化日志（已带插件名 group） |
-| `SystemConfig` | `plugin.SystemConfig` | 管理员 ID 等系统级配置 |
+| `SystemConfig` | `plugin.SystemConfig` | 管理员列表等系统级配置（`AdminIds`；权限判断用 `IsAdmin`） |
 | `ConfigEditor` | `plugin.ConfigEditor` | 配置中心读写（可能为 nil，需判空） |
 
 注入实现是 `Meta.SetStorage(...)` 等 setter；`ConfigSchema()` / `ConfigFields()` 在 DI **之前**被调用（纯元信息声明，实现不得依赖注入字段，且必须每次返回同一指针）。

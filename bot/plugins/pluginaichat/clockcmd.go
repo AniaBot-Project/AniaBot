@@ -40,7 +40,7 @@ func (p *AIChatPlugin) handleClockCommand(ctx context.Context, b bot.Bot, cmd co
 		targetType = clockTargetGroup
 		targetID = msg.GroupId.String()
 	}
-	isAdmin := msg.Sender.UserId == p.SystemConfig.AdminId
+	isAdmin := p.SystemConfig.IsAdmin(msg.Sender.UserId)
 
 	sub := ""
 	if len(cmd.Args) > 0 {

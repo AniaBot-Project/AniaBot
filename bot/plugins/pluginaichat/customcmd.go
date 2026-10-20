@@ -283,7 +283,7 @@ func (p *AIChatPlugin) handleCmdCommand(ctx context.Context, b bot.Bot, cmd comm
 		}
 		p.sendPlainText(b, id, isGroup, strings.TrimRight(sb.String(), "\n"))
 	case "add":
-		if msg.Sender.UserId != p.SystemConfig.AdminId {
+		if !p.SystemConfig.IsAdmin(msg.Sender.UserId) {
 			p.sendPlainText(b, id, isGroup, "仅管理员可添加自定义命令")
 			return false, nil
 		}
@@ -299,7 +299,7 @@ func (p *AIChatPlugin) handleCmdCommand(ctx context.Context, b bot.Bot, cmd comm
 		}
 		p.sendPlainText(b, id, isGroup, "已添加自定义命令 /"+strings.ToLower(name))
 	case "del", "delete", "rm":
-		if msg.Sender.UserId != p.SystemConfig.AdminId {
+		if !p.SystemConfig.IsAdmin(msg.Sender.UserId) {
 			p.sendPlainText(b, id, isGroup, "仅管理员可删除自定义命令")
 			return false, nil
 		}

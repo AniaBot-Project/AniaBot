@@ -121,7 +121,7 @@ type UnloadEvent interface {
 | `PersistentStorage` | `storage.PersistentStorage` | 持久化 KV 存储，已按插件名隔离 |
 | `RestyClient` | `*resty.Client` | HTTP 客户端 |
 | `Logger` | `*slog.Logger` | 结构化日志 |
-| `SystemConfig` | `SystemConfig` | 系统级配置（如 `AdminId`） |
+| `SystemConfig` | `SystemConfig` | 系统级配置（`AdminIds` 管理员列表 / `AdminId` 首位管理员，权限判断用 `IsAdmin`） |
 
 ## 事件一览
 
