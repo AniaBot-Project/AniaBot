@@ -510,6 +510,15 @@ X-Proxy-Route: team-a
 
 详见 [请求拦截插件](/guide/builtin-plugins#请求拦截插件)。
 
+## plugin.repeat —— 复读机插件
+
+| 配置键 | 默认值 | 说明 |
+| --- | --- | --- |
+| `plugin.repeat.enable` | `true` | 是否启用复读机，关闭后不再自动跟读；`/close repeat`、`/enable repeat` 命令会同步写回该键，重启后保持 |
+| `plugin.repeat.trigger_count` | `3` | 同一条消息连续出现多少条时跟读一次；小于 `2` 按 `2` 处理 |
+
+配置改动重启后生效。详见 [复读机插件](/guide/builtin-plugins#复读机插件)。
+
 ## plugin.dailyNews —— 每日新闻插件
 
 | 配置键 | 默认值 | 说明 |
