@@ -5,16 +5,16 @@ package pluginaichat
 // 用法：
 //
 //	/proactive                查看本会话状态
-//	/proactive on             开启本会话的主动互动（管理员）
-//	/proactive off            关闭本会话（管理员）
-//	/proactive auto           取消本会话的单独开关，回到面板配置的白名单（管理员）
+//	/proactive on             开启本会话的主动互动，并写回配置白名单（管理员）
+//	/proactive off            关闭本会话，并从白名单中移除（管理员）
+//	/proactive reload         从配置中心重新读取白名单（面板改完不必重启，管理员）
 //	/proactive now [想说的话]  立即触发一次，跳过时段/间隔/上限等时间类闸门（管理员，用于调试）
 //	/proactive list           列出所有启用主动互动的会话（管理员）
 //	/proactive log [n]        查看本会话最近的主动发言记录（管理员）
 //	/proactive help           查看帮助
 //
-// 开关写入持久化存储（proactive: 命名空间），立即生效并跨重启保留；
-// 面板配置里的白名单作为「auto」时的默认值，两者互不覆盖。
+// 开关直接改写配置项 plugin.ai_chat_bot.proactive.scopes：面板即时可见、重启后
+// 保留，与面板手动编辑的是同一份名单，不存在另一份隐藏的状态。
 
 import (
 	"context"
@@ -55,17 +55,32 @@ func (p *AIChatPlugin) handleProactiveCommand(_ context.Context, b bot.Bot, cmd 
 	switch sub {
 	case "", "status":
 		p.sendPlainText(b, id, isGroup, p.proactiveManager.statusText(scope, isGroup))
-	case "on", "off", "auto":
+	case "on", "off":
 		if !isAdmin {
 			p.sendPlainText(b, id, isGroup, "只有管理员可以修改主动互动开关")
 			return false, nil
 		}
-		state := sub
-		if state == "auto" {
-			state = ""
+		changed, persisted := p.proactiveManager.setScopeEnabled(scope, sub == "on")
+		msg := p.proactiveManager.statusText(scope, isGroup)
+		switch {
+		case !persisted:
+			msg += "\n注意：配置中心不可用，本次改动只对当前运行生效。"
+		case changed:
+			msg += "\n已写入配置项 plugin.ai_chat_bot.proactive.scopes，面板刷新即可看到。"
 		}
-		p.proactiveManager.setScopeState(scope, state)
-		p.sendPlainText(b, id, isGroup, p.proactiveManager.statusText(scope, isGroup))
+		p.sendPlainText(b, id, isGroup, msg)
+	case "auto", "reload":
+		if !isAdmin {
+			p.sendPlainText(b, id, isGroup, "只有管理员可以重新加载白名单")
+			return false, nil
+		}
+		n, ok := p.proactiveManager.reloadScopes()
+		if !ok {
+			p.sendPlainText(b, id, isGroup, "配置中心不可用，无法从配置重新加载白名单")
+			return false, nil
+		}
+		p.sendPlainText(b, id, isGroup, fmt.Sprintf("已从配置中心重新加载白名单（共 %d 个会话）。\n%s",
+			n, p.proactiveManager.statusText(scope, isGroup)))
 	case "now":
 		if !isAdmin {
 			p.sendPlainText(b, id, isGroup, "只有管理员可以手动触发主动发言")
@@ -105,20 +120,13 @@ func (m *proactiveManager) statusText(scope string, isGroup bool) string {
 		scene = "群聊"
 	}
 	state := m.scopeState(scope)
-	enabled := m.enabled(scope)
+	enabled := state == proactiveScopeOn
 
 	var mode string
-	switch state {
-	case proactiveScopeOn:
-		mode = "已启用（/proactive on）"
-	case proactiveScopeOff:
-		mode = "已关闭（/proactive off）"
-	default:
-		if enabled {
-			mode = "已启用（面板配置白名单）"
-		} else {
-			mode = "未启用（不在白名单内）"
-		}
+	if enabled {
+		mode = "已启用（在配置白名单内）"
+	} else {
+		mode = "未启用（不在配置白名单内）"
 	}
 
 	today := m.store.countSentSince(scope, startOfDay(time.Now()))
@@ -180,21 +188,10 @@ func (m *proactiveManager) listText() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("已启用主动互动的会话（共 %d 个）：\n", len(scopes)))
 	for _, scope := range scopes {
-		state := m.scopeState(scope)
-		tag := "配置"
-		switch state {
-		case proactiveScopeOn:
-			tag = "指令开启"
-		case proactiveScopeOff:
-			tag = "指令关闭"
-		}
 		sb.WriteString("- ")
 		sb.WriteString(scope)
-		sb.WriteString("（")
-		sb.WriteString(tag)
-		sb.WriteString("）")
 		if n := len(m.store.pendingByScope(scope)); n > 0 {
-			sb.WriteString(fmt.Sprintf("，待执行 %d 条", n))
+			sb.WriteString(fmt.Sprintf("（待执行 %d 条）", n))
 		}
 		sb.WriteString("\n")
 	}
@@ -263,8 +260,8 @@ func proactiveHelpText(isAdmin bool) string {
 	sb.WriteString("主动互动：让 AI 在合适的时候主动开口（默认关闭，按会话启用）\n")
 	sb.WriteString("/proactive —— 查看本会话状态\n")
 	if isAdmin {
-		sb.WriteString("/proactive on|off —— 开启/关闭本会话的主动互动\n")
-		sb.WriteString("/proactive auto —— 取消单独开关，回到面板配置的白名单\n")
+		sb.WriteString("/proactive on|off —— 开启/关闭本会话（直接改写面板里的白名单）\n")
+		sb.WriteString("/proactive reload —— 从配置中心重新读取白名单（面板改完不必重启）\n")
 		sb.WriteString("/proactive now [想说的话] —— 立即触发一次（调试用，跳过时段/间隔/上限限制）\n")
 		sb.WriteString("/proactive list —— 列出所有启用主动互动的会话\n")
 		sb.WriteString("/proactive log [n] —— 查看本会话最近的主动发言记录（默认 10 条）\n")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -39,7 +40,6 @@ func newTestProactiveManager(t *testing.T) *proactiveManager {
 		logger:      testLogger(),
 		store:       newTestIntentionStore(t),
 		scopes:      map[string]*scopeActivity{},
-		overrides:   map[string]string{},
 		lastIdle:    map[string]time.Time{},
 		running:     map[string]struct{}{},
 		awaiting:    map[string]struct{}{},
@@ -317,40 +317,148 @@ func TestIntentionStorePrune(t *testing.T) {
 
 // ---- 会话开关 ----
 
-func TestScopeOverridePrecedence(t *testing.T) {
+// stubConfigEditor 测试用配置中心：内存键值 + 写入计数。
+type stubConfigEditor struct {
+	mu   sync.Mutex
+	vals map[string]any
+	sets int
+}
+
+func newStubConfigEditor() *stubConfigEditor {
+	return &stubConfigEditor{vals: map[string]any{}}
+}
+
+func (s *stubConfigEditor) Get(key string) (any, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.vals[key]
+	return v, ok
+}
+
+func (s *stubConfigEditor) Set(key string, val any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.vals[key] = val
+	s.sets++
+	return nil
+}
+
+func (s *stubConfigEditor) Delete(key string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.vals[key]; !ok {
+		return false
+	}
+	delete(s.vals, key)
+	return true
+}
+
+func (s *stubConfigEditor) All() map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]any, len(s.vals))
+	for k, v := range s.vals {
+		out[k] = v
+	}
+	return out
+}
+
+func (s *stubConfigEditor) scopes(t *testing.T) []string {
+	t.Helper()
+	raw, _ := s.Get(proactiveScopesKey)
+	return toStringSlice(raw)
+}
+
+// TestSetScopeEnabledWritesThrough /proactive on|off 要直接改写配置白名单，
+// 面板才能看到；不能只改内存或藏到另一个命名空间里。
+func TestSetScopeEnabledWritesThrough(t *testing.T) {
 	m := newTestProactiveManager(t)
-	m.baseScopes["g:1"] = struct{}{}
+	editor := newStubConfigEditor()
+	editor.vals[proactiveScopesKey] = []any{"g:1"}
+	m.plugin = &AIChatPlugin{}
+	m.plugin.ConfigEditor = editor
+	m.applyScopes([]string{"g:1"})
 
-	if !m.enabled("g:1") {
-		t.Fatal("白名单内会话应默认启用")
+	changed, persisted := m.setScopeEnabled("g:2", true)
+	if !changed || !persisted {
+		t.Fatalf("开启应同时改内存与落盘, changed=%v persisted=%v", changed, persisted)
 	}
-	if m.enabled("g:2") {
-		t.Fatal("白名单外会话不应启用")
-	}
-
-	// 指令关闭优先于白名单；开启优先于「不在白名单」
-	m.setScopeState("g:1", proactiveScopeOff)
-	if m.enabled("g:1") {
-		t.Fatal("off 应覆盖白名单")
-	}
-	m.setScopeState("g:2", proactiveScopeOn)
 	if !m.enabled("g:2") {
-		t.Fatal("on 应对白名单外会话生效")
+		t.Fatal("开启后应立即可用")
+	}
+	if got := editor.scopes(t); len(got) != 2 || !containsString(got, "g:1") || !containsString(got, "g:2") {
+		t.Fatalf("配置白名单 = %#v, want [g:1 g:2]", got)
+	}
+	if len(m.plugin.cfg.Proactive.Scopes) != 2 {
+		t.Fatalf("插件配置结构体未同步: %#v", m.plugin.cfg.Proactive.Scopes)
 	}
 
-	scopes := m.enabledScopes()
-	if len(scopes) != 1 || scopes[0] != "g:2" {
-		t.Fatalf("enabledScopes = %#v, want [g:2]", scopes)
+	// 重复开启不应重复写入
+	sets := editor.sets
+	if changed, _ := m.setScopeEnabled("g:2", true); changed {
+		t.Fatal("重复开启不应报告变更")
+	}
+	if editor.sets != sets {
+		t.Fatal("重复开启不应写配置")
 	}
 
-	// auto 清空覆盖，回到白名单
-	m.setScopeState("g:1", "")
-	m.setScopeState("g:2", "")
-	if !m.enabled("g:1") || m.scopeState("g:1") != "auto" {
-		t.Fatal("auto 应回到白名单默认值")
+	// 关闭 = 从白名单移除
+	changed, persisted = m.setScopeEnabled("g:1", false)
+	if !changed || !persisted || m.enabled("g:1") {
+		t.Fatalf("关闭失败: changed=%v persisted=%v enabled=%v", changed, persisted, m.enabled("g:1"))
 	}
-	if m.enabled("g:2") {
-		t.Fatal("g:2 清空覆盖后应回到未启用")
+	if got := editor.scopes(t); len(got) != 1 || got[0] != "g:2" {
+		t.Fatalf("关闭后白名单 = %#v, want [g:2]", got)
+	}
+}
+
+// TestSetScopeEnabledKeepsPanelEdits 回写前要重读配置，不能拿启动时的旧名单
+// 覆盖管理员刚在面板里手动加的其他会话。
+func TestSetScopeEnabledKeepsPanelEdits(t *testing.T) {
+	m := newTestProactiveManager(t)
+	editor := newStubConfigEditor()
+	editor.vals[proactiveScopesKey] = []any{"g:1"}
+	m.plugin = &AIChatPlugin{}
+	m.plugin.ConfigEditor = editor
+	m.applyScopes([]string{"g:1"})
+
+	// 模拟管理员在面板里又加了一个群（插件内存未刷新）
+	editor.vals[proactiveScopesKey] = []any{"g:1", "g:9"}
+
+	if _, persisted := m.setScopeEnabled("g:2", true); !persisted {
+		t.Fatal("回写应成功")
+	}
+	if got := editor.scopes(t); len(got) != 3 {
+		t.Fatalf("面板编辑被覆盖: %#v", got)
+	}
+}
+
+// TestReloadScopes 面板改完可用 /proactive reload 热加载，不必重启。
+func TestReloadScopes(t *testing.T) {
+	m := newTestProactiveManager(t)
+	editor := newStubConfigEditor()
+	editor.vals[proactiveScopesKey] = []any{"g:9", "bad-scope", "g:9"}
+	m.plugin = &AIChatPlugin{}
+	m.plugin.ConfigEditor = editor
+
+	n, ok := m.reloadScopes()
+	if !ok || n != 1 {
+		t.Fatalf("reload = %d/%v, want 1/true（非法项与重复项应被丢弃）", n, ok)
+	}
+	if !m.enabled("g:9") || m.enabled("g:1") {
+		t.Fatal("reload 后白名单不正确")
+	}
+}
+
+// TestSetScopeEnabledWithoutEditor 配置中心不可用时仍可临时开关，但要告知未落盘。
+func TestSetScopeEnabledWithoutEditor(t *testing.T) {
+	m := newTestProactiveManager(t)
+	changed, persisted := m.setScopeEnabled("g:1", true)
+	if !changed || persisted {
+		t.Fatalf("无配置中心时应 changed=true persisted=false, got %v/%v", changed, persisted)
+	}
+	if !m.enabled("g:1") {
+		t.Fatal("无配置中心时也应本次运行生效")
 	}
 }
 

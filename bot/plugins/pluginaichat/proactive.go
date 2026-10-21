@@ -22,8 +22,6 @@ package pluginaichat
 // 白名单启用（配置项 proactive.scopes，或管理员发送 /proactive on）。
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
@@ -61,15 +59,14 @@ const (
 	proactiveOutcomeIgnored = "ignored" // 观察窗口内无人回应
 )
 
-// 会话开关状态（overrides 的取值，缺省表示继承配置里的白名单）。
+// 会话开关状态。
 const (
 	proactiveScopeOn  = "on"
 	proactiveScopeOff = "off"
 )
 
 const (
-	proactiveKeyPrefix   = "proactive:" // 会话开关覆盖的持久化命名空间
-	proactiveOverrideKey = "overrides"  // 命名空间下的会话开关 JSON
+	proactiveScopesKey = "plugin.ai_chat_bot.proactive.scopes"
 
 	// proactiveDefaultTick 调度间隔：一分钟一轮，单轮开销只有几条 SQL。
 	proactiveDefaultTick = time.Minute
@@ -179,7 +176,6 @@ type proactiveManager struct {
 	plugin *AIChatPlugin
 	logger *slog.Logger
 	store  *intentionStore
-	kv     storage.PersistentStorage // 会话开关覆盖持久化
 
 	idle        time.Duration // 冷场阈值，<=0 表示不按冷场触发
 	minGap      time.Duration // 两次主动发言的最小间隔
@@ -198,12 +194,13 @@ type proactiveManager struct {
 	maxContext  int
 	baseScopes  map[string]struct{}
 
-	mu        sync.Mutex
-	overrides map[string]string // scope -> on/off，缺省继承 baseScopes
-	scopes    map[string]*scopeActivity
-	lastIdle  map[string]time.Time // scope -> 已为其生成过冷场意图的 lastHumanAt
-	running   map[string]struct{}  // 正在执行的意图 ID
-	awaiting  map[string]struct{}  // 有待观察回应的 scope
+	// opMu 串行化会话开关的读-改-写（不持 m.mu，避免配置中心 I/O 阻塞消息处理）
+	opMu     sync.Mutex
+	mu       sync.Mutex
+	scopes   map[string]*scopeActivity
+	lastIdle map[string]time.Time // scope -> 已为其生成过冷场意图的 lastHumanAt
+	running  map[string]struct{}  // 正在执行的意图 ID
+	awaiting map[string]struct{}  // 有待观察回应的 scope
 
 	bot  bot.Bot
 	stop chan struct{}
@@ -235,7 +232,6 @@ func newProactiveManager(p *AIChatPlugin) *proactiveManager {
 		logger:      logger,
 		store:       store,
 		scopes:      map[string]*scopeActivity{},
-		overrides:   map[string]string{},
 		lastIdle:    map[string]time.Time{},
 		running:     map[string]struct{}{},
 		awaiting:    map[string]struct{}{},
@@ -283,24 +279,14 @@ func newProactiveManager(p *AIChatPlugin) *proactiveManager {
 		p.Logger.Warn("免打扰时段格式无法解析，按不启用处理", "value", cfg.QuietHours)
 	}
 
-	// 会话白名单：格式 g:会话ID / f:用户ID（与记忆、知识库的 scope 一致）
-	for _, raw := range cfg.Scopes {
-		scope := strings.TrimSpace(raw)
-		if scope == "" {
-			continue
-		}
-		if _, _, ok := parseScope(scope); !ok {
-			p.Logger.Warn("主动互动会话白名单条目格式非法，已跳过（应为 g:群ID 或 f:用户ID）",
-				"value", raw)
-			continue
-		}
+	// 会话白名单：格式 g:会话ID / f:用户ID（与记忆、知识库的 scope 一致）。
+	// 运行时以内存集合为准，/proactive on|off 会同步回写配置中心（见 setScopeEnabled）。
+	scopes := normalizeScopes(cfg.Scopes, p.Logger)
+	m.baseScopes = make(map[string]struct{}, len(scopes))
+	for _, scope := range scopes {
 		m.baseScopes[scope] = struct{}{}
 	}
-
-	if p.PersistentStorage != nil {
-		m.kv = p.PersistentStorage.Clone(proactiveKeyPrefix)
-	}
-	m.loadOverrides()
+	p.cfg.Proactive.Scopes = scopes
 
 	m.logger.Info("已启用主动互动",
 		"scopes", len(m.baseScopes),
@@ -382,124 +368,206 @@ func (m *proactiveManager) refreshAwaiting() {
 
 // ---- 会话开关 ----
 
-// enabled 判断某会话是否允许主动互动：显式开关优先，其次看配置白名单。
+// enabled 判断某会话是否允许主动互动。
 func (m *proactiveManager) enabled(scope string) bool {
 	if m == nil {
 		return false
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.enabledLocked(scope)
-}
-
-func (m *proactiveManager) enabledLocked(scope string) bool {
-	if state, ok := m.overrides[scope]; ok {
-		return state == proactiveScopeOn
-	}
 	_, ok := m.baseScopes[scope]
 	return ok
 }
 
-// scopeState 返回会话开关状态：on / off / auto（auto 表示继承配置白名单）。
+// scopeState 返回会话开关状态（on / off），供指令与状态展示使用。
 func (m *proactiveManager) scopeState(scope string) string {
-	if m == nil {
-		return ""
+	if m.enabled(scope) {
+		return proactiveScopeOn
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if state, ok := m.overrides[scope]; ok {
-		return state
-	}
-	return "auto"
+	return proactiveScopeOff
 }
 
-// setScopeState 设置会话开关：on / off / ""（清空覆盖，回到配置白名单）。
-// 关闭时同时丢弃该会话的现场记录，重新开启后从新的一轮现场开始计时。
-func (m *proactiveManager) setScopeState(scope, state string) bool {
-	if m == nil || scope == "" {
-		return false
-	}
-	if state != proactiveScopeOn && state != proactiveScopeOff && state != "" {
-		return false
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if state == "" {
-		delete(m.overrides, scope)
-	} else {
-		m.overrides[scope] = state
-	}
-	if state == proactiveScopeOff {
-		delete(m.scopes, scope)
-		delete(m.lastIdle, scope)
-	}
-	m.persistOverridesLocked()
-	return true
-}
-
-// enabledScopes 返回当前允许主动互动的全部会话（配置白名单 + 覆盖为 on 的）。
+// enabledScopes 返回当前允许主动互动的全部会话（排序后）。
 func (m *proactiveManager) enabledScopes() []string {
 	if m == nil {
 		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	set := make(map[string]struct{}, len(m.baseScopes)+len(m.overrides))
+	out := make([]string, 0, len(m.baseScopes))
 	for s := range m.baseScopes {
-		set[s] = struct{}{}
-	}
-	for s, state := range m.overrides {
-		if state == proactiveScopeOn {
-			set[s] = struct{}{}
-		} else {
-			delete(set, s)
-		}
-	}
-	out := make([]string, 0, len(set))
-	for s := range set {
 		out = append(out, s)
 	}
 	sort.Strings(out)
 	return out
 }
 
-func (m *proactiveManager) loadOverrides() {
-	if m.kv == nil {
-		return
+// setScopeEnabled 开启 / 关闭某会话的主动互动。
+//
+// 直接改写配置项 plugin.ai_chat_bot.proactive.scopes（控制面板即时可见、重启后
+// 保留），同时更新内存里的实时集合——两者保持一致，不再有「藏在 KV 里的第二份
+// 名单」。改写前先读一次配置中心再合并，避免覆盖掉管理员刚在面板里手动改过的
+// 其他会话。返回是否发生变更、以及是否成功落盘（配置中心不可用时只对本次运行生效）。
+func (m *proactiveManager) setScopeEnabled(scope string, on bool) (changed, persisted bool) {
+	if m == nil || scope == "" {
+		return false, false
 	}
-	raw, ok := m.kv.GetString(context.Background(), proactiveOverrideKey)
-	if !ok || strings.TrimSpace(raw) == "" {
-		return
+	if _, _, ok := parseScope(scope); !ok {
+		return false, false
 	}
-	var parsed map[string]string
-	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-		m.logger.Warn("解析主动互动会话开关失败，按空处理", "error", err.Error())
-		return
+
+	// 读-改-写需要串行化（同一时刻可能有两个管理员同时在操作）
+	m.opMu.Lock()
+	defer m.opMu.Unlock()
+
+	list := m.currentScopes()
+	if containsString(list, scope) == on {
+		return false, true
 	}
-	for scope, state := range parsed {
-		if state != proactiveScopeOn && state != proactiveScopeOff {
-			continue
+	if on {
+		list = append(list, scope)
+	} else {
+		list = removeString(list, scope)
+	}
+	list = normalizeScopes(list, m.logger)
+	m.applyScopes(list)
+	persisted = m.persistScopes(list)
+
+	if !on {
+		// 关闭时丢弃该会话的现场记录，重新开启后从新的一轮现场开始计时
+		m.mu.Lock()
+		delete(m.scopes, scope)
+		delete(m.lastIdle, scope)
+		m.mu.Unlock()
+	}
+	return true, persisted
+}
+
+// reloadScopes 从配置中心重新读取白名单（面板改完不必重启）。
+func (m *proactiveManager) reloadScopes() (int, bool) {
+	if m == nil || m.plugin == nil || m.plugin.ConfigEditor == nil {
+		return 0, false
+	}
+	raw, ok := m.plugin.ConfigEditor.Get(proactiveScopesKey)
+	if !ok {
+		raw = []string{}
+	}
+	list := normalizeScopes(toStringSlice(raw), m.logger)
+	m.applyScopes(list)
+	return len(list), true
+}
+
+// currentScopes 读取当前生效的白名单：优先配置中心（面板可能刚改过），
+// 配置中心不可用时退回到内存集合。
+func (m *proactiveManager) currentScopes() []string {
+	if m.plugin != nil && m.plugin.ConfigEditor != nil {
+		raw, ok := m.plugin.ConfigEditor.Get(proactiveScopesKey)
+		if !ok {
+			return nil
 		}
-		if _, _, ok := parseScope(scope); !ok {
-			continue
-		}
-		m.overrides[scope] = state
+		return toStringSlice(raw)
+	}
+	return m.enabledScopes()
+}
+
+// applyScopes 用新名单替换内存集合，并同步插件配置结构体（与其他插件
+// 「改运行时状态 + 回写配置」的惯例一致）。
+func (m *proactiveManager) applyScopes(list []string) {
+	set := make(map[string]struct{}, len(list))
+	for _, scope := range list {
+		set[scope] = struct{}{}
+	}
+	m.mu.Lock()
+	m.baseScopes = set
+	m.mu.Unlock()
+	if m.plugin != nil {
+		m.plugin.cfg.Proactive.Scopes = append([]string(nil), list...)
 	}
 }
 
-// persistOverridesLocked 落盘会话开关；调用方需持有 m.mu。
-func (m *proactiveManager) persistOverridesLocked() {
-	if m.kv == nil {
-		return
+// persistScopes 把名单写回配置中心。
+func (m *proactiveManager) persistScopes(list []string) bool {
+	if m.plugin == nil || m.plugin.ConfigEditor == nil {
+		m.logger.Warn("配置中心不可用，主动互动会话名单仅本次运行生效")
+		return false
 	}
-	raw, err := json.Marshal(m.overrides)
-	if err != nil {
-		m.logger.Error("序列化主动互动会话开关失败", "error", err.Error())
-		return
+	if list == nil {
+		list = []string{}
 	}
-	if !m.kv.SetString(context.Background(), proactiveOverrideKey, string(raw)) {
-		m.logger.Error("保存主动互动会话开关失败")
+	if err := m.plugin.ConfigEditor.Set(proactiveScopesKey, list); err != nil {
+		m.logger.Error("回写主动互动会话名单失败", "error", err.Error())
+		return false
 	}
+	return true
+}
+
+// normalizeScopes 规范化名单：去空白、去重、过滤非法项并按字典序排序。
+func normalizeScopes(list []string, logger *slog.Logger) []string {
+	seen := make(map[string]struct{}, len(list))
+	out := make([]string, 0, len(list))
+	for _, raw := range list {
+		scope := strings.TrimSpace(raw)
+		if scope == "" {
+			continue
+		}
+		if _, _, ok := parseScope(scope); !ok {
+			if logger != nil {
+				logger.Warn("主动互动会话名单条目格式非法，已跳过（应为 g:会话ID 或 f:用户ID）", "value", raw)
+			}
+			continue
+		}
+		if _, dup := seen[scope]; dup {
+			continue
+		}
+		seen[scope] = struct{}{}
+		out = append(out, scope)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// toStringSlice 把配置中心返回的 JSON 数组（[]any / []string）转成字符串切片。
+func toStringSlice(v any) []string {
+	switch val := v.(type) {
+	case nil:
+		return nil
+	case []string:
+		return append([]string(nil), val...)
+	case []any:
+		out := make([]string, 0, len(val))
+		for _, item := range val {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	case string:
+		if strings.TrimSpace(val) == "" {
+			return nil
+		}
+		return []string{val}
+	default:
+		return nil
+	}
+}
+
+func containsString(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+func removeString(list []string, want string) []string {
+	out := make([]string, 0, len(list))
+	for _, s := range list {
+		if s != want {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // ---- 现场记录 ----
