@@ -91,6 +91,9 @@ type AIChatPlugin struct {
 	// clockManager AI 定时任务调度器；为 nil 表示功能未启用
 	clockManager *clockManager
 
+	// proactiveManager 主动互动调度器（意图队列）；为 nil 表示功能未启用
+	proactiveManager *proactiveManager
+
 	// memoryManager 长期记忆管理器；为 nil 表示功能未启用
 	memoryManager *memoryManager
 
@@ -178,6 +181,14 @@ func (p *AIChatPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 	// 未完成初始化（如未配置 API KEY）时跳过全部处理，交由后续插件
 	if !p.ready {
 		return true, nil
+	}
+	// 主动互动：先记录现场（机器人本来就收得到全部群消息），再看是不是开关指令。
+	// 两者都在 mention 门之前——管理员往往不 @ 机器人就直接发 /proactive on。
+	if p.proactiveManager != nil {
+		p.proactiveManager.noteMessage(msg, true)
+	}
+	if cmd.Name == "proactive" {
+		return p.handleProactiveCommand(ctx, bot, cmd, msg)
 	}
 	// 工具审批回复必须最先拦截：审批等待期间会话锁被占用（回复走不到正常聊天
 	// 流程），且回复通常不带 @（mention 门会把它挡掉）
@@ -392,6 +403,13 @@ func (p *AIChatPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command
 	// 未完成初始化（如未配置 API KEY）时跳过全部处理，交由后续插件
 	if !p.ready {
 		return true, nil
+	}
+	// 主动互动：先记录现场，再看是不是开关指令（都在 mention 门之前）
+	if p.proactiveManager != nil {
+		p.proactiveManager.noteMessage(msg, false)
+	}
+	if cmd.Name == "proactive" {
+		return p.handleProactiveCommand(ctx, bot, cmd, msg)
 	}
 	// 工具审批回复必须最先拦截：审批等待期间会话锁被占用，回复走不到正常聊天流程
 	if p.approvalManager != nil {
@@ -712,6 +730,9 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 		p.Logger.Info("AI请求没有返回什么东西")
 		return true
 	}
+
+	// 主动互动的现场标记：机器人刚说过话，短时间内不应再主动开口
+	p.noteBotSpoke(id, isGroup)
 
 	p.Logger.Info("AI请求token消耗", "id", id, "is_group", isGroup, "batch", len(batch), "prompt_tokens", usage.PromptTokens, "completion_tokens", usage.CompletionTokens, "total_tokens", usage.TotalTokens)
 
@@ -1052,6 +1073,14 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 		p.Logger.Info("AI定时任务功能未启用（plugin.ai_chat_bot.clock.enable=false）")
 	}
 
+	// 主动互动：意图队列 + tick 调度（默认关闭；需要 SQL 后端持久化意图）。
+	// 建表失败时 newProactiveManager 记错误日志并返回 nil，功能降级不影响对话。
+	if p.cfg.Proactive.Enable {
+		p.proactiveManager = newProactiveManager(p)
+	} else {
+		p.Logger.Info("主动互动未启用（plugin.ai_chat_bot.proactive.enable=false）")
+	}
+
 	// 语义向量计算器：知识库与长期记忆共享（复用 kb.embedding 配置）
 	embedder := p.buildKBEmbedder()
 	p.embedder = embedder
@@ -1160,6 +1189,9 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 func (p *AIChatPlugin) Awake(ctx context.Context, bot bot.Bot) error {
 	if p.clockManager != nil {
 		p.clockManager.Start(bot)
+	}
+	if p.proactiveManager != nil {
+		p.proactiveManager.Start(bot)
 	}
 	return nil
 }

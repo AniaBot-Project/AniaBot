@@ -141,6 +141,14 @@ func (p *AIChatPlugin) registerScopedTools(sessionExecutor *llmtool.SessionToolE
 			sessionExecutor.RegisterSession(tool)
 		}
 	}
+	// 注册主动互动工具（proactive_create/list/cancel）：让 AI 自己预约「过一会儿
+	// 主动说句话」，与定时任务的区别是到点仍要过闸门、也可以放弃；scope 绑定
+	// 当前会话，不能跨会话安排发言
+	if p.proactiveManager != nil {
+		for _, tool := range newProactiveTools(p.proactiveManager, sessionKey(id, isGroup), isGroup) {
+			sessionExecutor.RegisterSession(tool)
+		}
+	}
 	// 注册 skill 管理工具（skill_list / skill_install / skill_remove）：让 AI
 	// 无需后台面板即可自行安装/卸载技能（配置门控，默认关闭）
 	if p.cfg.SkillTool.Enable {
