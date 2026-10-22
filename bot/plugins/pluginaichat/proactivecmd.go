@@ -45,7 +45,8 @@ func (p *AIChatPlugin) handleProactiveCommand(_ context.Context, b bot.Bot, cmd 
 
 	sub := ""
 	if len(cmd.Args) > 0 {
-		sub = cmd.Args[0]
+		// 子命令统一转小写：避免 /proactive ON 被当成未知命令
+		sub = strings.ToLower(strings.TrimSpace(cmd.Args[0]))
 	}
 	rest := cmd.Args
 	if len(rest) > 0 {
@@ -69,7 +70,7 @@ func (p *AIChatPlugin) handleProactiveCommand(_ context.Context, b bot.Bot, cmd 
 			msg += "\n已写入配置项，面板刷新即可看到。"
 		}
 		p.sendPlainText(b, id, isGroup, msg)
-	case "auto", "reload":
+	case "reload":
 		if !isAdmin {
 			p.sendPlainText(b, id, isGroup, "只有管理员可以重新加载白名单")
 			return false, nil

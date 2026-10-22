@@ -3,6 +3,7 @@ package pluginaichat
 import (
 	"context"
 	"database/sql"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/jeanhua/AniaBot/bot/component/llmtool"
 	"github.com/jeanhua/AniaBot/common/model/message"
+	"github.com/jeanhua/AniaBot/common/msgchain"
 	"github.com/jeanhua/AniaBot/common/storage"
 
 	_ "modernc.org/sqlite"
@@ -43,6 +45,7 @@ func newTestProactiveManager(t *testing.T) *proactiveManager {
 		lastIdle:    map[string]time.Time{},
 		running:     map[string]struct{}{},
 		awaiting:    map[string]struct{}{},
+		unpersisted: map[string]unpersistedSend{},
 		baseScopes:  map[string]struct{}{},
 		idle:        90 * time.Minute,
 		minGap:      60 * time.Minute,
@@ -389,8 +392,10 @@ func TestSetScopeEnabledWritesThrough(t *testing.T) {
 	if got := editor.scopes(t); len(got) != 2 || !containsString(got, "g:1") || !containsString(got, "g:2") {
 		t.Fatalf("配置白名单 = %#v, want [g:1 g:2]", got)
 	}
-	if len(m.plugin.cfg.Proactive.Scopes) != 2 {
-		t.Fatalf("插件配置结构体未同步: %#v", m.plugin.cfg.Proactive.Scopes)
+	// 运行时名单不再写回插件配置结构体（配置中心是唯一真相，写回只会引入
+	// reload 与 on/off 之间的数据竞争与丢更新）
+	if len(m.plugin.cfg.Proactive.Scopes) != 0 {
+		t.Fatalf("不应再写 plugin.cfg.Proactive.Scopes: %#v", m.plugin.cfg.Proactive.Scopes)
 	}
 
 	// 重复开启不应重复写入
@@ -846,5 +851,180 @@ func TestProactiveCreateAndCancel(t *testing.T) {
 	}
 	if got := m.store.pendingByScope("g:1"); len(got) != 0 {
 		t.Fatalf("取消后不应还有待执行意图, got %d", len(got))
+	}
+}
+
+// TestScopeUpdatesConcurrent 回归：/proactive reload 与 /proactive on|off 都会
+// 改写会话名单，必须在同一把锁下串行化（修复前 -race 会报数据竞争）。
+func TestScopeUpdatesConcurrent(t *testing.T) {
+	m := newTestProactiveManager(t)
+	editor := newStubConfigEditor()
+	editor.vals[proactiveScopesKey] = []any{"g:1"}
+	m.plugin = &AIChatPlugin{}
+	m.plugin.ConfigEditor = editor
+	m.applyScopes([]string{"g:1"})
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			m.setScopeEnabled("g:"+strconv.Itoa(i+2), true)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			m.reloadScopes()
+		}
+	}()
+	wg.Wait()
+
+	// 串行化后内存名单与配置中心必须一致：两个操作都是「读配置 → 写内存 → 写配置」，
+	// 交错执行时后完成的一方可能把另一方刚写入的会话覆盖掉
+	if got, want := strings.Join(m.enabledScopes(), ","), strings.Join(editor.scopes(t), ","); got != want {
+		t.Fatalf("并发结束后内存名单应与配置中心一致: got %q want %q", got, want)
+	}
+}
+
+// TestReloadScopesSerialized 回归：reloadScopes 必须与 setScopeEnabled 共用
+// opMu——两者都是「读配置中心 → 写内存集合」，交错执行会丢更新。
+func TestReloadScopesSerialized(t *testing.T) {
+	m := newTestProactiveManager(t)
+	editor := newStubConfigEditor()
+	editor.vals[proactiveScopesKey] = []any{"g:1"}
+	m.plugin = &AIChatPlugin{}
+	m.plugin.ConfigEditor = editor
+	m.applyScopes([]string{"g:1"})
+
+	// 模拟另一个会话开关操作正持锁进行
+	m.opMu.Lock()
+	done := make(chan struct{})
+	go func() {
+		m.reloadScopes()
+		close(done)
+	}()
+	select {
+	case <-done:
+		m.opMu.Unlock()
+		t.Fatal("reloadScopes 未与 setScopeEnabled 共用 opMu（可能丢更新）")
+	case <-time.After(50 * time.Millisecond):
+		// 正确：reload 在等锁
+	}
+	m.opMu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("释放 opMu 后 reloadScopes 应能完成")
+	}
+}
+
+// TestGateIgnoresSyntheticActivity 回归：重启后由调度器建立的「冷场计时基线」
+// （Seeded）不能被闸门当成「现场正在聊天」，否则到期的意图会被无故顺延。
+func TestGateIgnoresSyntheticActivity(t *testing.T) {
+	m := newTestProactiveManager(t)
+	m.plugin = &AIChatPlugin{}
+	m.plugin.cfg.Proactive.Enable = true
+	m.baseScopes["g:1"] = struct{}{}
+	now := time.Now()
+
+	// 模拟重启后首轮：只有基线，没有任何真实消息
+	m.mu.Lock()
+	m.scopes["g:1"] = &scopeActivity{Scope: "g:1", ID: "1", IsGroup: true, LastHumanAt: now, Seeded: true}
+	m.mu.Unlock()
+
+	it := newGateIntent(proactiveSourceAI, now)
+	if res := m.gate(it, now); res.action != gateAllow {
+		t.Fatalf("Seeded 现场不应被当作正在聊天, got %v (%s)", res.action, res.reason)
+	}
+
+	// 真实消息到达后基线失效，闸门恢复活跃判断
+	m.noteMessage(message.Message{
+		GroupId: "1",
+		Sender:  message.MessageSender{UserId: "2", Nickname: "小明"},
+		Message: []message.OB11Segment{{Type: "text", Data: map[string]any{"text": "在吗"}}},
+	}, true)
+	if snap := m.snapshot("g:1"); snap == nil || snap.Seeded {
+		t.Fatal("收到真实消息后应清除 Seeded")
+	}
+	if res := m.gate(it, now); res.action != gatePostpone {
+		t.Fatalf("真实消息到达后应顺延, got %v (%s)", res.action, res.reason)
+	}
+}
+
+// TestStoreSentSuppressesResend 回归：发送成功后状态落盘失败，不能让该意图
+// 继续保持 pending 被下一轮 tick 重新发送。
+func TestStoreSentSuppressesResend(t *testing.T) {
+	m := newTestProactiveManager(t)
+	it := &ProactiveIntention{
+		ID: "u1", Scope: "g:1", Source: proactiveSourceAI,
+		DueAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
+		CreatedAt: time.Now(), Status: proactiveStatusSent, SentAt: time.Now(),
+	}
+	mustInsert(t, m.store, it)
+
+	// 模拟数据库故障
+	m.store.db.Close()
+	if m.storeSent(it) {
+		t.Fatal("数据库已关闭时不应报告落盘成功")
+	}
+	if !m.isUnpersisted(it.ID) {
+		t.Fatal("落盘失败后应进入内存抑制表")
+	}
+	// 抑制表里的记录不应阻止其他意图，也不应无限增长
+	m.retryUnpersisted(time.Now())
+	if !m.isUnpersisted(it.ID) {
+		t.Fatal("落盘仍失败时应继续抑制")
+	}
+	m.retryUnpersisted(time.Now().Add(proactiveUnpersistedTTL + time.Minute))
+	if m.isUnpersisted(it.ID) {
+		t.Fatal("超过抑制时长后应丢弃条目")
+	}
+}
+
+// partialFailBot 从第 failAfter 次之后的发送开始失败。
+type partialFailBot struct {
+	recordBot
+	failAfter int
+	sends     int
+}
+
+func (b *partialFailBot) SendGroupMsg(id message.QID, chain msgchain.GroupChain) (message.QID, bool) {
+	b.sends++
+	if b.sends > b.failAfter {
+		return "", false
+	}
+	return b.recordBot.SendGroupMsg(id, chain)
+}
+
+// TestSendReportsPartialSuccess 回归：多段发送中途失败时必须报告「已发出部分」，
+// 让调用方放弃重试，避免已发出的片段被重复发送。
+func TestSendReportsPartialSuccess(t *testing.T) {
+	m := newTestProactiveManager(t)
+	m.plugin = &AIChatPlugin{}
+	m.plugin.cfg.Reply.SplitBlankLine = true
+
+	fb := &partialFailBot{failAfter: 1}
+	ok, sentAny := m.send(fb, "1", true, "一\n\n二\n\n三")
+	if ok {
+		t.Fatal("第二段发送失败时不应报告全部成功")
+	}
+	if !sentAny {
+		t.Fatal("已发出第一段，应报告部分已发出")
+	}
+	if got := fb.sent(); len(got) != 1 || !strings.Contains(got[0], "一") {
+		t.Fatalf("只应发出第一段, got %v", got)
+	}
+}
+
+// TestProactiveSkipOutputToolDescription 主动互动场景的 skip_output 不应沿用
+// 定时任务措辞（「任务」「执行日志」在主动互动里并不存在）。
+func TestProactiveSkipOutputToolDescription(t *testing.T) {
+	tool := newProactiveSkipOutputTool(&clockOutputState{})
+	if tool.Name() != "skip_output" {
+		t.Fatalf("工具名应为 skip_output, got %q", tool.Name())
+	}
+	if !strings.Contains(tool.Description(), "主动") || strings.Contains(tool.Description(), "定时任务") {
+		t.Fatalf("描述不应混入定时任务措辞: %s", tool.Description())
 	}
 }

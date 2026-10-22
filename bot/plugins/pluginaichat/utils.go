@@ -384,6 +384,18 @@ func (p *AIChatPlugin) configureImageCallbacks(ctx context.Context, bot bot.Bot,
 	}
 }
 
+// attachLocalImageCallback 为后台一次性会话（定时任务 / 主动互动）挂载本地图片
+// 读取回调：主模型支持多模态或配置了备用识别模型时可用。loaded 由调用方持有，
+// 收尾时经 TakeLoadedImages 取出并入下一轮上下文；usageSink 接收备用识别的用量。
+func (p *AIChatPlugin) attachLocalImageCallback(callbacks *llmtool.CallBackFuncs, ctx context.Context, loaded *[]string, usageSink func(aichat.TokenUsage)) {
+	if !p.cfg.Multimodal && p.ocrModel == nil {
+		return
+	}
+	callbacks.LoadLocalImage = func(path string) (string, error) {
+		return p.loadLocalImageInto(ctx, path, loaded, usageSink), nil
+	}
+}
+
 // loadLocalImageInto 读取本地图片供 LLM 查看：主模型支持多模态时把 data URI 推入
 // 待加载队列（loadedImages 由调用方持有，下一轮上下文提供），否则交由备用识别模型描述。
 // usageSink 接收备用识别产生的 LLM 用量（多模态路径不产生产量，不会调用）。

@@ -140,6 +140,10 @@ type scopeActivity struct {
 	LastHumanAt time.Time
 	LastBotAt   time.Time
 	Messages    []observedMessage
+	// Seeded 这条现场是调度器建立的「冷场计时基线」，还没有任何真实消息：
+	// 此时 LastHumanAt 只表示计时起点，不能当作「现场正在聊天」的信号
+	//（否则重启后第一轮会把到期的意图误判成有人正在说话）。
+	Seeded bool
 }
 
 // contextBlock 把最近消息拼成给 AI 看的现场记录。
@@ -165,6 +169,7 @@ type scopeSnapshot struct {
 	LastHumanAt time.Time
 	LastBotAt   time.Time
 	Context     string
+	Seeded      bool
 }
 
 // proactiveManager 主动互动调度器：意图持久化 + tick 调度 + 闸门 + 执行 + 反馈。
@@ -201,6 +206,9 @@ type proactiveManager struct {
 	lastIdle map[string]time.Time // scope -> 已为其生成过冷场意图的 lastHumanAt
 	running  map[string]struct{}  // 正在执行的意图 ID
 	awaiting map[string]struct{}  // 有待观察回应的 scope
+	// unpersisted 已发出但状态没能落盘的意图：数据库瞬时故障时抑制重复发送
+	//（库里该行仍是 pending，不抑制的话下一轮 tick 会再发一遍）
+	unpersisted map[string]unpersistedSend
 
 	bot  bot.Bot
 	stop chan struct{}
@@ -235,6 +243,7 @@ func newProactiveManager(p *AIChatPlugin) *proactiveManager {
 		lastIdle:    map[string]time.Time{},
 		running:     map[string]struct{}{},
 		awaiting:    map[string]struct{}{},
+		unpersisted: map[string]unpersistedSend{},
 		baseScopes:  map[string]struct{}{},
 		stop:        make(chan struct{}),
 		tick:        proactiveDefaultTick,
@@ -286,7 +295,6 @@ func newProactiveManager(p *AIChatPlugin) *proactiveManager {
 	for _, scope := range scopes {
 		m.baseScopes[scope] = struct{}{}
 	}
-	p.cfg.Proactive.Scopes = scopes
 
 	m.logger.Info("已启用主动互动",
 		"scopes", len(m.baseScopes),
@@ -333,6 +341,7 @@ func (m *proactiveManager) tickOnce() {
 	now := time.Now()
 	m.store.expireStale(now)
 	m.settleOutcomes(now)
+	m.retryUnpersisted(now)
 	m.considerIdle(now)
 	m.runDue(now)
 
@@ -448,6 +457,11 @@ func (m *proactiveManager) reloadScopes() (int, bool) {
 	if m == nil || m.plugin == nil || m.plugin.ConfigEditor == nil {
 		return 0, false
 	}
+	// 与 setScopeEnabled 共用 opMu：两者都是「读配置中心 → 写内存集合」，
+	// 交错执行会丢更新（reload 读到旧名单后把刚开启的会话覆盖掉）
+	m.opMu.Lock()
+	defer m.opMu.Unlock()
+
 	raw, ok := m.plugin.ConfigEditor.Get(proactiveScopesKey)
 	if !ok {
 		raw = []string{}
@@ -470,8 +484,11 @@ func (m *proactiveManager) currentScopes() []string {
 	return m.enabledScopes()
 }
 
-// applyScopes 用新名单替换内存集合，并同步插件配置结构体（与其他插件
-// 「改运行时状态 + 回写配置」的惯例一致）。
+// applyScopes 用新名单替换内存集合。
+//
+// 不再写 plugin.cfg.Proactive.Scopes：该字段没有任何读者，配置中心（面板与
+// 指令都读写它）才是唯一真相；保留这份影子状态只会在 reload 与 on/off
+// 并发时产生数据竞争与丢更新。
 func (m *proactiveManager) applyScopes(list []string) {
 	set := make(map[string]struct{}, len(list))
 	for _, scope := range list {
@@ -480,9 +497,6 @@ func (m *proactiveManager) applyScopes(list []string) {
 	m.mu.Lock()
 	m.baseScopes = set
 	m.mu.Unlock()
-	if m.plugin != nil {
-		m.plugin.cfg.Proactive.Scopes = append([]string(nil), list...)
-	}
 }
 
 // persistScopes 把名单写回配置中心。
@@ -598,6 +612,7 @@ func (m *proactiveManager) noteMessage(msg message.Message, isGroup bool) {
 	m.mu.Lock()
 	act := m.scopeLocked(scope, id, isGroup, now)
 	act.LastHumanAt = now
+	act.Seeded = false
 	if text != "" {
 		act.Messages = append(act.Messages, observedMessage{
 			At:     now,
@@ -637,13 +652,14 @@ func (m *proactiveManager) noteBotSpoke(id message.QID, isGroup bool) {
 }
 
 // scopeLocked 返回会话现场（不存在则创建）。调用方需持有 m.mu。
-// 新建时把 LastHumanAt 设为当前时间，保证重启后要等满一个冷场窗口才会触发。
+// 新建时把 LastHumanAt 设为当前时间，保证重启后要等满一个冷场窗口才会触发；
+// 同时标记 Seeded，闸门不会把这条计时基线当成「有人正在说话」。
 func (m *proactiveManager) scopeLocked(scope string, id message.QID, isGroup bool, now time.Time) *scopeActivity {
 	act, ok := m.scopes[scope]
 	if ok {
 		return act
 	}
-	act = &scopeActivity{Scope: scope, ID: id, IsGroup: isGroup, LastHumanAt: now}
+	act = &scopeActivity{Scope: scope, ID: id, IsGroup: isGroup, LastHumanAt: now, Seeded: true}
 	m.scopes[scope] = act
 	return act
 }
@@ -660,6 +676,7 @@ func (m *proactiveManager) snapshot(scope string) *scopeSnapshot {
 		LastHumanAt: act.LastHumanAt,
 		LastBotAt:   act.LastBotAt,
 		Context:     act.contextBlock(),
+		Seeded:      act.Seeded,
 	}
 }
 
@@ -747,7 +764,7 @@ func (m *proactiveManager) runDue(now time.Time) {
 	items := m.store.due(now, proactiveTickBatch)
 	for i := range items {
 		it := items[i]
-		if m.isRunning(it.ID) {
+		if m.isRunning(it.ID) || m.isUnpersisted(it.ID) {
 			continue
 		}
 		res := m.gate(&it, now)
@@ -831,20 +848,22 @@ func (m *proactiveManager) gate(it *ProactiveIntention, now time.Time) gateResul
 		}
 	}
 
-	// 现场活跃度
+	// 现场活跃度。Seeded 的现场只是冷场计时基线（进程启动时建立），没有真实
+	// 消息，不能据此判断「正在聊天」。
 	if snap := m.snapshot(it.Scope); snap != nil {
 		if !snap.LastBotAt.IsZero() {
 			if gap := proactiveMinAfterBot - now.Sub(snap.LastBotAt); gap > 0 {
 				return gateResult{action: gatePostpone, reason: "刚发过言，稍后再说", delay: gap}
 			}
 		}
-		if !snap.LastHumanAt.IsZero() {
-			if gap := proactiveLiveWindow - now.Sub(snap.LastHumanAt); gap > 0 {
-				return gateResult{action: gatePostpone, reason: "当前正在聊天，不插话", delay: proactivePostponeStep}
-			}
-			// 冷场意图排队期间已经有人说话了：这句话的前提没了，作废
+		if !snap.Seeded && !snap.LastHumanAt.IsZero() {
+			// 硬冲突优先于时间冲突：冷场意图排队期间已经有人说话了，这句话的
+			// 前提没了，直接作废（放在顺延判定之前，避免白顺延一轮再作废）
 			if it.Source == proactiveSourceIdle && snap.LastHumanAt.After(it.CreatedAt) {
 				return gateResult{action: gateCancel, reason: "现场已恢复活跃，本次冷场意图作废"}
+			}
+			if gap := proactiveLiveWindow - now.Sub(snap.LastHumanAt); gap > 0 {
+				return gateResult{action: gatePostpone, reason: "当前正在聊天，不插话", delay: proactivePostponeStep}
 			}
 		}
 	}
@@ -856,6 +875,13 @@ func (m *proactiveManager) isRunning(id string) bool {
 	defer m.mu.Unlock()
 	_, ok := m.running[id]
 	return ok
+}
+
+// botRef 线程安全地读取发送用 bot：Start 写入，tick 与执行路径读取。
+func (m *proactiveManager) botRef() bot.Bot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.bot
 }
 
 // launch 在后台执行一条意图（独立 goroutine + 崩溃恢复，不阻塞 tick）。
@@ -893,6 +919,80 @@ func (m *proactiveManager) closeIntention(it *ProactiveIntention, status, reason
 	}
 	m.logger.Info("主动意图结束", "id", it.ID, "scope", it.Scope, "source", it.Source,
 		"status", status, "reason", reason)
+}
+
+// ---- 落盘失败抑制 ----
+
+// proactiveUnpersistedTTL 「已发出但状态未落盘」记录的内存抑制时长。
+// 意图的有效期默认 30 分钟，过期后 expireStale 会把残留的 pending 行收成
+// expired、不会再被取出执行，抑制时长留足余量即可。
+const proactiveUnpersistedTTL = time.Hour
+
+// unpersistedSend 一次已发出但状态未能落盘的发送。
+type unpersistedSend struct {
+	it *ProactiveIntention
+	at time.Time
+}
+
+// storeSent 落盘「已发送」状态。
+//
+// 数据库瞬时故障时同步重试；仍失败则记入内存抑制表——该行在库里仍是 pending
+// 且 due_at 已过，若不抑制，下一轮 tick 会把同一句话再发一遍（每轮一次，
+// 直到有效期结束）。
+func (m *proactiveManager) storeSent(it *ProactiveIntention) bool {
+	for attempt := 0; attempt < 3; attempt++ {
+		if m.store.update(it) {
+			return true
+		}
+		if attempt < 2 {
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+	m.mu.Lock()
+	if m.unpersisted == nil {
+		m.unpersisted = map[string]unpersistedSend{}
+	}
+	m.unpersisted[it.ID] = unpersistedSend{it: it, at: time.Now()}
+	m.mu.Unlock()
+	m.logger.Error("主动发言状态落盘失败，已在内存中抑制重复发送", "id", it.ID, "scope", it.Scope)
+	return false
+}
+
+// isUnpersisted 该意图是否处于「已发出但未落盘」的抑制状态。
+func (m *proactiveManager) isUnpersisted(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.unpersisted[id]
+	return ok
+}
+
+// retryUnpersisted 重试抑制表里的落盘操作；超过抑制时长的条目直接丢弃
+// （对应的行此时已被 expireStale 收成 expired，不会再被执行）。
+func (m *proactiveManager) retryUnpersisted(now time.Time) {
+	m.mu.Lock()
+	if len(m.unpersisted) == 0 {
+		m.mu.Unlock()
+		return
+	}
+	items := make([]unpersistedSend, 0, len(m.unpersisted))
+	for id, rec := range m.unpersisted {
+		if now.Sub(rec.at) > proactiveUnpersistedTTL {
+			delete(m.unpersisted, id)
+			continue
+		}
+		items = append(items, rec)
+	}
+	m.mu.Unlock()
+
+	for _, rec := range items {
+		if !m.store.update(rec.it) {
+			continue
+		}
+		m.mu.Lock()
+		delete(m.unpersisted, rec.it.ID)
+		m.mu.Unlock()
+		m.logger.Info("主动发言状态补记落盘成功", "id", rec.it.ID, "scope", rec.it.Scope)
+	}
 }
 
 // postpone 推迟一条意图；超过有效期则直接作废。

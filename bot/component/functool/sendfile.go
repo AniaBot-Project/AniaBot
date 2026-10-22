@@ -45,6 +45,13 @@ func (t *SendFileTool) Execute(ctx context.Context, params any, callbacks llmtoo
 	p := params.(*SendFileParams)
 	log.Println("执行file... 参数:", p)
 
+	// 后台一次性会话（定时任务 / 主动互动）可能未注入该回调：这里优雅报错。
+	// 不做判空的话，nil 函数调用只能等工具层 recover 兜住，模型收到的会是一个
+	// 没有任何指导意义的运行时错误。
+	if callbacks.SendFile == nil {
+		return "当前会话不支持发送文件", errToolExecute
+	}
+
 	if SensitiveHostPath(p.Path) {
 		return "禁止发送aniabot数据库文件", errToolExecute
 	}

@@ -735,13 +735,13 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 		return true
 	}
 
-	// 主动互动的现场标记：机器人刚说过话，短时间内不应再主动开口
-	p.noteBotSpoke(id, isGroup)
-
 	p.Logger.Info("AI请求token消耗", "id", id, "is_group", isGroup, "batch", len(batch), "prompt_tokens", usage.PromptTokens, "completion_tokens", usage.CompletionTokens, "total_tokens", usage.TotalTokens)
 
+	// 主动互动的现场标记：机器人刚说过话，短时间内不应再主动开口。只在确实
+	// 发出回复后标记（流式已推送 / 合并转发 / 逐条发送），发送失败不算说过话。
 	// 流式已发出回复时不再走一次性发送（内容已逐字展示在流式消息中）
 	if stream != nil && stream.Streaming() {
+		p.noteBotSpoke(id, isGroup)
 		return true
 	}
 
@@ -754,6 +754,7 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 		// 拆分发送时仅首条携带 @ 提及（合并转发为首节点），避免每条回复都提醒
 		mentions := batchMentions(batch)
 		if shouldMergeGroupReply(segments) && sendGroupForwardReply(b, id, segments, mentions, batchSelfID(batch), p.Logger) {
+			p.noteBotSpoke(id, isGroup)
 			return true
 		}
 		for i, seg := range segments {
@@ -779,6 +780,7 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 			}
 		}
 	}
+	p.noteBotSpoke(id, isGroup)
 	return true
 }
 

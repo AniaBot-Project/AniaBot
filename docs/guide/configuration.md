@@ -402,6 +402,28 @@ X-Proxy-Route: team-a
 
 与框架的 `StartCron` 静态任务不同，clock 任务由 AI / 用户**动态创建**、持久化保存、重启不丢。执行日志可在面板「状态总览」页查看。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
 
+### AI 主动互动（proactive）
+
+让 AI 在冷场或有未说完的事时主动开口。与定时任务「到点必发」不同，主动互动只是一条**意图**：需要 SQL 持久化后端（意图存于 `ania_intention` 表），到点后还要过闸门（免打扰、每日上限、最小间隔、现场是否已活跃），AI 也可以在执行时用 `skip_output` 放弃。
+
+| 配置键 | 默认值 | 说明 |
+| --- | --- | --- |
+| `plugin.ai_chat_bot.proactive.enable` | `false` | 总开关；开启后还需按会话启用（下方白名单，或管理员在会话内发送 `/proactive on`） |
+| `plugin.ai_chat_bot.proactive.scopes` | 空 | 启用会话白名单，每行一个 `g:会话ID` / `f:用户ID`；`/proactive on|off` 直接改写这里（群聊需先 @ 机器人） |
+| `plugin.ai_chat_bot.proactive.idle_minutes` | `90` | 会话安静超过该时长后生成冷场意图；`0` 表示不按冷场触发 |
+| `plugin.ai_chat_bot.proactive.min_gap_minutes` | `60` | 同一会话两次主动发言的最小间隔 |
+| `plugin.ai_chat_bot.proactive.daily_limit` | `3` | 单会话每日上限；`0` 不限制 |
+| `plugin.ai_chat_bot.proactive.global_daily_limit` | `20` | 全局每日上限；`0` 不限制 |
+| `plugin.ai_chat_bot.proactive.quiet_hours` | `23:00-08:00` | 免打扰时段（支持跨午夜），时段内的意图顺延到结束，撑不过有效期则作废；留空不限制 |
+| `plugin.ai_chat_bot.proactive.expire_minutes` | `30` | 意图有效期，超过仍未发出则作废 |
+| `plugin.ai_chat_bot.proactive.outcome_minutes` | `10` | 回应观察窗口：窗口内有人说话记「有回应」，否则记「无人理」 |
+| `plugin.ai_chat_bot.proactive.cooldown_minutes` | `360` | 连续无人理后的冷却时长 |
+| `plugin.ai_chat_bot.proactive.strike_limit` | `3` | 连续多少次无人理后进入冷却；`0` 关闭该限制 |
+| `plugin.ai_chat_bot.proactive.timeout_sec` | `120` | 单次生成超时（秒） |
+| `plugin.ai_chat_bot.proactive.max_context_messages` | `30` | 每会话保留的现场消息条数（作为主动开口时的参考） |
+
+AI 也可以用 `proactive_create` / `proactive_list` / `proactive_cancel` 自行预约与取消意图（只能作用于当前会话）。`/proactive log` 可查看每次「说了什么、为什么没说」。详见 [AI 对话插件](/guide/builtin-plugins#主动互动proactive)。
+
 ### AI 长期记忆（memory）
 
 | 配置键 | 默认值 | 说明 |

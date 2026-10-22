@@ -147,6 +147,10 @@ func (t *proactiveCancelTool) Execute(_ context.Context, params any, _ llmtool.C
 		return "", fmt.Errorf("主动互动未启用")
 	}
 	id := strings.TrimSpace(p.ID)
+	// 正在执行的意图取消不到：执行结束会写回 sent，这里先明确拒绝
+	if t.mgr.isRunning(id) {
+		return "这条意图正在执行，无法取消；执行结束后可用 proactive_list 确认结果。", nil
+	}
 	for _, it := range t.mgr.store.pendingByScope(t.scope) {
 		if it.ID != id {
 			continue

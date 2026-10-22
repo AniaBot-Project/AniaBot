@@ -20,6 +20,7 @@ import (
 	"github.com/jeanhua/AniaBot/bot/component/aichat"
 	"github.com/jeanhua/AniaBot/bot/component/llmtool"
 	"github.com/jeanhua/AniaBot/common/aitool"
+	"github.com/jeanhua/AniaBot/common/bot"
 	"github.com/jeanhua/AniaBot/common/model/message"
 	"github.com/jeanhua/AniaBot/common/msgchain"
 )
@@ -34,7 +35,14 @@ type proactiveResult struct {
 // execute 执行一条意图：抢会话锁 → 配额检查 → 生成 → 发送 → 落盘状态。
 func (m *proactiveManager) execute(it *ProactiveIntention, forced bool) {
 	p := m.plugin
-	if p == nil || !p.ready {
+	if p == nil {
+		m.closeIntention(it, proactiveStatusCancelled, "插件实例不存在")
+		return
+	}
+	if !p.ready {
+		// 初始化未完成（如未配置 API Key）：推迟而不是静默返回，否则该行会
+		// 一直是 pending，每分钟被 tick 重新取出执行
+		m.postpone(it, time.Now().Add(proactivePostponeStep), "AI 对话尚未就绪，稍后再试")
 		return
 	}
 	id, isGroup, ok := parseScope(it.Scope)
@@ -43,9 +51,7 @@ func (m *proactiveManager) execute(it *ProactiveIntention, forced bool) {
 		return
 	}
 
-	m.mu.Lock()
-	b := m.bot
-	m.mu.Unlock()
+	b := m.botRef()
 	if b == nil {
 		m.postpone(it, time.Now().Add(proactivePostponeStep), "机器人尚未就绪")
 		return
@@ -73,7 +79,7 @@ func (m *proactiveManager) execute(it *ProactiveIntention, forced bool) {
 	defer cancel()
 
 	start := time.Now()
-	res, usage, err := m.chat(ctx, it, id, isGroup)
+	res, usage, err := m.chat(ctx, it, id, isGroup, b)
 	p.quotaManager.Add(it.Scope, usage)
 
 	if err != nil {
@@ -105,8 +111,14 @@ func (m *proactiveManager) execute(it *ProactiveIntention, forced bool) {
 		return
 	}
 
-	if !m.send(id, isGroup, text) {
+	ok, sentAny := m.send(b, id, isGroup, text)
+	if !ok {
 		it.Attempts++
+		// 已经发出了一部分：重试会把前面的片段再发一遍，宁可不补也不重复
+		if sentAny {
+			m.closeIntention(it, proactiveStatusFailed, "部分内容已发出，为避免重复不再重试")
+			return
+		}
 		if it.Attempts < proactiveMaxAttempts {
 			m.postpone(it, time.Now().Add(proactivePostponeStep), "发送失败")
 			return
@@ -120,9 +132,7 @@ func (m *proactiveManager) execute(it *ProactiveIntention, forced bool) {
 	it.SentAt = now
 	it.Reply = truncateRunes(text, proactiveMaxReplyRunes)
 	it.Reason = ""
-	if !m.store.update(it) {
-		m.logger.Error("记录主动发言结果失败", "id", it.ID)
-	}
+	m.storeSent(it)
 	m.noteBotSpoke(id, isGroup)
 
 	// 进入观察窗口：窗口内有人说话记为 replied，否则 tick 里结算为 ignored
@@ -137,9 +147,8 @@ func (m *proactiveManager) execute(it *ProactiveIntention, forced bool) {
 }
 
 // chat 构建一次性会话并生成「这一次要说什么」（不发送）。
-func (m *proactiveManager) chat(ctx context.Context, it *ProactiveIntention, id message.QID, isGroup bool) (proactiveResult, aichat.TokenUsage, error) {
+func (m *proactiveManager) chat(ctx context.Context, it *ProactiveIntention, id message.QID, isGroup bool, b bot.Bot) (proactiveResult, aichat.TokenUsage, error) {
 	p := m.plugin
-	b := m.bot
 
 	prompt := p.getPromptForID(id, isGroup)
 	scene := p.buildScenePrompt(b, id, isGroup)
@@ -166,10 +175,13 @@ func (m *proactiveManager) chat(ctx context.Context, it *ProactiveIntention, id 
 		}
 	}
 
-	// skip_output：AI 判断此刻不该开口时的唯一出口
+	// skip_output：AI 判断此刻不该开口时的唯一出口（与定时任务共用状态与工具，
+	// 但描述按主动互动场景给出）
 	output := &clockOutputState{}
-	if skipTool := newClockSkipOutputTool(output); !p.toolExecutor.Has(skipTool.Name()) {
+	if skipTool := newProactiveSkipOutputTool(output); !p.toolExecutor.Has(skipTool.Name()) {
 		sessionExecutor.RegisterSession(skipTool)
+	} else {
+		p.Logger.Warn("skip_output 工具与内置工具重名，本次主动互动不注册", "intention", it.ID)
 	}
 
 	baseURL, apiKey, model, format := p.subagentLLMConfig()
@@ -198,7 +210,9 @@ func (m *proactiveManager) chat(ctx context.Context, it *ProactiveIntention, id 
 		func(text string) { p.sendPlainText(b, id, isGroup, text) },
 		p.buildAdminPromptSender(b))
 
-	resp, usage, err := chat.Chat(ctx, m.buildPrompt(it, id, isGroup), m.callbacks(id, isGroup), chatOpts)
+	var extra usageAcc
+	resp, usage, err := chat.Chat(ctx, m.buildPrompt(it, id, isGroup), m.callbacks(ctx, b, id, isGroup, &extra), chatOpts)
+	usage = mergeTokenUsage(usage, extra.take())
 	if err != nil {
 		return proactiveResult{}, usage, err
 	}
@@ -298,43 +312,75 @@ func (m *proactiveManager) scopeContext(scope string) string {
 
 // callbacks 构造主动互动执行用的工具回调。
 // 只有最终回复会外发：中间轮文本仅记日志，避免一次主动开口变成刷屏。
-func (m *proactiveManager) callbacks(id message.QID, isGroup bool) llmtool.CallBackFuncs {
+//
+// 与定时任务（makeClockCallback）保持同一套能力：文件发送、私聊文件链接、本地
+// 图片与命令级人工审批都要注入——缺 SendFile 时启用 file 工具会空函数调用
+// panic，缺 RequestApproval 会让 bash 未列名命令绕过审批。
+func (m *proactiveManager) callbacks(ctx context.Context, b bot.Bot, id message.QID, isGroup bool, extra *usageAcc) llmtool.CallBackFuncs {
 	logger := m.logger
-	return llmtool.CallBackFuncs{
+	p := m.plugin
+	var loadedImages []string
+	cbs := llmtool.CallBackFuncs{
 		SendText: func(s string) (string, error) {
 			logger.Info("主动互动丢弃中间轮文本（未主动发送）", "text", truncateRunes(s, 200))
 			return "已记录，未发送", nil
 		},
 		SendImage: func(bs64 string) (string, error) {
-			if m.bot == nil {
-				return "", fmt.Errorf("机器人尚未就绪")
-			}
-			if isGroup {
-				builder := msgchain.Builder().Group()
-				builder.ImageBase64(bs64)
-				if _, ok := m.bot.SendGroupMsg(id, builder.Build()); !ok {
-					return "", fmt.Errorf("发送失败")
-				}
-				return "发送成功", nil
-			}
-			builder := msgchain.Builder().Friend()
-			builder.ImageBase64(bs64)
-			if _, ok := m.bot.SendFriendMsg(id, builder.Build()); !ok {
+			if !m.sendImage(b, id, isGroup, bs64) {
 				return "", fmt.Errorf("发送失败")
 			}
 			return "发送成功", nil
 		},
+		SendFile: func(name, bs64 string) (string, error) {
+			if !m.sendFile(b, id, isGroup, name, bs64) {
+				return "", fmt.Errorf("发送失败（也可能是上传超时、内容稍后仍会送达，请勿重复发送）")
+			}
+			return "发送成功", nil
+		},
+		GetPrivateFileURL: func(fileId string) (string, error) {
+			if isGroup {
+				return "", fmt.Errorf("当前为群聊主动互动，无法获取私聊文件")
+			}
+			qb := botQQ(b)
+			if qb == nil {
+				return "", fmt.Errorf("当前平台不支持获取私聊文件URL")
+			}
+			url, ok := qb.GetPrivateFileURL(id, fileId)
+			if !ok {
+				return "", fmt.Errorf("获取私聊文件URL失败")
+			}
+			return url, nil
+		},
 		LoadImages: func(_ []string) (string, error) {
 			return "当前为主动互动触发，没有可以直接加载的消息图片；可以用 get_msg_history 查看历史", nil
 		},
-		TakeLoadedImages: func() []string { return nil },
+		TakeLoadedImages: func() []string {
+			imgs := loadedImages
+			loadedImages = nil
+			return imgs
+		},
 	}
+	// 本地图片（主模型多模态或配置了备用识别模型时可用），与定时任务同一套实现
+	if p != nil {
+		p.attachLocalImageCallback(&cbs, ctx, &loadedImages, extra.add)
+	}
+	// 命令级人工审批（bash 三段式）：主动互动无人值守，requester=0 即仅管理员可批，
+	// 提示发到本会话（与定时任务同口径）
+	if p != nil && p.cfg.Approval.Enable && p.approvalManager != nil {
+		cbs.RequestApproval = func(ctx context.Context, toolName, summary string) (bool, string) {
+			return p.approvalManager.request(ctx, sessionKey(id, isGroup), toolName, summary,
+				message.FromUint64(0), func(text string) { p.sendPlainText(b, id, isGroup, text) })
+		}
+	}
+	return cbs
 }
 
 // send 发送主动发言内容。开启「按空行拆分回复」时拆成多条，与普通回复一致。
-func (m *proactiveManager) send(id message.QID, isGroup bool, text string) bool {
-	if m.bot == nil {
-		return false
+// 返回是否全部发送成功，以及是否已经发出至少一段——后者用于区分「完全没
+// 发出去（可以重试）」与「部分已发出（重试会导致重复）」。
+func (m *proactiveManager) send(b bot.Bot, id message.QID, isGroup bool, text string) (ok, sentAny bool) {
+	if b == nil {
+		return false, false
 	}
 	split := m.plugin != nil && m.plugin.cfg.Reply.SplitBlankLine
 	for _, seg := range replySegments(text, split) {
@@ -342,21 +388,63 @@ func (m *proactiveManager) send(id message.QID, isGroup bool, text string) bool 
 		if seg == "" {
 			continue
 		}
-		if isGroup {
-			builder := msgchain.Builder().Group()
-			builder.Text(seg)
-			if _, ok := m.bot.SendGroupMsg(id, builder.Build()); !ok {
-				return false
-			}
-			continue
+		if !m.sendText(b, id, isGroup, seg) {
+			return false, sentAny
 		}
-		builder := msgchain.Builder().Friend()
-		builder.Text(seg)
-		if _, ok := m.bot.SendFriendMsg(id, builder.Build()); !ok {
-			return false
-		}
+		sentAny = true
 	}
-	return true
+	return true, sentAny
+}
+
+// sendText 发送一段纯文本，返回是否成功。
+func (m *proactiveManager) sendText(b bot.Bot, id message.QID, isGroup bool, text string) bool {
+	if b == nil {
+		return false
+	}
+	if isGroup {
+		builder := msgchain.Builder().Group()
+		builder.Text(text)
+		_, ok := b.SendGroupMsg(id, builder.Build())
+		return ok
+	}
+	builder := msgchain.Builder().Friend()
+	builder.Text(text)
+	_, ok := b.SendFriendMsg(id, builder.Build())
+	return ok
+}
+
+// sendImage 发送 base64 图片，返回是否成功。
+func (m *proactiveManager) sendImage(b bot.Bot, id message.QID, isGroup bool, bs64 string) bool {
+	if b == nil {
+		return false
+	}
+	if isGroup {
+		builder := msgchain.Builder().Group()
+		builder.ImageBase64(bs64)
+		_, ok := b.SendGroupMsg(id, builder.Build())
+		return ok
+	}
+	builder := msgchain.Builder().Friend()
+	builder.ImageBase64(bs64)
+	_, ok := b.SendFriendMsg(id, builder.Build())
+	return ok
+}
+
+// sendFile 发送 base64 文件，返回是否成功。
+func (m *proactiveManager) sendFile(b bot.Bot, id message.QID, isGroup bool, name, bs64 string) bool {
+	if b == nil {
+		return false
+	}
+	if isGroup {
+		builder := msgchain.Builder().Group()
+		builder.FileBase64(name, bs64)
+		_, ok := b.SendGroupMsg(id, builder.Build())
+		return ok
+	}
+	builder := msgchain.Builder().Friend()
+	builder.FileBase64(name, bs64)
+	_, ok := b.SendFriendMsg(id, builder.Build())
+	return ok
 }
 
 // weekdayCN 返回中文星期。

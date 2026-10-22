@@ -77,11 +77,20 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
+// intentionDBTimeout 单条 SQL 的超时：调度循环与消息热路径（noteMessage 里结算
+// replied）都会调到这里，存储卡住时不能无限期阻塞消息处理。
+const intentionDBTimeout = 5 * time.Second
+
 // intentionStore 意图行级存储。所有方法失败时只记日志并返回零值，
 // 让上层调度按「本轮没有可执行意图」自然降级，绝不阻塞消息主流程。
 type intentionStore struct {
 	db     *sql.DB
 	logger *slog.Logger
+}
+
+// dbCtx 返回带超时的数据库上下文。
+func (s *intentionStore) dbCtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), intentionDBTimeout)
 }
 
 // newIntentionStore 建表并返回存储；建表失败返回 error（由调用方禁用功能）。
@@ -131,7 +140,9 @@ func formatRowTime(t time.Time) string {
 
 // insert 写入一条意图。
 func (s *intentionStore) insert(it *ProactiveIntention) bool {
-	_, err := s.db.ExecContext(context.Background(),
+	ctx, cancel := s.dbCtx()
+	defer cancel()
+	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO ania_intention (`+intentionColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		it.ID, it.Scope, it.Source, it.Prompt, it.Note, it.Priority,
 		formatRowTime(it.DueAt), formatRowTime(it.ExpiresAt),
@@ -146,7 +157,9 @@ func (s *intentionStore) insert(it *ProactiveIntention) bool {
 
 // update 覆盖一条意图的可变字段（scope / source / created_* 创建后不再变更）。
 func (s *intentionStore) update(it *ProactiveIntention) bool {
-	res, err := s.db.ExecContext(context.Background(),
+	ctx, cancel := s.dbCtx()
+	defer cancel()
+	res, err := s.db.ExecContext(ctx,
 		`UPDATE ania_intention SET prompt = ?, note = ?, priority = ?, due_at = ?, expires_at = ?, `+
 			`status = ?, sent_at = ?, outcome = ?, outcome_at = ?, reason = ?, reply = ?, attempts = ? WHERE id = ?`,
 		it.Prompt, it.Note, it.Priority, formatRowTime(it.DueAt), formatRowTime(it.ExpiresAt),
@@ -157,8 +170,9 @@ func (s *intentionStore) update(it *ProactiveIntention) bool {
 		return false
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		s.logger.Warn("更新主动意图时记录已不存在", "id", it.ID)
-		return false
+		// MySQL 默认返回「变更行数」而非「匹配行数」（go-sql-driver 未开
+		// clientFoundRows），字段值恰好没变时也是 0——不能据此判定记录已不存在
+		s.logger.Debug("主动意图更新未产生变更行", "id", it.ID)
 	}
 	return true
 }
@@ -168,7 +182,9 @@ func (s *intentionStore) due(now time.Time, limit int) []ProactiveIntention {
 	if limit <= 0 {
 		limit = proactiveTickBatch
 	}
-	rows, err := s.db.QueryContext(context.Background(),
+	ctx, cancel := s.dbCtx()
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+intentionColumns+` FROM ania_intention WHERE status = ? AND due_at <= ? `+
 			`ORDER BY priority DESC, due_at ASC LIMIT ?`,
 		proactiveStatusPending, formatRowTime(now), limit)
@@ -181,7 +197,9 @@ func (s *intentionStore) due(now time.Time, limit int) []ProactiveIntention {
 
 // pendingByScope 列出某会话待执行的意图（任何来源）。
 func (s *intentionStore) pendingByScope(scope string) []ProactiveIntention {
-	rows, err := s.db.QueryContext(context.Background(),
+	ctx, cancel := s.dbCtx()
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+intentionColumns+` FROM ania_intention WHERE scope = ? AND status = ? ORDER BY due_at ASC`,
 		scope, proactiveStatusPending)
 	if err != nil {
@@ -196,7 +214,9 @@ func (s *intentionStore) recentByScope(scope string, limit int) []ProactiveInten
 	if limit <= 0 {
 		limit = 10
 	}
-	rows, err := s.db.QueryContext(context.Background(),
+	ctx, cancel := s.dbCtx()
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+intentionColumns+` FROM ania_intention WHERE scope = ? ORDER BY created_at DESC LIMIT ?`,
 		scope, limit)
 	if err != nil {
@@ -227,8 +247,10 @@ func collectIntentions(rows *sql.Rows, logger *slog.Logger, errMsg string) []Pro
 
 // lastSentAt 返回某会话最近一次成功主动发言的时间。
 func (s *intentionStore) lastSentAt(scope string) (time.Time, bool) {
+	ctx, cancel := s.dbCtx()
+	defer cancel()
 	var raw string
-	err := s.db.QueryRowContext(context.Background(),
+	err := s.db.QueryRowContext(ctx,
 		`SELECT sent_at FROM ania_intention WHERE scope = ? AND status = ? ORDER BY sent_at DESC LIMIT 1`,
 		scope, proactiveStatusSent).Scan(&raw)
 	if err != nil {
@@ -243,14 +265,16 @@ func (s *intentionStore) lastSentAt(scope string) (time.Time, bool) {
 
 // countSentSince 统计某会话（scope 为空表示全局）从 since 起成功发出的条数。
 func (s *intentionStore) countSentSince(scope string, since time.Time) int {
+	ctx, cancel := s.dbCtx()
+	defer cancel()
 	var n int
 	var err error
 	if scope == "" {
-		err = s.db.QueryRowContext(context.Background(),
+		err = s.db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM ania_intention WHERE status = ? AND sent_at >= ?`,
 			proactiveStatusSent, formatRowTime(since)).Scan(&n)
 	} else {
-		err = s.db.QueryRowContext(context.Background(),
+		err = s.db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM ania_intention WHERE scope = ? AND status = ? AND sent_at >= ?`,
 			scope, proactiveStatusSent, formatRowTime(since)).Scan(&n)
 	}
@@ -267,7 +291,9 @@ func (s *intentionStore) consecutiveIgnored(scope string, limit int) int {
 	if limit <= 0 {
 		return 0
 	}
-	rows, err := s.db.QueryContext(context.Background(),
+	ctx, cancel := s.dbCtx()
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT outcome FROM ania_intention WHERE scope = ? AND status = ? ORDER BY sent_at DESC LIMIT ?`,
 		scope, proactiveStatusSent, limit)
 	if err != nil {
@@ -283,6 +309,11 @@ func (s *intentionStore) consecutiveIgnored(scope string, limit int) int {
 		}
 		outcomes = append(outcomes, o)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		s.logger.Error("读取主动发言结果失败", "scope", scope, "error", err)
+		return 0
+	}
 	rows.Close()
 
 	n := 0
@@ -297,7 +328,9 @@ func (s *intentionStore) consecutiveIgnored(scope string, limit int) int {
 
 // markReplied 把某会话在观察窗口内发出、尚未结算的发言标记为「有人回应」。
 func (s *intentionStore) markReplied(scope string, since time.Time) int {
-	res, err := s.db.ExecContext(context.Background(),
+	ctx, cancel := s.dbCtx()
+	defer cancel()
+	res, err := s.db.ExecContext(ctx,
 		`UPDATE ania_intention SET outcome = ?, outcome_at = ? `+
 			`WHERE scope = ? AND status = ? AND outcome = '' AND sent_at >= ?`,
 		proactiveOutcomeReplied, formatRowTime(time.Now()), scope, proactiveStatusSent, formatRowTime(since))
@@ -311,7 +344,9 @@ func (s *intentionStore) markReplied(scope string, since time.Time) int {
 
 // markIgnored 把观察窗口已过、仍无人回应的发言标记为「被忽略」，返回条数。
 func (s *intentionStore) markIgnored(cutoff time.Time) int {
-	res, err := s.db.ExecContext(context.Background(),
+	ctx, cancel := s.dbCtx()
+	defer cancel()
+	res, err := s.db.ExecContext(ctx,
 		`UPDATE ania_intention SET outcome = ?, outcome_at = ? `+
 			`WHERE status = ? AND outcome = '' AND sent_at <= ?`,
 		proactiveOutcomeIgnored, formatRowTime(time.Now()), proactiveStatusSent, formatRowTime(cutoff))
@@ -325,7 +360,9 @@ func (s *intentionStore) markIgnored(cutoff time.Time) int {
 
 // expireStale 把超过有效期仍未执行的意图置为 expired，返回条数。
 func (s *intentionStore) expireStale(now time.Time) int {
-	res, err := s.db.ExecContext(context.Background(),
+	ctx, cancel := s.dbCtx()
+	defer cancel()
+	res, err := s.db.ExecContext(ctx,
 		`UPDATE ania_intention SET status = ?, reason = '超过有效期未发出' `+
 			`WHERE status = ? AND expires_at <> '' AND expires_at < ?`,
 		proactiveStatusExpired, proactiveStatusPending, formatRowTime(now))
@@ -339,7 +376,9 @@ func (s *intentionStore) expireStale(now time.Time) int {
 
 // prune 删除早于 before 的历史意图（待执行的意图不删），返回删除条数。
 func (s *intentionStore) prune(before time.Time) int {
-	res, err := s.db.ExecContext(context.Background(),
+	ctx, cancel := s.dbCtx()
+	defer cancel()
+	res, err := s.db.ExecContext(ctx,
 		`DELETE FROM ania_intention WHERE created_at < ? AND status <> ?`,
 		formatRowTime(before), proactiveStatusPending)
 	if err != nil {
@@ -352,7 +391,9 @@ func (s *intentionStore) prune(before time.Time) int {
 
 // awaitingScopes 返回仍在观察窗口内的会话（sent 且尚未结算）。
 func (s *intentionStore) awaitingScopes(since time.Time) []string {
-	rows, err := s.db.QueryContext(context.Background(),
+	ctx, cancel := s.dbCtx()
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT DISTINCT scope FROM ania_intention WHERE status = ? AND outcome = '' AND sent_at >= ?`,
 		proactiveStatusSent, formatRowTime(since))
 	if err != nil {
@@ -367,6 +408,11 @@ func (s *intentionStore) awaitingScopes(since time.Time) []string {
 			return out
 		}
 		out = append(out, scope)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		s.logger.Error("读取待观察会话失败", "error", err)
+		return out
 	}
 	rows.Close()
 	return out
