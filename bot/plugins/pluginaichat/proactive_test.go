@@ -798,6 +798,43 @@ func TestBuildPromptMentionsSkipOutput(t *testing.T) {
 	}
 }
 
+// TestTriggerSummary 写进 Query 日志的触发说明：来源、意图内容与现场近况，
+// 面板据此回看「这次为什么开口 / 打算说什么」。
+func TestTriggerSummary(t *testing.T) {
+	m := newTestProactiveManager(t)
+	m.baseScopes["g:1"] = struct{}{}
+	now := time.Now()
+
+	m.mu.Lock()
+	act := m.scopeLocked("g:1", "1", true, now.Add(-25*time.Minute))
+	act.Seeded = false
+	act.Messages = []observedMessage{{At: now.Add(-3 * time.Minute), Sender: "小明", Text: "今天好热"}}
+	m.mu.Unlock()
+
+	idle := m.triggerSummary(&ProactiveIntention{ID: "abcd1234", Scope: "g:1", Source: proactiveSourceIdle})
+	for _, want := range []string{"【主动互动 · 冷场触发】", "意图 abcd1234", "会话已安静 25 分钟", "最近消息：", "小明: 今天好热"} {
+		if !strings.Contains(idle, want) {
+			t.Fatalf("冷场触发说明缺少 %q: %s", want, idle)
+		}
+	}
+
+	ai := m.triggerSummary(&ProactiveIntention{Scope: "g:1", Source: proactiveSourceAI, Prompt: "问问面试结果", Note: "上周面的"})
+	for _, want := range []string{"AI 预约", "到点执行", "问问面试结果", "备注：上周面的"} {
+		if !strings.Contains(ai, want) {
+			t.Fatalf("AI 预约触发说明缺少 %q: %s", want, ai)
+		}
+	}
+
+	manual := m.triggerSummary(&ProactiveIntention{Scope: "g:1", Source: proactiveSourceManual, Prompt: "讲个笑话"})
+	if !strings.Contains(manual, "手动触发") || !strings.Contains(manual, "讲个笑话") {
+		t.Fatalf("手动触发说明异常: %s", manual)
+	}
+	empty := m.triggerSummary(&ProactiveIntention{Scope: "g:1", Source: proactiveSourceManual})
+	if !strings.Contains(empty, "未指定内容") {
+		t.Fatalf("手动触发未指定内容时应有说明: %s", empty)
+	}
+}
+
 // ---- 工具 ----
 
 func TestProactiveCreateRejectsDisabledScope(t *testing.T) {

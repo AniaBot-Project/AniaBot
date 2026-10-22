@@ -3,6 +3,7 @@ package querylog
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -147,6 +148,64 @@ func TestSQLBackendQueryFilter(t *testing.T) {
 	got := l.Query(Filter{ChatType: "group"})
 	if len(got) != 2 || !got[0].Time.After(got[1].Time) {
 		t.Errorf("Query 结果应按时间倒序: %+v", got)
+	}
+}
+
+// TestSQLBackendKindFilter 主动互动日志按 Kind 与普通对话区分，支持组合筛选。
+func TestSQLBackendKindFilter(t *testing.T) {
+	l, _ := newSQLLogger(t, 100)
+	l.Record(Entry{ChatType: "group", TargetID: "1", Query: "用户提问"})
+	l.Record(Entry{Kind: KindProactive, ChatType: "group", TargetID: "1", Query: "【主动互动 · 冷场触发】", Status: StatusSkipped, Note: "没有具体由头"})
+	l.Record(Entry{Kind: KindProactive, ChatType: "friend", TargetID: "2", Query: "【主动互动 · 手动触发】", Reply: "在吗"})
+
+	if got := l.Query(Filter{Kind: KindProactive, Limit: 10}); len(got) != 2 {
+		t.Fatalf("按主动互动筛选应命中 2 条, got %d", len(got))
+	}
+	chatOnly := l.Query(Filter{Kind: KindChat, Limit: 10})
+	if len(chatOnly) != 1 || chatOnly[0].Kind != "" {
+		t.Fatalf("普通对话筛选应只命中未标记记录: %+v", chatOnly)
+	}
+	if got := l.Query(Filter{Kind: KindProactive, ChatType: "friend", Limit: 10}); len(got) != 1 || got[0].Reply != "在吗" {
+		t.Fatalf("kind + chat_type 组合筛选异常: %+v", got)
+	}
+	// 说明字段往返
+	skip := l.Query(Filter{Kind: KindProactive, ChatType: "group", Limit: 10})
+	if len(skip) != 1 || skip[0].Note == "" || skip[0].Status != StatusSkipped {
+		t.Fatalf("说明/状态未保存: %+v", skip)
+	}
+}
+
+// TestSQLBackendUpgradeAddsKindColumn 旧库（无 kind 列）升级后自动补列：
+// 历史记录视为普通对话，新记录的 kind 可正常写入与筛选。
+func TestSQLBackendUpgradeAddsKindColumn(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { db.Close() })
+
+	// 升级前的表结构（没有 kind 列）
+	if _, err := db.Exec(`CREATE TABLE ania_query_log (seq INTEGER NOT NULL PRIMARY KEY, chat_type TEXT NOT NULL, target_id TEXT NOT NULL, senders TEXT NOT NULL, status TEXT NOT NULL, query_text TEXT NOT NULL, created_at INTEGER NOT NULL, payload TEXT NOT NULL)`); err != nil {
+		t.Fatalf("建旧表失败: %v", err)
+	}
+	old := Entry{ID: "1", Time: time.Now(), ChatType: "group", TargetID: "1", Query: "旧记录", Status: StatusSuccess}
+	payload, _ := json.Marshal(old)
+	if _, err := db.Exec(`INSERT INTO ania_query_log (seq, chat_type, target_id, senders, status, query_text, created_at, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		1, old.ChatType, old.TargetID, ",", string(old.Status), old.Query, old.Time.Unix(), string(payload)); err != nil {
+		t.Fatalf("写入旧记录失败: %v", err)
+	}
+
+	l := New(&sqlFakeStore{fakeStore: newFakeStore(), db: db}, 10, nil)
+	if got := l.Query(Filter{Kind: KindChat, Limit: 10}); len(got) != 1 || got[0].Query != "旧记录" {
+		t.Fatalf("旧记录应视为普通对话: %+v", got)
+	}
+	l.Record(Entry{Kind: KindProactive, ChatType: "group", TargetID: "1", Query: "新主动互动"})
+	if got := l.Query(Filter{Kind: KindProactive, Limit: 10}); len(got) != 1 || got[0].Query != "新主动互动" {
+		t.Fatalf("补列后新记录 kind 应可筛选: %+v", got)
+	}
+	if got := l.Query(Filter{Limit: 10}); len(got) != 2 {
+		t.Fatalf("不带 kind 筛选应返回全部记录, got %d", len(got))
 	}
 }
 

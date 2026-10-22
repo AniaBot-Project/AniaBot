@@ -216,7 +216,7 @@ clock 任务里注册的是**异步**子代理变体（`clocksubagent.go`）：�
 
 - **quotaManager**：按「每会话每日」+「全局每日」两个维度限制 token 消耗，键 `daily:<日期>:<会话key>` 天然按天过期；Check-Add 为宽松语义（非硬实时），面板可查看用量
 - **usageAcc**：goroutine 安全的派生用量累加器，归集主循环之外的消耗（异步子代理、team 成员、备用识图），收尾并入统计与配额
-- **Query 日志**：一次「触发 → 最终响应」的完整记录（`ania_query_log` 行级），含用户输入、发送者、工具调用明细（上限 20 条 + 总数）、token、状态（running/success/stopped/timeout/error），面板「Query 日志」页按条件筛选
+- **Query 日志**：一次「触发 → 最终响应」的完整记录（`ania_query_log` 行级），含用户输入、发送者、工具调用明细（上限 20 条 + 总数）、token、状态（running/success/skipped/stopped/timeout/error），面板「Query 日志」页按条件筛选；主动互动的执行同样落在这里（`kind=proactive`，以触发说明替代用户输入，保持安静时状态为 skipped 并在 note 记录原因），Token 统计按来源单列
 
 ## 钩子系统（hooks）
 

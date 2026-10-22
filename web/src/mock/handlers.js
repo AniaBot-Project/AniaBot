@@ -389,9 +389,11 @@ const routes = [
       const chatType = c.query.get('chat_type')
       const targetId = c.query.get('target_id')
       const sender = c.query.get('sender')
+      const kind = c.query.get('kind')
       if (chatType) list = list.filter((x) => x.chat_type === chatType)
       if (targetId) list = list.filter((x) => x.target_id === targetId)
       if (sender) list = list.filter((x) => (x.senders || []).some((s) => String(s).includes(sender)))
+      if (kind) list = list.filter((x) => (x.kind || 'chat') === kind)
       list = list.filter((x) => inRange(x.time, c.query) && hasKeyword({ q: x.query, r: x.reply, e: x.error }, c.query.get('keyword')))
       return paginate(list, c.query, (x) => x.id)
     },

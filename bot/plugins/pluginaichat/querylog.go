@@ -138,10 +138,68 @@ func (p *AIChatPlugin) finishQuery(r *queryRecorder, chat *aichat.ChatBot, usage
 			status = querylog.StatusError
 		}
 	}
-	toolCalls := r.toolCalls
 	// 并入主请求循环之外派生的消耗（异步子代理 / team_run 成员 / 备用图片识别，
 	// 见 usageacc.go），使统计反映会话的完整成本（配额在各派生调用点单独累加）
 	extra := p.takeExtraUsage(r.key)
+	p.writeQueryResult(r, usage, extra, status, reply, "", errText)
+}
+
+// beginProactiveQuery 开始记录一次主动互动执行。与普通 Query 的区别：Kind 标记
+// 为 proactive（面板据此区分筛选与统计），Query 记录触发说明（来源、意图内容、
+// 现场近况）而不是用户输入；工具调用沿用同一套逐条落盘逻辑。
+func (p *AIChatPlugin) beginProactiveQuery(chat *aichat.ChatBot, id message.QID, isGroup bool, trigger string) *queryRecorder {
+	if p.queryLogger == nil {
+		return nil
+	}
+	chatType := "friend"
+	if isGroup {
+		chatType = "group"
+	}
+	r := &queryRecorder{start: time.Now(), key: sessionKey(id, isGroup), maxRecords: p.queryLogMaxToolRecords()}
+	r.entry = p.queryLogger.Record(querylog.Entry{
+		Kind:     querylog.KindProactive,
+		ChatType: chatType,
+		TargetID: id.String(),
+		Query:    trigger,
+		Status:   querylog.StatusRunning,
+	})
+	chat.SetToolObserver(func(info aichat.ToolCallInfo) {
+		p.onToolCall(r, info)
+	})
+	return r
+}
+
+// finishProactiveQuery 收尾一次主动互动记录：回填状态、耗时、token 用量、工具
+// 明细与结果。status 为空时按错误推断；保持安静（skip_output）时传
+// StatusSkipped，note 记原因、reply 为空。主动互动的图片识别等派生消耗已在
+// chat 内部并入 usage，因此不再取会话级 extraUsage（那是主对话的）。
+func (p *AIChatPlugin) finishProactiveQuery(r *queryRecorder, usage aichat.TokenUsage, status querylog.Status, reply, note string, execErr error) {
+	if r == nil {
+		return
+	}
+	errText := ""
+	if execErr != nil {
+		errText = execErr.Error()
+		if status == "" {
+			switch {
+			case errors.Is(execErr, context.Canceled):
+				status = querylog.StatusStopped
+			case errors.Is(execErr, context.DeadlineExceeded):
+				status = querylog.StatusTimeout
+			default:
+				status = querylog.StatusError
+			}
+		}
+	} else if status == "" {
+		status = querylog.StatusSuccess
+	}
+	p.writeQueryResult(r, usage, aichat.TokenUsage{}, status, reply, note, errText)
+}
+
+// writeQueryResult 把一次 Query 的终态写回记录：状态、耗时、token 用量、
+// 工具调用明细与结果说明。普通 Query 与主动互动共用，保证两边字段回填一致。
+func (p *AIChatPlugin) writeQueryResult(r *queryRecorder, usage, extra aichat.TokenUsage, status querylog.Status, reply, note, errText string) {
+	toolCalls := r.toolCalls
 	p.queryLogger.Update(r.entry.ID, func(e *querylog.Entry) {
 		e.Status = status
 		e.DurationMs = time.Since(r.start).Milliseconds()
@@ -153,6 +211,7 @@ func (p *AIChatPlugin) finishQuery(r *queryRecorder, chat *aichat.ChatBot, usage
 		e.ToolCalls = toolCalls
 		e.ToolCallsTotal = r.toolCallsTotal
 		e.Reply = reply
+		e.Note = note
 		e.Error = errText
 	})
 }

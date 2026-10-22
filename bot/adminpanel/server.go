@@ -829,7 +829,8 @@ func (s *Server) handleMsgLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleQueryLogs 按条件分页查询 AI Query 日志（新在前）。
-// 支持查询参数：chat_type（group/friend）、target_id（群号/QQ）、sender（触发人 QQ）、
+// 支持查询参数：kind（chat / proactive，主动互动与普通对话区分）、
+// chat_type（group/friend）、target_id（群号/QQ）、sender（触发人 QQ）、
 // start / end（RFC3339 或 datetime-local 格式）、keyword（匹配用户输入）、
 // limit（每页条数，默认 50，最大 200）、before（分页游标：仅返回比该日志 ID 更旧的记录）。
 // 响应：{"items": [...], "has_more": bool}。
@@ -840,10 +841,15 @@ func (s *Server) handleQueryLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	f := querylog.Filter{
+		Kind:     q.Get("kind"),
 		ChatType: q.Get("chat_type"),
 		TargetID: q.Get("target_id"),
 		Sender:   q.Get("sender"),
 		Keyword:  q.Get("keyword"),
+	}
+	if f.Kind != "" && f.Kind != querylog.KindChat && f.Kind != querylog.KindProactive {
+		writeError(w, http.StatusBadRequest, "kind 仅支持 chat / proactive")
+		return
 	}
 	if f.ChatType != "" && f.ChatType != "group" && f.ChatType != "friend" {
 		writeError(w, http.StatusBadRequest, "chat_type 仅支持 group / friend")

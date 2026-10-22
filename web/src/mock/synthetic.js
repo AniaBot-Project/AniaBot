@@ -123,13 +123,21 @@ const QUERIES = [
 ]
 const QUERY_STATUSES = ['success', 'success', 'success', 'success', 'running', 'error', 'timeout', 'interrupted']
 
+// 主动互动的触发说明（与后端的 triggerSummary 形状一致）
+const PROACTIVE_TRIGGERS = [
+  '【主动互动 · 冷场触发】意图 abcd1234\n会话已安静 1 小时 25 分钟，由 AI 判断是否开口。\n最近消息：\n[14:02] 小明: 今天好热',
+  '【主动互动 · AI 预约】意图 9f8e7d6c\n到点执行：\n问问面试结果怎么样了\n备注：上周三面的试',
+  '【主动互动 · 手动触发】意图 5a4b3c2d\n管理员希望你说：\n提醒大家今晚 8 点开会',
+]
+
 export function buildQueryLogs(now) {
   const items = []
   let n = 1
   let t = now - ri(100, 130) * 60 * 1000
   while (t < now - 60 * 1000) {
-    const q = pick(QUERIES)
-    const status = pick(QUERY_STATUSES)
+    const proactive = n % 6 === 0
+    const q = proactive ? { q: pick(PROACTIVE_TRIGGERS), tools: [] } : pick(QUERIES)
+    const status = proactive ? pick(['success', 'success', 'skipped']) : pick(QUERY_STATUSES)
     const done = status !== 'running'
     const prompt = ri(2, 18) * 1000
     const completion = ri(300, 6000)
@@ -151,6 +159,7 @@ export function buildQueryLogs(now) {
       total_tokens: prompt + completion,
       cached_tokens: cached,
     }
+    if (proactive) item.kind = 'proactive'
     if (q.tools.length) {
       item.tool_calls = q.tools.map(([name, args]) => ({
         name, arguments: args,
@@ -161,6 +170,7 @@ export function buildQueryLogs(now) {
     }
     if (done) {
       if (status === 'success') item.reply = pick(AI_REPLIES)
+      if (status === 'skipped') item.note = 'AI 判断此刻无需发言：这个话题已经过去了'
       if (status === 'error') item.error = '上游 API 返回 429：请求过于频繁，已重试 3 次'
       if (status === 'timeout') item.error = '执行超时（300s），已被强制中止'
       if (status === 'interrupted') item.error = '被用户 /stop 指令中止'
@@ -319,7 +329,7 @@ export function buildTokenStatsDetail(range, now, startStr, endStr) {
     r.total_tokens = r.prompt_tokens + r.completion_tokens
     return r
   }
-  const statusNames = ['success', 'error', 'timeout', 'stopped', 'interrupted']
+  const statusNames = ['success', 'skipped', 'error', 'timeout', 'stopped', 'interrupted']
   const byStatus = {}
   let rest = summaryNum.requests
   for (const st of statusNames) {
@@ -334,33 +344,34 @@ export function buildTokenStatsDetail(range, now, startStr, endStr) {
     { chat_type: 'group', target_id: 'qq:7891011', ...split(sumAcc(daily.slice(-9)), 0.04) },
   ]
   const hourly = Array.from({ length: 24 }, (_, h) => {
-    const q = ri(0, 14), tk = ri(0, 6)
+    const q = ri(0, 14), p = ri(0, 2), tk = ri(0, 6)
     const mk = (n) => ({ requests: n, prompt_tokens: n * ri(2, 8) * 1000, completion_tokens: n * ri(400, 1500), total_tokens: 0, cached_tokens: 0, cache_hit_rate: ri(30, 60) / 100 })
-    const q1 = mk(q), t1 = mk(tk)
-    for (const x of [q1, t1]) {
+    const q1 = mk(q), p1 = mk(p), t1 = mk(tk)
+    for (const x of [q1, p1, t1]) {
       x.total_tokens = x.prompt_tokens + x.completion_tokens
       x.cached_tokens = Math.floor(x.prompt_tokens * 0.4)
     }
-    const total = sumAcc([q1, t1])
-    return { date: '', query: q1, task: t1, total }
+    const total = sumAcc([q1, p1, t1])
+    return { date: '', query: q1, proactive: p1, task: t1, total }
   })
   const dailyOut = daily.map((d) => {
-    const q = { requests: Math.round(d.requests * 0.7), prompt_tokens: Math.round(d.prompt_tokens * 0.7), completion_tokens: Math.round(d.completion_tokens * 0.7), total_tokens: 0, cached_tokens: Math.round(d.cached_tokens * 0.7), cache_hit_rate: d.cache_hit_rate }
-    const t = { requests: d.requests - q.requests, prompt_tokens: d.prompt_tokens - q.prompt_tokens, completion_tokens: d.completion_tokens - q.completion_tokens, total_tokens: 0, cached_tokens: d.cached_tokens - q.cached_tokens, cache_hit_rate: d.cache_hit_rate }
-    for (const x of [q, t]) x.total_tokens = x.prompt_tokens + x.completion_tokens
-    const total = sumAcc([q, t])
-    return { date: d.date, query: q, task: t, total }
+    const q = { requests: Math.round(d.requests * 0.65), prompt_tokens: Math.round(d.prompt_tokens * 0.65), completion_tokens: Math.round(d.completion_tokens * 0.65), total_tokens: 0, cached_tokens: Math.round(d.cached_tokens * 0.65), cache_hit_rate: d.cache_hit_rate }
+    const p = { requests: Math.max(0, Math.round(d.requests * 0.05)), prompt_tokens: Math.round(d.prompt_tokens * 0.05), completion_tokens: Math.round(d.completion_tokens * 0.05), total_tokens: 0, cached_tokens: Math.round(d.cached_tokens * 0.05), cache_hit_rate: d.cache_hit_rate }
+    const t = { requests: Math.max(0, d.requests - q.requests - p.requests), prompt_tokens: Math.max(0, d.prompt_tokens - q.prompt_tokens - p.prompt_tokens), completion_tokens: Math.max(0, d.completion_tokens - q.completion_tokens - p.completion_tokens), total_tokens: 0, cached_tokens: Math.max(0, d.cached_tokens - q.cached_tokens - p.cached_tokens), cache_hit_rate: d.cache_hit_rate }
+    for (const x of [q, p, t]) x.total_tokens = x.prompt_tokens + x.completion_tokens
+    const total = sumAcc([q, p, t])
+    return { date: d.date, query: q, proactive: p, task: t, total }
   })
 
   return {
     range: range || 'all',
     summary: numAcc(summaryNum),
     today: numAcc(daily[daily.length - 1]),
-    by_source: { query: numAcc(split(summaryNum, 0.7)), task: numAcc(split(summaryNum, 0.3)) },
+    by_source: { query: numAcc(split(summaryNum, 0.65)), proactive: numAcc(split(summaryNum, 0.05)), task: numAcc(split(summaryNum, 0.3)) },
     by_chat_type: { group: numAcc(split(summaryNum, 0.72)), friend: numAcc(split(summaryNum, 0.28)) },
     by_status: byStatus,
     top_targets: topTargets.map((t) => ({ chat_type: t.chat_type, target_id: t.target_id, ...numAcc(t) })),
-    hourly: hourly.map((h) => ({ date: h.date, query: h.query, task: h.task, total: h.total })),
+    hourly: hourly.map((h) => ({ date: h.date, query: h.query, proactive: h.proactive, task: h.task, total: h.total })),
     daily: dailyOut,
     iterations: summaryNum.requests * 3,
     avg_iterations: summaryNum.requests ? Math.round((summaryNum.requests * 3.4 / summaryNum.requests) * 10) / 10 : 0,

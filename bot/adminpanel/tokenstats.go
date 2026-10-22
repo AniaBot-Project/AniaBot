@@ -153,12 +153,13 @@ func resolveTokenRange(key, startStr, endStr string, now time.Time) (tokenRange,
 // tokenTopTargets 详细统计中按目标（群/好友）排行的条目数上限
 const tokenTopTargets = 10
 
-// tokenDayDetail 单日用量（按来源拆分：对话 / 定时任务）。
+// tokenDayDetail 单日用量（按来源拆分：对话 / 主动互动 / 定时任务）。
 type tokenDayDetail struct {
-	Date  string       `json:"date"`
-	Query tokenStatAcc `json:"query"`
-	Task  tokenStatAcc `json:"task"`
-	Total tokenStatAcc `json:"total"`
+	Date      string       `json:"date"`
+	Query     tokenStatAcc `json:"query"`
+	Proactive tokenStatAcc `json:"proactive"`
+	Task      tokenStatAcc `json:"task"`
+	Total     tokenStatAcc `json:"total"`
 }
 
 // tokenTargetStat 按会话目标（目标会话 ID / 用户 ID）聚合的用量。
@@ -195,8 +196,8 @@ func summarize(a *tokenStatAcc) tokenStatSummary {
 	return s
 }
 
-// handleTokenStatsDetail 返回更细粒度的 token 统计维度：按来源（对话 / 定时任务）、
-// 会话类型（群聊 / 私聊）、执行状态、消耗目标排行（Top 10）、24 小时分布与
+// handleTokenStatsDetail 返回更细粒度的 token 统计维度：按来源（对话 / 主动互动 /
+// 定时任务）、会话类型（群聊 / 私聊）、执行状态、消耗目标排行（Top 10）、24 小时分布与
 // 分来源的每日序列。数据源与 handleTokenStats 相同（留存日志，非全量历史）。
 // 支持查询参数 range 限定统计窗口：today / yesterday / 7d / 30d / month / all
 // （默认 all，即全部留存记录）/ custom（自定义，需配合 start / end=2006-01-02，
@@ -224,7 +225,7 @@ func (s *Server) handleTokenStatsDetail(w http.ResponseWriter, r *http.Request) 
 		buckets[ds] = &daily[len(daily)-1]
 	}
 
-	var summary, today, byQuery, byTask, byGroup, byFriend tokenStatAcc
+	var summary, today, byQuery, byProactive, byTask, byGroup, byFriend tokenStatAcc
 	// hourly 与 daily 同构（按来源拆分，Date 字段不用），供单天窗口时前端直接渲染当日小时序列
 	hourly := make([]tokenDayDetail, 24)
 	statusCount := map[string]int{}
@@ -240,15 +241,21 @@ func (s *Server) handleTokenStatsDetail(w http.ResponseWriter, r *http.Request) 
 		}
 		if b, ok := buckets[ds]; ok {
 			b.Total.add(prompt, completion, total, cached)
-			if source == "task" {
+			switch source {
+			case "task":
 				b.Task.add(prompt, completion, total, cached)
-			} else {
+			case "proactive":
+				b.Proactive.add(prompt, completion, total, cached)
+			default:
 				b.Query.add(prompt, completion, total, cached)
 			}
 		}
-		if source == "task" {
+		switch source {
+		case "task":
 			byTask.add(prompt, completion, total, cached)
-		} else {
+		case "proactive":
+			byProactive.add(prompt, completion, total, cached)
+		default:
 			byQuery.add(prompt, completion, total, cached)
 		}
 		switch chatType {
@@ -259,9 +266,12 @@ func (s *Server) handleTokenStatsDetail(w http.ResponseWriter, r *http.Request) 
 		}
 		hh := &hourly[lt.Hour()]
 		hh.Total.add(prompt, completion, total, cached)
-		if source == "task" {
+		switch source {
+		case "task":
 			hh.Task.add(prompt, completion, total, cached)
-		} else {
+		case "proactive":
+			hh.Proactive.add(prompt, completion, total, cached)
+		default:
 			hh.Query.add(prompt, completion, total, cached)
 		}
 		if status != "" && status != "running" {
@@ -282,7 +292,12 @@ func (s *Server) handleTokenStatsDetail(w http.ResponseWriter, r *http.Request) 
 
 	if s.opt.QueryLogs != nil {
 		for _, e := range s.opt.QueryLogs(querylog.Filter{Start: rng.start, End: rng.end, Limit: 500}) {
-			addEntry(e.Time, "query", e.ChatType, e.TargetID, string(e.Status),
+			// 主动互动是 AI 自行发起的执行，与用户触发的对话分开计量
+			source := "query"
+			if e.KindValue() == querylog.KindProactive {
+				source = "proactive"
+			}
+			addEntry(e.Time, source, e.ChatType, e.TargetID, string(e.Status),
 				e.Iterations, e.PromptTokens, e.CompletionTokens, e.TotalTokens, e.CachedTokens)
 		}
 	}
@@ -296,16 +311,19 @@ func (s *Server) handleTokenStatsDetail(w http.ResponseWriter, r *http.Request) 
 	summary.finish()
 	today.finish()
 	byQuery.finish()
+	byProactive.finish()
 	byTask.finish()
 	byGroup.finish()
 	byFriend.finish()
 	for i := range hourly {
 		hourly[i].Query.finish()
+		hourly[i].Proactive.finish()
 		hourly[i].Task.finish()
 		hourly[i].Total.finish()
 	}
 	for i := range daily {
 		daily[i].Query.finish()
+		daily[i].Proactive.finish()
 		daily[i].Task.finish()
 		daily[i].Total.finish()
 	}
@@ -335,7 +353,7 @@ func (s *Server) handleTokenStatsDetail(w http.ResponseWriter, r *http.Request) 
 		"range":          rng.key,
 		"summary":        summarize(&summary),
 		"today":          summarize(&today),
-		"by_source":      map[string]tokenStatSummary{"query": summarize(&byQuery), "task": summarize(&byTask)},
+		"by_source":      map[string]tokenStatSummary{"query": summarize(&byQuery), "proactive": summarize(&byProactive), "task": summarize(&byTask)},
 		"by_chat_type":   map[string]tokenStatSummary{"group": summarize(&byGroup), "friend": summarize(&byFriend)},
 		"by_status":      statusCount,
 		"top_targets":    ranked,

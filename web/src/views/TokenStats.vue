@@ -115,6 +115,7 @@
           <div class="flex items-center gap-3">
             <span class="flex items-center gap-1.5 text-[10px] tracking-[0.12em] uppercase text-zinc-400">
               <i class="w-2 h-2 bg-zinc-700 inline-block rounded-[1px]" />对话
+              <i class="w-2 h-2 bg-zinc-500 inline-block rounded-[1px] ml-2" />主动互动
               <i class="w-2 h-2 bg-zinc-300 inline-block rounded-[1px] ml-2" />定时任务
             </span>
             <button class="text-[10px] tracking-[0.15em] uppercase text-zinc-500 hover:text-zinc-900 font-medium transition-colors" @click="loadDetail">刷新</button>
@@ -125,12 +126,14 @@
           <template v-if="singleDay">
             <div v-for="(h, i) in hourly" :key="i" class="flex-1 flex flex-col justify-end h-full min-w-0" :title="hourTip(i, h)">
               <div class="w-full bg-zinc-700" :style="{ height: hourBarH(h.query?.total_tokens) }" />
+              <div class="w-full bg-zinc-500" :style="{ height: hourBarH(h.proactive?.total_tokens) }" />
               <div class="w-full bg-zinc-300 rounded-t-sm" :style="{ height: hourBarH(h.task?.total_tokens) }" />
             </div>
           </template>
           <template v-else>
             <div v-for="d in daily" :key="d.date" class="flex-1 flex flex-col justify-end h-full min-w-0" :title="dayTip(d)">
               <div class="w-full bg-zinc-700" :style="{ height: barH(d.query?.total_tokens) }" />
+              <div class="w-full bg-zinc-500" :style="{ height: barH(d.proactive?.total_tokens) }" />
               <div class="w-full bg-zinc-300 rounded-t-sm" :style="{ height: barH(d.task?.total_tokens) }" />
             </div>
           </template>
@@ -149,7 +152,7 @@
         </div>
         <div class="dotline my-3" />
         <div class="text-[10px] tracking-[0.14em] uppercase text-zinc-500 truncate">
-          Source: query &amp; cron logs (retained, capped)
+          Source: query / proactive / cron logs (retained, capped)
           <span class="mx-2 text-zinc-300">//</span>
           Cache metrics depend on upstream API
         </div>
@@ -161,16 +164,21 @@
         <section class="tcard p-4 sm:p-6 flex flex-col">
           <div class="flex items-center justify-between">
             <span class="tlabel">By Source</span>
-            <span class="tpill"><span class="tdot bg-zinc-800" />对话 / 任务</span>
+            <span class="tpill"><span class="tdot bg-zinc-800" />对话 / 主动互动 / 任务</span>
           </div>
           <div class="flex h-3 rounded-sm overflow-hidden mt-5 bg-zinc-100">
-            <div class="bg-zinc-800" :style="{ width: shareW(bySource.query?.total_tokens, bySource.task?.total_tokens) }" />
-            <div class="bg-zinc-300" :style="{ width: shareW(bySource.task?.total_tokens, bySource.query?.total_tokens) }" />
+            <div class="bg-zinc-800" :style="{ width: segW(bySource.query?.total_tokens, bySource.proactive?.total_tokens, bySource.task?.total_tokens) }" />
+            <div class="bg-zinc-500" :style="{ width: segW(bySource.proactive?.total_tokens, bySource.query?.total_tokens, bySource.task?.total_tokens) }" />
+            <div class="bg-zinc-300" :style="{ width: segW(bySource.task?.total_tokens, bySource.query?.total_tokens, bySource.proactive?.total_tokens) }" />
           </div>
           <dl class="flex-1 mt-3 text-xs">
             <div class="dimrow">
               <dt class="tlabel">对话 Query</dt>
               <dd class="dimval">{{ fmtTokens(bySource.query?.total_tokens) }} <span class="text-zinc-400 font-normal">/ {{ bySource.query?.requests ?? 0 }} runs · avg {{ fmtTokens(Math.round(bySource.query?.avg_total_tokens || 0)) }}</span></dd>
+            </div>
+            <div class="dimrow">
+              <dt class="tlabel">主动互动 Proactive</dt>
+              <dd class="dimval">{{ fmtTokens(bySource.proactive?.total_tokens) }} <span class="text-zinc-400 font-normal">/ {{ bySource.proactive?.requests ?? 0 }} runs · avg {{ fmtTokens(Math.round(bySource.proactive?.avg_total_tokens || 0)) }}</span></dd>
             </div>
             <div class="dimrow">
               <dt class="tlabel">定时任务 Cron</dt>
@@ -396,6 +404,7 @@ watch(range, () => {
 
 const STATUS_META = [
   { key: 'success', label: '成功', bar: 'bg-zinc-800', dot: 'bg-[#34c759]' },
+  { key: 'skipped', label: '保持安静', bar: 'bg-blue-200', dot: 'bg-[#0071e3]' },
   { key: 'stopped', label: '已停止', bar: 'bg-zinc-400', dot: 'bg-zinc-400' },
   { key: 'timeout', label: '超时', bar: 'bg-zinc-300', dot: 'bg-[#ff9f0a]' },
   { key: 'error', label: '错误', bar: 'bg-zinc-200', dot: 'bg-[#ff3b30]' },
@@ -456,6 +465,13 @@ function shareW(a, b) {
   return (((a || 0) / sum) * 100).toFixed(1) + '%'
 }
 
+// segW 多段堆叠条中某一项的宽度；全为 0 时留空（露出灰底）
+function segW(v, ...rest) {
+  const sum = (v || 0) + rest.reduce((s, x) => s + (x || 0), 0)
+  if (!sum) return '0%'
+  return (((v || 0) / sum) * 100).toFixed(1) + '%'
+}
+
 // ---- 格式化 ----
 
 function fmtTokens(n) {
@@ -470,11 +486,11 @@ function pctText(r) {
 }
 
 function dayTip(d) {
-  return `${d.date} · 共 ${d.total?.total_tokens || 0} tok（对话 ${d.query?.total_tokens || 0} / 任务 ${d.task?.total_tokens || 0}）· ${d.total?.requests || 0} runs`
+  return `${d.date} · 共 ${d.total?.total_tokens || 0} tok（对话 ${d.query?.total_tokens || 0} / 主动互动 ${d.proactive?.total_tokens || 0} / 任务 ${d.task?.total_tokens || 0}）· ${d.total?.requests || 0} runs`
 }
 
 function hourTip(i, h) {
-  return `${String(i).padStart(2, '0')}:00 · 共 ${h.total?.total_tokens || 0} tok（对话 ${h.query?.total_tokens || 0} / 任务 ${h.task?.total_tokens || 0}）· ${h.total?.requests || 0} runs`
+  return `${String(i).padStart(2, '0')}:00 · 共 ${h.total?.total_tokens || 0} tok（对话 ${h.query?.total_tokens || 0} / 主动互动 ${h.proactive?.total_tokens || 0} / 任务 ${h.task?.total_tokens || 0}）· ${h.total?.requests || 0} runs`
 }
 
 function load() {

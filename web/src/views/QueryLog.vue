@@ -2,18 +2,34 @@
   <div class="space-y-4">
     <!-- 筛选与操作栏 -->
     <div class="flex items-center justify-between flex-wrap gap-3">
-      <div class="flex items-center gap-1 glass rounded-xl p-1">
-        <button
-          v-for="t in typeTabs"
-          :key="t.value"
-          class="px-3 py-1.5 text-xs rounded-md transition-all"
-          :class="filters.chat_type === t.value
-            ? 'btn-accent font-medium shadow-sm'
-            : 'text-slate-500 hover:text-slate-800 hover:bg-white/60'"
-          @click="filters.chat_type = t.value; applyFilters()"
-        >
-          {{ t.label }}
-        </button>
+      <div class="flex items-center gap-2 flex-wrap">
+        <div class="flex items-center gap-1 glass rounded-xl p-1">
+          <button
+            v-for="t in typeTabs"
+            :key="t.value"
+            class="px-3 py-1.5 text-xs rounded-md transition-all"
+            :class="filters.chat_type === t.value
+              ? 'btn-accent font-medium shadow-sm'
+              : 'text-slate-500 hover:text-slate-800 hover:bg-white/60'"
+            @click="filters.chat_type = t.value; applyFilters()"
+          >
+            {{ t.label }}
+          </button>
+        </div>
+        <!-- 来源：普通对话 / 主动互动（AI 自行发起的发言） -->
+        <div class="flex items-center gap-1 glass rounded-xl p-1">
+          <button
+            v-for="t in kindTabs"
+            :key="t.value"
+            class="px-3 py-1.5 text-xs rounded-md transition-all"
+            :class="filters.kind === t.value
+              ? 'btn-accent font-medium shadow-sm'
+              : 'text-slate-500 hover:text-slate-800 hover:bg-white/60'"
+            @click="filters.kind = t.value; applyFilters()"
+          >
+            {{ t.label }}
+          </button>
+        </div>
       </div>
       <div class="flex items-center gap-3">
         <label class="flex items-center gap-1.5 text-xs text-slate-500 select-none cursor-pointer">
@@ -68,7 +84,7 @@
     <!-- 日志列表（新在上，滚动到底部自动加载更早的记录） -->
     <section class="space-y-3">
       <div v-if="logs.length === 0" class="bg-white rounded-xl shadow-sm border border-white/60 py-12 text-sm text-slate-400 text-center">
-        暂无符合条件的 Query 记录（@ 机器人或私聊触发 AI 回复后在此展示）
+        暂无符合条件的 Query 记录（@ 机器人或私聊触发 AI 回复、或主动互动发言后在此展示）
       </div>
 
       <div
@@ -81,6 +97,9 @@
           <div class="flex items-center gap-2 flex-wrap">
             <span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap" :class="statusClass(log.status)">
               {{ statusText(log.status) }}
+            </span>
+            <span v-if="log.kind === 'proactive'" class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap bg-blue-50 text-[#0071e3] border border-blue-200">
+              主动互动
             </span>
             <span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap bg-zinc-100 text-zinc-600 border border-zinc-200">
               {{ log.chat_type === 'group' ? '群聊' : '私聊' }} · {{ log.target_id }}
@@ -124,6 +143,9 @@
           <span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap" :class="statusClass(detail.status)">
             {{ statusText(detail.status) }}
           </span>
+          <span v-if="detail.kind === 'proactive'" class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap bg-blue-50 text-[#0071e3] border border-blue-200">
+            主动互动
+          </span>
           <span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap bg-zinc-100 text-zinc-600 border border-zinc-200">
             {{ detail.chat_type === 'group' ? '群聊' : '私聊' }} · {{ detail.target_id }}
           </span>
@@ -152,15 +174,20 @@
             <span v-if="detail.senders?.length">来自 {{ detail.senders.join(', ') }}</span>
           </div>
 
-          <!-- 用户输入 -->
+          <!-- 用户输入（主动互动为触发说明） -->
           <div>
-            <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium mb-2">用户输入</h3>
+            <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium mb-2">{{ detail.kind === 'proactive' ? '触发说明' : '用户输入' }}</h3>
             <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-white/60 rounded-lg px-3 py-2">{{ detail.query }}</p>
           </div>
 
           <!-- 错误信息 -->
           <div v-if="detail.error" class="text-xs text-[#ff3b30] bg-red-50 border border-red-100 rounded-lg px-3 py-2 whitespace-pre-wrap break-all">
             {{ detail.error }}
+          </div>
+
+          <!-- 补充说明（如主动互动保持安静的原因） -->
+          <div v-if="detail.note" class="text-xs text-slate-600 bg-slate-50 border border-white/60 rounded-lg px-3 py-2 whitespace-pre-wrap break-all">
+            {{ detail.note }}
           </div>
 
           <!-- 工具调用明细 -->
@@ -219,11 +246,18 @@ const typeTabs = [
   { value: 'friend', label: '私聊' },
 ]
 
+// 来源筛选：普通对话（含升级前的历史记录） / 主动互动
+const kindTabs = [
+  { value: '', label: '全部来源' },
+  { value: 'chat', label: '对话' },
+  { value: 'proactive', label: '主动互动' },
+]
+
 const inputClass = 'mt-1 w-full border border-zinc-300 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow bg-white'
 
 // filters 为编辑中的条件，applied 为实际生效（已点查询/切换类型）的条件，
 // 自动刷新沿用 applied，避免输入到一半被轮询带出去
-const emptyFilters = () => ({ chat_type: '', sender: '', target_id: '', start: '', end: '', keyword: '' })
+const emptyFilters = () => ({ kind: '', chat_type: '', sender: '', target_id: '', start: '', end: '', keyword: '' })
 const filters = reactive(emptyFilters())
 const applied = reactive(emptyFilters())
 
@@ -294,13 +328,14 @@ function elapsedMs(log) {
 }
 
 function statusText(s) {
-  return { running: '执行中', success: '成功', stopped: '已停止', timeout: '超时', error: '出错', interrupted: '中断' }[s] || s
+  return { running: '执行中', success: '成功', skipped: '保持安静', stopped: '已停止', timeout: '超时', error: '出错', interrupted: '中断' }[s] || s
 }
 
 function statusClass(s) {
   return {
     running: 'btn-accent',
     success: 'bg-white text-zinc-600 border border-zinc-300',
+    skipped: 'bg-blue-50 text-[#0071e3] border border-blue-200',
     stopped: 'bg-zinc-100 text-zinc-500 border border-zinc-200',
     timeout: 'bg-zinc-100 text-zinc-500 border border-zinc-200',
     error: 'bg-red-50 text-[#ff3b30] border border-red-200',

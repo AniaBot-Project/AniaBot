@@ -25,10 +25,18 @@ type Status string
 const (
 	StatusRunning     Status = "running"     // 已触发，执行中
 	StatusSuccess     Status = "success"     // 执行成功
+	StatusSkipped     Status = "skipped"     // 主动互动中 AI 判断无需发言（保持安静）
 	StatusStopped     Status = "stopped"     // 用户主动停止（/stop）
 	StatusTimeout     Status = "timeout"     // 请求超时
 	StatusError       Status = "error"       // 执行出错
 	StatusInterrupted Status = "interrupted" // 进程重启，执行中断
+)
+
+// Kind 日志类型。普通对话留空（升级前的历史记录同样为空），主动互动等非常规
+// 触发用非空值标记；面板据此区分展示与筛选，容量与淘汰规则不变。
+const (
+	KindChat      = "chat"      // 普通对话（仅作为筛选值，普通记录不写该字段）
+	KindProactive = "proactive" // 主动互动（AI 自行发起的发言）
 )
 
 // 用户输入、工具参数、最终回复为对话双方生成的内容，始终完整记录；
@@ -48,8 +56,9 @@ type ToolCallRecord struct {
 type Entry struct {
 	ID               string           `json:"id"`
 	Time             time.Time        `json:"time"`
-	ChatType         string           `json:"chat_type"` // group / friend
-	TargetID         string           `json:"target_id"` // 目标会话 ID / 用户 ID
+	Kind             string           `json:"kind,omitempty"` // 空为普通对话，见 Kind* 常量
+	ChatType         string           `json:"chat_type"`      // group / friend
+	TargetID         string           `json:"target_id"`      // 目标会话 ID / 用户 ID
 	Senders          []string         `json:"senders,omitempty"`
 	Query            string           `json:"query"` // 合并后的用户输入（可能含排队消息）
 	Status           Status           `json:"status"`
@@ -62,7 +71,16 @@ type Entry struct {
 	TotalTokens      int              `json:"total_tokens,omitempty"`
 	CachedTokens     int              `json:"cached_tokens,omitempty"` // 命中上游 prompt 缓存的 token 数（提供方支持时才有）
 	Reply            string           `json:"reply,omitempty"`         // 最终回复
+	Note             string           `json:"note,omitempty"`          // 附加说明（如主动互动保持安静的原因）
 	Error            string           `json:"error,omitempty"`
+}
+
+// KindValue 返回日志类型；空值归一为普通对话（兼容升级前的历史记录）。
+func (e Entry) KindValue() string {
+	if e.Kind == "" {
+		return KindChat
+	}
+	return e.Kind
 }
 
 const defaultMax = 20000
@@ -133,7 +151,9 @@ func New(store storage.PersistentStorage, maxEntries int, logger *slog.Logger) *
 		l.backend = disabledBackend{}
 		return l
 	}
-	l.backend = newSQLBackend(db, l.logger)
+	// 升级前的旧库没有 kind 列：按需补列（失败时该列不参与下推与写入）
+	hasKind := ensureKindColumn(context.Background(), db, dialect, l.logger)
+	l.backend = newSQLBackend(db, l.logger, hasKind)
 	l.seq = l.backend.maxSeq()
 	return l
 }
@@ -217,6 +237,7 @@ func (l *Logger) Recent(limit int) []Entry {
 
 // Filter Query 日志的查询条件，零值字段不参与过滤。
 type Filter struct {
+	Kind     string    // chat / proactive（空不过滤；chat 同时命中未标记的历史记录）
 	ChatType string    // group / friend
 	TargetID string    // 目标会话 ID / 用户 ID（精确匹配）
 	Sender   string    // 触发人 QQ（精确匹配，命中批次内任一发言者）
@@ -229,6 +250,9 @@ type Filter struct {
 
 // match 判断一条日志是否满足过滤条件。
 func (f Filter) match(e Entry) bool {
+	if f.Kind != "" && e.KindValue() != f.Kind {
+		return false
+	}
 	if f.ChatType != "" && e.ChatType != f.ChatType {
 		return false
 	}

@@ -164,3 +164,53 @@ func TestTokenStatsDetailRange(t *testing.T) {
 		t.Fatalf("bogus range: status = %d", rec.Code)
 	}
 }
+
+// 主动互动（Kind=proactive）在 Token 统计中单独计量，不再混入「对话」。
+func TestTokenStatsDetailProactiveSource(t *testing.T) {
+	now := time.Now()
+	s := &Server{opt: Options{
+		QueryLogs: func(f querylog.Filter) []querylog.Entry {
+			return []querylog.Entry{
+				{Time: now, ChatType: "group", TargetID: "100", Status: querylog.StatusSuccess, TotalTokens: 1000},
+				{Time: now, Kind: querylog.KindProactive, ChatType: "group", TargetID: "100", Status: querylog.StatusSkipped, TotalTokens: 400},
+			}
+		},
+	}}
+	rec := httptest.NewRecorder()
+	s.handleTokenStatsDetail(rec, httptest.NewRequest("GET", "/api/tokenstats/detail", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	var got struct {
+		BySource map[string]struct {
+			Requests    int `json:"requests"`
+			TotalTokens int `json:"total_tokens"`
+		} `json:"by_source"`
+		ByStatus map[string]int `json:"by_status"`
+		Daily    []struct {
+			Query struct {
+				TotalTokens int `json:"total_tokens"`
+			} `json:"query"`
+			Proactive struct {
+				TotalTokens int `json:"total_tokens"`
+			} `json:"proactive"`
+		} `json:"daily"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if got.BySource["proactive"].TotalTokens != 400 || got.BySource["proactive"].Requests != 1 {
+		t.Fatalf("by_source.proactive = %+v", got.BySource["proactive"])
+	}
+	if got.BySource["query"].TotalTokens != 1000 || got.BySource["query"].Requests != 1 {
+		t.Fatalf("by_source.query = %+v", got.BySource["query"])
+	}
+	if got.ByStatus["skipped"] != 1 {
+		t.Fatalf("by_status.skipped = %d", got.ByStatus["skipped"])
+	}
+	last := got.Daily[len(got.Daily)-1]
+	if last.Proactive.TotalTokens != 400 || last.Query.TotalTokens != 1000 {
+		t.Fatalf("daily 末尾 = %+v", last)
+	}
+}
