@@ -3,8 +3,8 @@ package pluginaichat
 // 主动互动的执行路径：把一条到点的意图变成一条真正发出去的消息。
 //
 // 与 AI 定时任务（clock）共用同一套「一次性会话」思路：每次执行为全新的
-// ChatBot（historyStore 传 nil，不落盘、执行后丢弃），带完整工具能力；中间轮
-// 文本丢弃，只发最终回复。区别在于：
+// ChatBot（会话历史只读回放、本次结果不落盘，执行后丢弃），带完整工具能力；
+// 中间轮文本丢弃，只发最终回复。区别在于：
 //   - 提示词不是「完成任务」，而是「决定要不要主动说、说什么」；
 //   - 多一个 skip_output 出口：AI 判断此刻没什么可说的就保持安静；
 //   - 发送成功后进入回应观察窗口（见 proactive.go 的 settleOutcomes）。
@@ -77,6 +77,9 @@ func (m *proactiveManager) execute(it *ProactiveIntention, forced bool) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
 	defer cancel()
+	// 锁确认丢失时取消本次生成（与主对话路径同一策略）：此时会话可能已被
+	// 他人接管，宁可这次不发言，也不要在没有锁的情况下继续生成并写回历史
+	lock.attachCancel(cancel)
 
 	start := time.Now()
 	res, usage, err := m.chat(ctx, it, id, isGroup, b)
@@ -133,6 +136,9 @@ func (m *proactiveManager) execute(it *ProactiveIntention, forced bool) {
 	it.Reply = truncateRunes(text, proactiveMaxReplyRunes)
 	it.Reason = ""
 	m.storeSent(it)
+	// 把这句话写回会话历史：主动互动走的是独立的一次性会话，不写回的话
+	// 主对话完全不知道自己刚说过什么（用户接话时上下文里只有用户那句）
+	m.recordUtterance(id, isGroup, text)
 	m.noteBotSpoke(id, isGroup)
 
 	// 进入观察窗口：窗口内有人说话记为 replied，否则 tick 里结算为 ignored
@@ -145,6 +151,62 @@ func (m *proactiveManager) execute(it *ProactiveIntention, forced bool) {
 		"duration", time.Since(start).Round(time.Millisecond).String(),
 		"tokens", usage.TotalTokens)
 }
+
+// recordUtterance 把主动发出的内容写回会话历史，让主对话（以及重启后的下一轮）
+// 知道自己说过这句话。
+//
+// 主动互动的生成走「一次性会话」（历史只读回放、本次结果不落盘），发出的
+// 内容不会像普通回复那样由 Chat 自动落盘；不补这一步的话，用户接一句
+// 「你刚才说什么」，主对话的历史里只有用户消息、没有它自己那句，AI 就只能
+// 反问你指什么。
+//
+// 会话驻留时追加到内存窗口（同时随窗口落盘）；未驻留时直接写持久化历史，
+// 下次重建会话时会随历史一起回放。历史后端不可用（未启用 SQL）时自然降级。
+//
+// 调用点在持有会话锁期间执行（见 execute），写入先于锁释放完成：此时主对话
+// 不可能正在响应（抢锁失败的主动互动只会顺延），排队消息则要等锁释放后才被
+// 消费——因此它们一定排在这条主动发言之后，历史顺序与真实发言顺序一致。
+func (m *proactiveManager) recordUtterance(id message.QID, isGroup bool, text string) {
+	p := m.plugin
+	text = strings.TrimSpace(text)
+	if p == nil || text == "" {
+		return
+	}
+	key := sessionKey(id, isGroup)
+	if v, ok := p.chats.Load(key); ok {
+		if e, ok2 := v.(*chatEntry); ok2 && e.chat != nil {
+			e.chat.AppendHistory(aichat.TextMessage(aichat.RoleAssistant, text))
+			return
+		}
+	}
+	if p.historyDB == nil {
+		return
+	}
+	store := newSQLHistoryStore(p.historyDB, key, p.Logger)
+	if err := store.Append(context.Background(), []aichat.Message{
+		aichat.TextMessage(aichat.RoleAssistant, text),
+	}); err != nil {
+		p.Logger.Warn("主动发言写回会话历史失败", "key", key, "error", err.Error())
+	}
+}
+
+// readOnlyHistory 只读的会话历史：Load 透传，Append/Replace/Clear 一律丢弃。
+//
+// 主动互动的生成需要读会话历史（否则每次开口都像第一次进这个群），但这次
+// 生成本身不能写进真实历史——触发提示词、中间工具轮、最终回复都只服务这一次
+// 判断，真实历史里只应出现最终真的发出去了的那句话（见 recordUtterance）。
+// 包装成只读后，Chat 的窗口照常回放与追加，压缩/截断也只作用于内存副本。
+type readOnlyHistory struct {
+	inner aichat.HistoryStore
+}
+
+func (r readOnlyHistory) Load(ctx context.Context) ([]aichat.Message, error) {
+	return r.inner.Load(ctx)
+}
+
+func (readOnlyHistory) Append(context.Context, []aichat.Message) error  { return nil }
+func (readOnlyHistory) Replace(context.Context, []aichat.Message) error { return nil }
+func (readOnlyHistory) Clear(context.Context) error                     { return nil }
 
 // chat 构建一次性会话并生成「这一次要说什么」（不发送）。
 func (m *proactiveManager) chat(ctx context.Context, it *ProactiveIntention, id message.QID, isGroup bool, b bot.Bot) (proactiveResult, aichat.TokenUsage, error) {
@@ -185,14 +247,27 @@ func (m *proactiveManager) chat(ctx context.Context, it *ProactiveIntention, id 
 	}
 
 	baseURL, apiKey, model, format := p.subagentLLMConfig()
+	// 会话历史只读回放：要接着之前的话题说，就得先看到聊到哪儿了；但本次生成
+	// 的触发提示词与回复只留在内存窗口（执行后丢弃），不污染真实历史。
+	var history aichat.HistoryStore
+	if p.historyDB != nil {
+		history = readOnlyHistory{inner: newSQLHistoryStore(p.historyDB, sessionKey(id, isGroup), p.Logger)}
+	}
 	chat, err := aichat.NewChatBot(
 		baseURL, apiKey, model,
-		prompt, p.cfg.MaxContextTokens, sessionExecutor, nil,
+		prompt, p.cfg.MaxContextTokens, sessionExecutor, history,
 		aichat.WithClientOptions(append(p.llmClientOptions(), aichat.WithAPIFormat(format))...),
 		aichat.WithScenePrompt(scene),
 	)
 	if err != nil {
 		return proactiveResult{}, aichat.TokenUsage{}, fmt.Errorf("创建对话失败: %w", err)
+	}
+	// 回放历史（与 getChat 同口径的超时）：加载失败按空历史继续，不能因为
+	// 历史读不出来就不敢开口
+	if history != nil {
+		loadCtx, cancelLoad := context.WithTimeout(context.Background(), historyLoadTimeout)
+		chat.LoadHistory(loadCtx)
+		cancelLoad()
 	}
 	chat.SetMaxIterations(p.mainMaxIterations())
 	if p.skillManager != nil {
@@ -286,6 +361,11 @@ func (m *proactiveManager) buildPrompt(it *ProactiveIntention, id message.QID, i
 		sb.WriteString("（备注：")
 		sb.WriteString(strings.TrimSpace(it.Note))
 		sb.WriteString("）\n")
+	}
+
+	if spoken := m.recentUtterances(it.Scope, proactiveRecentUtterances); spoken != "" {
+		sb.WriteString("\n你最近主动说过的话（别重复，也不用装作没说过）：\n")
+		sb.WriteString(spoken)
 	}
 
 	if ctxText := m.scopeContext(it.Scope); ctxText != "" {

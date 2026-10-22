@@ -50,6 +50,43 @@ func TestChatPersistsUserMessage(t *testing.T) {
 	}
 }
 
+// TestAppendHistoryWritesBackExternalOutput 主动互动这类由外部流程（一次性会话）
+// 发出的内容，必须能写回会话历史：否则用户接话时，主对话只看到用户那句，
+// 完全不知道自己刚说过什么。
+func TestAppendHistoryWritesBackExternalOutput(t *testing.T) {
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bs, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(bs))
+		fakeChatHandler(w, r)
+	}))
+	defer srv.Close()
+
+	store := &fakeHistoryStore{}
+	bot, err := NewChatBot(srv.URL, "test-key", "test-model", "系统提示词", 0, nil, store)
+	if err != nil {
+		t.Fatalf("NewChatBot: %v", err)
+	}
+
+	bot.AppendHistory(TextMessage(RoleAssistant, "外面下雨了，出门记得带伞"))
+
+	// 内存窗口与落盘都应出现这条 assistant 消息
+	if hist := bot.window.history(); len(hist) != 1 || hist[0].Role != RoleAssistant {
+		t.Fatalf("窗口应包含写回的主动发言: %+v", hist)
+	}
+	if len(store.saved) != 1 || store.saved[0].Role != RoleAssistant {
+		t.Fatalf("落盘应包含写回的主动发言: %+v", store.saved)
+	}
+
+	// 下一轮请求要能看到这句话，且排在用户消息之前
+	if _, _, err := bot.Chat(context.Background(), "带伞？你什么时候说的", llmtool.CallBackFuncs{}, ChatOptions{}); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if len(bodies) != 1 || !strings.Contains(bodies[0], "出门记得带伞") {
+		t.Fatalf("下一轮请求应带上写回的主动发言: %v", bodies)
+	}
+}
+
 // assertUserBeforeAssistant 断言末尾两条为 [user, assistant]。
 func assertUserBeforeAssistant(t *testing.T, label string, msgs []Message) {
 	t.Helper()

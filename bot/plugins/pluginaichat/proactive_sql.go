@@ -226,6 +226,29 @@ func (s *intentionStore) recentByScope(scope string, limit int) []ProactiveInten
 	return collectIntentions(rows, s.logger, "读取意图历史失败")
 }
 
+// recentSpoken 取某会话最近成功发出的主动发言（按发送时间倒序，新在前）。
+//
+// 供提示词回显「我上次说了什么」：主动互动每次都是全新的一次性会话，不读
+// 会话历史，只能靠意图表里已发送的 Reply 保持自我一致。只取 sent 且有内容
+// 的记录；走 (scope, sent_at) 索引，且不在调度热路径上。
+func (s *intentionStore) recentSpoken(scope string, limit int) []ProactiveIntention {
+	if limit <= 0 {
+		limit = proactiveRecentUtterances
+	}
+	ctx, cancel := s.dbCtx()
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+intentionColumns+` FROM ania_intention `+
+			`WHERE scope = ? AND status = ? AND reply <> '' `+
+			`ORDER BY sent_at DESC LIMIT ?`,
+		scope, proactiveStatusSent, limit)
+	if err != nil {
+		s.logger.Error("读取最近主动发言失败", "scope", scope, "error", err)
+		return nil
+	}
+	return collectIntentions(rows, s.logger, "读取最近主动发言失败")
+}
+
 // collectIntentions 收集 rows（先关 rows 再返回，SQLite 单连接下必须如此）。
 func collectIntentions(rows *sql.Rows, logger *slog.Logger, errMsg string) []ProactiveIntention {
 	var out []ProactiveIntention

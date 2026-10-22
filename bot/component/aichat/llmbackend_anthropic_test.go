@@ -609,3 +609,34 @@ func TestAnthropicGenerateNoPromptCacheByDefault(t *testing.T) {
 		t.Fatalf("默认请求体不应包含 cache_control: %s", raw)
 	}
 }
+
+// TestConvertAnthropicMessagesLeadingAssistant Anthropic 要求 messages 以 user
+// 角色开头：历史被截断或被主动发言写回后可能以 assistant 开头，转换时补一条
+// 最小 user 消息兜底，避免整轮请求被上游拒绝；正常情况不引入额外消息。
+func TestConvertAnthropicMessagesLeadingAssistant(t *testing.T) {
+	msgs, _, err := convertAnthropicMessages([]Message{
+		TextMessage(RoleAssistant, "我先说一句"),
+		TextMessage(RoleUser, "你刚才说什么"),
+	}, PromptCacheConfig{})
+	if err != nil {
+		t.Fatalf("convertAnthropicMessages 失败: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("应在 assistant 前补一条 user 消息，got %d 条", len(msgs))
+	}
+	if msgs[0].Role != anthropic.MessageParamRoleUser {
+		t.Fatalf("首条应为 user，got %q", msgs[0].Role)
+	}
+	if msgs[1].Role != anthropic.MessageParamRoleAssistant || msgs[2].Role != anthropic.MessageParamRoleUser {
+		t.Fatalf("原有消息顺序被改变: %+v", msgs)
+	}
+
+	// 正常以 user 开头时不补消息
+	msgs, _, err = convertAnthropicMessages([]Message{TextMessage(RoleUser, "你好")}, PromptCacheConfig{})
+	if err != nil {
+		t.Fatalf("convertAnthropicMessages 失败: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].Role != anthropic.MessageParamRoleUser {
+		t.Fatalf("正常历史不应被改写: %+v", msgs)
+	}
+}

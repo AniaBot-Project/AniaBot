@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -89,6 +90,9 @@ const (
 	proactiveMaxPromptRunes = 2000
 	// proactiveMaxReplyRunes 记录已发送内容的符文上限。
 	proactiveMaxReplyRunes = 1000
+	// proactiveRecentUtterances 提示词里回显的「最近主动说过的话」条数：
+	// 一次性会话不读会话历史，靠这里让 AI 知道自己上次说了什么、避免重复。
+	proactiveRecentUtterances = 3
 	// proactiveMaxTextRunes 现场消息单条文本的截断长度。
 	proactiveMaxTextRunes = 200
 	// proactiveRetention 历史意图保留时长（待执行的不清理）。
@@ -678,6 +682,33 @@ func (m *proactiveManager) snapshot(scope string) *scopeSnapshot {
 		Context:     act.contextBlock(),
 		Seeded:      act.Seeded,
 	}
+}
+
+// recentUtterances 取该会话最近几次成功发出的主动发言，拼成提示词里的一段。
+//
+// 主动互动每次都是全新的一次性会话（不读会话历史），靠意图表里的 Reply 才能
+// 知道「我上次主动说过什么」；否则每轮都像第一次开口，容易重复同一句话。
+// 数据来自持久层，重启后依然有效。
+func (m *proactiveManager) recentUtterances(scope string, limit int) string {
+	if m == nil || m.store == nil || limit <= 0 {
+		return ""
+	}
+	items := m.store.recentSpoken(scope, limit)
+	lines := make([]string, 0, len(items))
+	for _, it := range items {
+		text := strings.TrimSpace(it.Reply)
+		if text == "" {
+			continue
+		}
+		lines = append(lines, "["+it.SentAt.Format("01-02 15:04")+"] 你："+
+			truncateRunes(text, proactiveMaxTextRunes*2))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	// 查询为新在前，转成时间正序更符合阅读习惯
+	slices.Reverse(lines)
+	return strings.Join(lines, "\n") + "\n"
 }
 
 // ---- 冷场触发 ----

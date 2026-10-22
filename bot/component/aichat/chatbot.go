@@ -85,6 +85,19 @@ func (b *ChatBot) LoadHistory(ctx context.Context) {
 	b.window.load(ctx)
 }
 
+// AppendHistory 追加外部流程产生的消息到会话历史（内存窗口 + 持久化）。
+//
+// 供不是由 Chat 产生的对外输出使用：例如主动互动的话由一次性会话生成并
+// 直接发出，若只发不写回，主对话下一轮就看不到「我刚说过什么」——用户回
+// 一句「你说什么」，AI 会完全不知道自己上一句说了什么。调用方需保证与
+// 同一会话的 Chat 串行（插件层按会话加锁）。
+func (b *ChatBot) AppendHistory(msgs ...Message) {
+	if len(msgs) == 0 {
+		return
+	}
+	b.window.append(msgs...)
+}
+
 // SetSystemPrompt 运行时更新静态系统提示词（面板修改 Prompt 覆盖后，驻留会话
 // 下一轮立即生效）。场景提示词经 SetScenePrompt 单独更新。
 func (b *ChatBot) SetSystemPrompt(prompt string) {

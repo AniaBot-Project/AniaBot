@@ -229,6 +229,15 @@ func convertAnthropicMessages(messages []Message, cache PromptCacheConfig) ([]an
 		}
 	}
 	flushToolResults()
+	// Anthropic 要求 messages 以 user 角色开头：上下文截断后的保留区、以及
+	// 主动互动写回历史的发言都可能让首条变成 assistant，直接下发会被上游
+	// 拒绝（400: first message must use the "user" role），补一条最小 user
+	// 消息兜底。正常情况下首条本来就是 user，不产生任何额外内容。
+	if len(result) > 0 && result[0].Role != anthropic.MessageParamRoleUser {
+		result = append([]anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock("（继续上面的对话）")),
+		}, result...)
+	}
 	if cache.Enable {
 		applyAnthropicCache(system, result, cache)
 	}
