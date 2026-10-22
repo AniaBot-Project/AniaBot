@@ -149,7 +149,11 @@ func (m *proactiveManager) statusText(scope string, isGroup bool) string {
 		sb.WriteString(m.quietSpec)
 	}
 	if !enabled {
-		sb.WriteString("\n提示：管理员发送 /proactive on 可为本会话开启")
+		if isGroup {
+			sb.WriteString("\n提示：管理员 @ 我 并发送 /proactive on 可为本会话开启")
+		} else {
+			sb.WriteString("\n提示：管理员发送 /proactive on 可为本会话开启")
+		}
 	}
 	return sb.String()
 }
@@ -260,7 +264,7 @@ func proactiveHelpText(isAdmin bool) string {
 	sb.WriteString("主动互动：让 AI 在合适的时候主动开口（默认关闭，按会话启用）\n")
 	sb.WriteString("/proactive —— 查看本会话状态\n")
 	if isAdmin {
-		sb.WriteString("/proactive on|off —— 开启/关闭本会话（直接改写面板里的白名单）\n")
+		sb.WriteString("/proactive on|off —— 开启/关闭本会话（直接改写面板里的白名单；群聊需先 @ 我）\n")
 		sb.WriteString("/proactive reload —— 从配置中心重新读取白名单（面板改完不必重启）\n")
 		sb.WriteString("/proactive now [想说的话] —— 立即触发一次（调试用，跳过时段/间隔/上限限制）\n")
 		sb.WriteString("/proactive list —— 列出所有启用主动互动的会话\n")

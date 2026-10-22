@@ -27,6 +27,9 @@ import (
 //	/clock run <id>       立即执行一次（仅管理员）
 //	/clock log [n]        查看最近 n 条执行记录（默认 10）
 //	/clock help           查看帮助
+//
+// 群聊里需先 @ 机器人（与其他群聊指令一致）：未 @ 的 /clock 会被 mention 门
+// 当作普通消息处理，不会触发命令。
 func (p *AIChatPlugin) handleClockCommand(ctx context.Context, b bot.Bot, cmd command.Command, msg message.Message) (bool, error) {
 	if p.clockManager == nil {
 		p.replyClock(b, msg, "定时任务功能未启用")

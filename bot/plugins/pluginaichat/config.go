@@ -169,7 +169,7 @@ type clockConfig struct {
 type proactiveConfig struct {
 	Enable bool `cfg:"enable" label:"启用主动互动" group:"AI 对话 · 主动互动" default:"false" help:"让 AI 在冷场或有未说完的事时主动发言（默认关闭）。开启后还需按会话启用：在下方白名单添加 g:群ID / f:用户ID，或由管理员在会话里发送 /proactive on；发言受免打扰时段、每日上限、最小间隔与回应反馈（连续无人理自动冷却）约束"`
 
-	Scopes []string `cfg:"scopes" label:"启用主动互动的会话" group:"AI 对话 · 主动互动" help:"每行一个，格式 g:群ID 或 f:用户ID（与长期记忆/知识库的会话 scope 一致，如 g:qq:123456）；管理员在会话内发送 /proactive on|off 会直接改写这里（面板即时可见，无需重启）"`
+	Scopes []string `cfg:"scopes" label:"启用主动互动的会话" group:"AI 对话 · 主动互动" help:"每行一个，格式 g:群ID 或 f:用户ID（与长期记忆/知识库的会话 scope 一致，如 g:qq:123456）；管理员在会话内发送 /proactive on|off 会直接改写这里（群聊需先 @ 机器人；面板即时可见，无需重启）"`
 
 	IdleMinutes        int    `cfg:"idle_minutes" label:"冷场触发（分钟）" group:"AI 对话 · 主动互动" default:"90" help:"会话连续无消息超过该时长后，AI 会判断要不要主动开口；0 表示不按冷场触发（只执行 AI 自己预约的意图）"`
 	MinGapMinutes      int    `cfg:"min_gap_minutes" label:"两次主动发言最小间隔（分钟）" group:"AI 对话 · 主动互动" default:"60"`
