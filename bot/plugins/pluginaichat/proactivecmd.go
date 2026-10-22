@@ -66,7 +66,7 @@ func (p *AIChatPlugin) handleProactiveCommand(_ context.Context, b bot.Bot, cmd 
 		case !persisted:
 			msg += "\n注意：配置中心不可用，本次改动只对当前运行生效。"
 		case changed:
-			msg += "\n已写入配置项 plugin.ai_chat_bot.proactive.scopes，面板刷新即可看到。"
+			msg += "\n已写入配置项，面板刷新即可看到。"
 		}
 		p.sendPlainText(b, id, isGroup, msg)
 	case "auto", "reload":
