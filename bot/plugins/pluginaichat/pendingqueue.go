@@ -30,8 +30,8 @@ func (p *AIChatPlugin) getPendingQueue(id message.QID, isGroup bool) *pendingQue
 	return q.(*pendingQueue)
 }
 
-// enqueuePending 将消息加入排队队列。
-// first 表示该消息是队列中的第一条（调用方可据此给用户一次性提示），
+// enqueuePending 将消息加入排队队列（静默排队，调用方不据此向用户发提示）。
+// first 表示该消息是队列中的第一条（调用方仅用于日志区分），
 // ok 为 false 表示队列已满，消息被丢弃。
 func (p *AIChatPlugin) enqueuePending(id message.QID, isGroup bool, msg message.Message) (first, ok bool) {
 	q := p.getPendingQueue(id, isGroup)

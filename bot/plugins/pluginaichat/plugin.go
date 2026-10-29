@@ -270,15 +270,11 @@ func (p *AIChatPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 			bot.SendGroupMsg(msg.GroupId, builder.Build())
 			return true, nil
 		}
-		// 当前正在响应：消息进入排队队列，响应结束后自动合并处理
-		first, ok := p.enqueuePending(msg.GroupId, true, msg)
-		if !ok {
+		// 当前正在响应：消息静默进入排队队列（不额外提示，避免刷屏），
+		// 响应结束后自动合并处理；只有队列已满导致消息被丢弃时才告知用户
+		if _, ok := p.enqueuePending(msg.GroupId, true, msg); !ok {
 			builder := msgchain.Builder().Group()
 			builder.Text("排队消息太多啦，稍后再试试吧~")
-			bot.SendGroupMsg(msg.GroupId, builder.Build())
-		} else if first {
-			builder := msgchain.Builder().Group()
-			builder.Text("正在回复上一条消息，你的消息已排队，稍后回复你~")
 			bot.SendGroupMsg(msg.GroupId, builder.Build())
 		}
 		p.touchChat(sessionKey(msg.GroupId, true))
@@ -474,15 +470,11 @@ func (p *AIChatPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command
 			bot.SendFriendMsg(msg.Sender.UserId, builder.Build())
 			return true, nil
 		}
-		// 当前正在响应：消息进入排队队列，响应结束后自动合并处理
-		first, ok := p.enqueuePending(msg.Sender.UserId, false, msg)
-		if !ok {
+		// 当前正在响应：消息静默进入排队队列（不额外提示，避免刷屏），
+		// 响应结束后自动合并处理；只有队列已满导致消息被丢弃时才告知用户
+		if _, ok := p.enqueuePending(msg.Sender.UserId, false, msg); !ok {
 			builder := msgchain.Builder().Friend()
 			builder.Text("排队消息太多啦，稍后再试试吧~")
-			bot.SendFriendMsg(msg.Sender.UserId, builder.Build())
-		} else if first {
-			builder := msgchain.Builder().Friend()
-			builder.Text("正在回复上一条消息，你的消息已排队，稍后回复你~")
 			bot.SendFriendMsg(msg.Sender.UserId, builder.Build())
 		}
 		p.touchChat(sessionKey(msg.Sender.UserId, false))
