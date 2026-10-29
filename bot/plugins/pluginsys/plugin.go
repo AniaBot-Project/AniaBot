@@ -43,24 +43,6 @@ func NewPluginSys() *PluginSys {
 	}
 }
 
-func (p *PluginSys) Awake(ctx context.Context, bot bot.Bot) error {
-	// 未配置管理员 ID（首次启动设置向导期间是正常状态）跳过启动通知，
-	// 避免向空目标发送而刷错误日志
-	admins := p.SystemConfig.Admins()
-	if len(admins) == 0 {
-		p.Logger.Info("未配置管理员 ID，跳过启动成功通知")
-		return nil
-	}
-	for _, admin := range admins {
-		builder := msgchain.Builder().Friend()
-		builder.Text("AniaBot启动成功，发送 /help 查看插件加载信息")
-		if _, ok := bot.SendFriendMsg(admin, builder.Build()); !ok {
-			p.Logger.Warn("启动成功消息发送失败（管理员不在线或所在平台未启用？）", "admin", admin)
-		}
-	}
-	return nil
-}
-
 func (p *PluginSys) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command.Command, msg message.Message) (bool, error) {
 	if cmd.Name == "help" {
 		plugins := bot.GetPluginList()

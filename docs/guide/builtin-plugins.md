@@ -38,7 +38,6 @@ bot.AddPlugin(pluginnews.NewNewsPlugin())        // 每日新闻
 
 其他行为：
 
-- **启动通知**：Bot 启动完成后自动私聊管理员「AniaBot启动成功」
 - **panic 告警**：任何插件运行时 panic，系统插件会私聊通知管理员（1 分钟内防抖，避免刷屏）
 
 ## AI 对话插件
