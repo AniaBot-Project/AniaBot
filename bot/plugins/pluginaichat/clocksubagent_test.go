@@ -418,7 +418,7 @@ func TestDrainClockSubagentsFeedsBackAlreadyFinished(t *testing.T) {
 	}
 	p.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	p.PersistentStorage = newSQLPFake()
-	m := newClockManager(p, time.Minute, 100)
+	m := newClockManager(p, time.Minute)
 	chat, err := aichat.NewChatBot(srv.URL, "k", "m", "系统提示", 128000, nil, nil)
 	if err != nil {
 		t.Fatalf("NewChatBot 失败: %v", err)
@@ -480,7 +480,7 @@ func TestDrainClockSubagentsNoopWithoutSubagents(t *testing.T) {
 	}
 	p.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	p.PersistentStorage = newSQLPFake()
-	m := newClockManager(p, time.Minute, 100)
+	m := newClockManager(p, time.Minute)
 	chat, err := aichat.NewChatBot(srv.URL, "k", "m", "系统提示", 128000, nil, nil)
 	if err != nil {
 		t.Fatalf("NewChatBot 失败: %v", err)

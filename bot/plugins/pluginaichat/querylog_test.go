@@ -17,7 +17,6 @@ func TestQueryLogLiveToolCalls(t *testing.T) {
 	p := &AIChatPlugin{}
 	p.Logger = slog.Default()
 	p.PersistentStorage = newSQLPFake()
-	p.cfg.QueryLog.Enable = true
 	p.initQueryLogger()
 	if p.queryLogger == nil {
 		t.Fatal("queryLogger 应已初始化")
@@ -73,7 +72,6 @@ func TestProactiveQueryLog(t *testing.T) {
 	p := &AIChatPlugin{}
 	p.Logger = slog.Default()
 	p.PersistentStorage = newSQLPFake()
-	p.cfg.QueryLog.Enable = true
 	p.initQueryLogger()
 
 	chat, err := aichat.NewChatBot("http://127.0.0.1", "key", "model", "prompt", 1000, nil, nil)

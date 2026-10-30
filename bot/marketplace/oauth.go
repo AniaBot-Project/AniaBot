@@ -17,13 +17,14 @@ import (
 // 无需回调地址，适合自托管面板：服务器向 GitHub 请求一次性设备码，
 // 用户在浏览器打开 github.com/login/device 输入 8 位代码，服务器轮询
 // 换取 access_token 并存入配置中心（与手动粘贴 Token 等效，仅提升限流配额）。
-// 前置条件：管理员在 GitHub 创建一个 OAuth App，并在应用设置中启用
-// Device flow，把 Client ID 填入 bot.marketplace.oauth_client_id。
-
+// 使用 AniaBot 官方 OAuth App 的固定 Client ID，开箱即用。
 const (
 	ghDeviceCodeURL  = "https://github.com/login/device/code"
 	ghAccessTokenURL = "https://github.com/login/oauth/access_token"
 	ghDeviceGrant    = "urn:ietf:params:oauth:grant-type:device_code"
+
+	// GitHubOAuthClientID AniaBot 官方 GitHub OAuth App 的 Client ID。
+	GitHubOAuthClientID = "Ov23li6fHYmQOGOmliT4"
 )
 
 // oauthFlow 一次设备授权流程的内存状态。
@@ -70,9 +71,9 @@ func (f *oauthFlow) snapshot() map[string]any {
 	return out
 }
 
-// oauthConfigured 是否已配置 OAuth App Client ID。
+// oauthConfigured 在线登录是否可用（使用内置官方 OAuth App，固定可用）。
 func (s *Service) oauthConfigured() bool {
-	return s.cfgStr("bot.marketplace.oauth_client_id") != ""
+	return true
 }
 
 // oauthUser 最近一次在线登录的 GitHub 用户名（用于面板展示）。
@@ -82,10 +83,7 @@ func (s *Service) oauthUser() string {
 
 // StartOAuth 开始一次设备授权流：向 GitHub 请求设备码并启动后台轮询。
 func (s *Service) StartOAuth(ctx context.Context) (map[string]any, error) {
-	clientID := s.cfgStr("bot.marketplace.oauth_client_id")
-	if clientID == "" {
-		return nil, fmt.Errorf("未配置 GitHub OAuth App Client ID（bot.marketplace.oauth_client_id），请先在「配置管理」中设置")
-	}
+	clientID := GitHubOAuthClientID
 	s.oauth.mu.Lock()
 	if s.oauth.active {
 		s.oauth.mu.Unlock()

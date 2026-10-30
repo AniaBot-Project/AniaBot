@@ -143,60 +143,6 @@
     "default": "¥ {data.balances.0.total_balance}"
   },
   {
-    "key": "bot.marketplace.enable",
-    "label": "启用插件市场",
-    "type": "bool",
-    "group": "插件市场",
-    "help": "开启后可在面板「插件市场」页浏览、在线安装/卸载第三方插件（安装会重新编译并重启 Bot）；安装插件等于在本机执行插件代码，请仅安装信任来源的插件",
-    "default": false
-  },
-  {
-    "key": "bot.marketplace.repo",
-    "label": "插件仓库",
-    "type": "string",
-    "group": "插件市场",
-    "help": "GitHub 仓库 owner/repo，默认官方插件市场",
-    "default": "AniaBot-Project/AniaBot-Plugins"
-  },
-  {
-    "key": "bot.marketplace.branch",
-    "label": "仓库分支",
-    "type": "string",
-    "group": "插件市场",
-    "default": "main"
-  },
-  {
-    "key": "bot.marketplace.source_dir",
-    "label": "源码目录",
-    "type": "string",
-    "group": "插件市场",
-    "help": "AniaBot 源码克隆路径，用于编译插件；留空时回退使用「自动更新」的源码目录（bot.update.source_dir）"
-  },
-  {
-    "key": "bot.marketplace.plugin_dir",
-    "label": "插件持久目录",
-    "type": "string",
-    "group": "插件市场",
-    "help": "已安装插件的持久副本目录（建议放在 data 卷，容器重建后插件不丢）",
-    "default": "./data/plugins"
-  },
-  {
-    "key": "bot.marketplace.cache_dir",
-    "label": "索引缓存目录",
-    "type": "string",
-    "group": "插件市场",
-    "help": "插件市场索引/下载缓存的存放目录",
-    "default": "./data/marketplace"
-  },
-  {
-    "key": "bot.marketplace.oauth_client_id",
-    "label": "GitHub OAuth Client ID",
-    "type": "string",
-    "group": "插件市场",
-    "help": "在线登录用；默认使用 AniaBot 官方 OAuth App，开箱即用。如需独立配额，可在 GitHub 创建 OAuth App 并启用 Device flow 后覆盖为自己的 Client ID（可不填 Client Secret）",
-    "default": "Ov23li6fHYmQOGOmliT4"
-  },
-  {
     "key": "bot.platform.discord.enable",
     "label": "启用 Discord 平台",
     "type": "bool",
@@ -742,38 +688,6 @@
     "default": 100
   },
   {
-    "key": "plugin.ai_chat_bot.max_token",
-    "label": "最大输出 Token",
-    "type": "int",
-    "group": "AI 对话 · 模型",
-    "help": "留空则不传该参数，使用模型 API 最大输出上限（anthropic 格式必填，留空时按 8192 下发）；已有值可清空保存恢复为不传",
-    "optional": true
-  },
-  {
-    "key": "plugin.ai_chat_bot.temperature",
-    "label": "Temperature",
-    "type": "float",
-    "group": "AI 对话 · 模型",
-    "help": "留空则不传该参数，使用模型 API 默认值；已有值可清空保存恢复为不传",
-    "optional": true
-  },
-  {
-    "key": "plugin.ai_chat_bot.top_p",
-    "label": "Top P",
-    "type": "float",
-    "group": "AI 对话 · 模型",
-    "help": "留空则不传该参数，使用模型 API 默认值；已有值可清空保存恢复为不传",
-    "optional": true
-  },
-  {
-    "key": "plugin.ai_chat_bot.top_k",
-    "label": "Top K",
-    "type": "int",
-    "group": "AI 对话 · 模型",
-    "help": "留空则不传该参数，使用模型 API 默认值；已有值可清空保存恢复为不传",
-    "optional": true
-  },
-  {
     "key": "plugin.ai_chat_bot.headers",
     "label": "自定义请求头",
     "type": "strings",
@@ -1176,13 +1090,6 @@
     "default": 120
   },
   {
-    "key": "plugin.ai_chat_bot.clock.max_log_entries",
-    "label": "日志保留条数",
-    "type": "int",
-    "group": "AI 对话 · 定时任务",
-    "default": 20000
-  },
-  {
     "key": "plugin.ai_chat_bot.memory.enable",
     "label": "启用长期记忆",
     "type": "bool",
@@ -1264,37 +1171,6 @@
     "group": "AI 对话 · 知识库",
     "help": "如 jina-embeddings-v3、text-embedding-3-small、BAAI/bge-large-zh-v1.5",
     "default": "jina-embeddings-v3"
-  },
-  {
-    "key": "plugin.ai_chat_bot.query_log.enable",
-    "label": "启用 Query 日志",
-    "type": "bool",
-    "group": "AI 对话 · 查询日志",
-    "help": "在面板记录每次 AI 回复的完整执行过程（耗时、token、工具调用详情）",
-    "default": true
-  },
-  {
-    "key": "plugin.ai_chat_bot.query_log.max_entries",
-    "label": "日志保留条数",
-    "type": "int",
-    "group": "AI 对话 · 查询日志",
-    "default": 20000
-  },
-  {
-    "key": "plugin.ai_chat_bot.query_log.max_tool_records",
-    "label": "单条日志工具明细上限",
-    "type": "int",
-    "group": "AI 对话 · 查询日志",
-    "help": "每条 Query 日志最多保留的工具调用明细条数，超出部分仅保留总数不存明细；0 表示不限制（实际条数受最大工具轮数约束）",
-    "default": 200
-  },
-  {
-    "key": "plugin.ai_chat_bot.query_log.max_result_runes",
-    "label": "日志中工具结果截断上限(字符)",
-    "type": "int",
-    "group": "AI 对话 · 查询日志",
-    "help": "仅控制工具执行结果写入 Query 日志时的保留长度，不影响 AI 实际收到的完整输出；0 表示不限制。仅此字段限长（网页抓取、命令执行等外部输出可能很大），用户输入、工具参数、最终回复始终完整记录",
-    "default": 1000
   },
   {
     "key": "plugin.ai_chat_bot.stream.enable",

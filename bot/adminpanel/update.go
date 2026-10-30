@@ -415,10 +415,7 @@ func (s *Server) runUpdate(srcDir, gitURL, branch string) {
 	// 与生成的注册文件，这里从持久插件目录恢复，保证更新后插件不丢失）
 	upd.setPhase(upPhaseDeps)
 	upd.appendLog("== 重放已安装插件 ==")
-	pluginDir := s.cfgStr("bot.marketplace.plugin_dir")
-	if pluginDir == "" {
-		pluginDir = "./data/plugins"
-	}
+	pluginDir := marketplace.DefaultPluginDir
 	if err := marketplace.ApplyInstalled(ctx, srcDir, pluginDir, s.opt.Logger); err != nil {
 		fail("插件错误", fmt.Errorf("重放已安装插件失败: %w", err))
 		return

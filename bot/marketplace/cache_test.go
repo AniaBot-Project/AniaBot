@@ -8,7 +8,7 @@ import (
 )
 
 func TestReadmeCacheRoundtripAndExpiry(t *testing.T) {
-	svc := New(&mapConfig{m: map[string]any{"bot.marketplace.cache_dir": t.TempDir()}}, slog.Default())
+	svc := New(&mapConfig{m: map[string]any{}}, slog.Default(), WithCacheDir(t.TempDir()))
 	if _, ok := svc.loadCachedReadme("example"); ok {
 		t.Fatal("空缓存不应命中")
 	}
@@ -29,7 +29,7 @@ func TestReadmeCacheRoundtripAndExpiry(t *testing.T) {
 }
 
 func TestClearReadmeCache(t *testing.T) {
-	svc := New(&mapConfig{m: map[string]any{"bot.marketplace.cache_dir": t.TempDir()}}, slog.Default())
+	svc := New(&mapConfig{m: map[string]any{}}, slog.Default(), WithCacheDir(t.TempDir()))
 	svc.saveCachedReadme("a", "A")
 	svc.saveCachedReadme("b", "B")
 	svc.clearReadmeCache()
@@ -41,7 +41,7 @@ func TestClearReadmeCache(t *testing.T) {
 }
 
 func TestIndexSyncedAt(t *testing.T) {
-	svc := New(&mapConfig{m: map[string]any{"bot.marketplace.cache_dir": t.TempDir()}}, slog.Default())
+	svc := New(&mapConfig{m: map[string]any{}}, slog.Default(), WithCacheDir(t.TempDir()))
 	if got := svc.indexSyncedAt(); got != 0 {
 		t.Fatalf("无缓存文件时应为 0, got %d", got)
 	}

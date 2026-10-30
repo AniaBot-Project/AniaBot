@@ -17,12 +17,8 @@ func TestServiceListDetail(t *testing.T) {
 	if os.Getenv("ANIABOT_TEST_NETWORK") != "1" {
 		t.Skip("设置 ANIABOT_TEST_NETWORK=1 以运行真实 GitHub 集成测试")
 	}
-	cfg := &mapConfig{m: map[string]any{
-		"bot.marketplace.enable":     true,
-		"bot.marketplace.plugin_dir": t.TempDir(),
-		"bot.marketplace.cache_dir":  t.TempDir(),
-	}}
-	svc := New(cfg, slog.Default())
+	cfg := &mapConfig{m: map[string]any{}}
+	svc := New(cfg, slog.Default(), WithPluginDir(t.TempDir()), WithCacheDir(t.TempDir()))
 	ctx := context.Background()
 
 	list, err := svc.List(ctx, true)

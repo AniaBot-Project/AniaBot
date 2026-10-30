@@ -36,6 +36,8 @@
           <input v-model="autoRefresh" type="checkbox" />
           自动刷新
         </label>
+        <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors disabled:opacity-50" :disabled="exporting" @click="exportLogs">导出日志</button>
+        <button class="text-xs text-zinc-500 hover:text-[#ff3b30] font-medium transition-colors disabled:opacity-50" :disabled="clearing" @click="clearLogs">清除日志</button>
         <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="load">刷新</button>
       </div>
     </div>
@@ -218,8 +220,18 @@
                   <pre class="text-xs text-[#ff3b30] font-mono whitespace-pre-wrap break-all leading-relaxed">{{ tc.error }}</pre>
                 </div>
                 <div v-else-if="tc.result">
-                  <div class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 mb-1">结果</div>
-                  <pre class="text-xs text-slate-600 font-mono whitespace-pre-wrap break-all leading-relaxed">{{ tc.result }}</pre>
+                  <div class="flex items-center gap-2 mb-1">
+                    <div class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">结果</div>
+                    <span v-if="isLongText(tc.result)" class="text-[10px] text-zinc-400 font-mono">{{ charCount(tc.result) }} 字符</span>
+                  </div>
+                  <pre class="text-xs text-slate-600 font-mono whitespace-pre-wrap break-all leading-relaxed">{{ shownResult(detail, i, tc.result) }}</pre>
+                  <button
+                    v-if="isLongText(tc.result)"
+                    class="mt-1.5 text-[11px] text-[#0071e3] hover:underline"
+                    @click="toggleResult(detail, i)"
+                  >
+                    {{ resultExpanded(detail, i) ? '收起' : `展开全部（超过 ${FOLD_CHARS} 字符）` }}
+                  </button>
                 </div>
               </div>
             </div>
@@ -265,6 +277,11 @@ const PAGE = 50 // 每页条数
 
 const logs = ref([]) // 新在前
 const autoRefresh = ref(true)
+const exporting = ref(false)
+const clearing = ref(false)
+// 工具结果超过该字符数时折叠展示，点击可展开（后端记录完整内容）
+const FOLD_CHARS = 1000
+const expandedResults = reactive(new Set())
 // detail 为当前弹窗展示的日志（null 表示弹窗关闭）
 const detail = ref(null)
 // now 每秒跳动一次，驱动 running 条目「已用时」实时刷新
@@ -296,6 +313,65 @@ function resetList() {
   logs.value = []
   hasMore.value = false
   loadedOlder.value = false
+}
+
+// 按当前筛选条件导出 Query 日志（后端返回 JSON 附件，含完整工具结果）
+async function exportLogs() {
+  if (exporting.value) return
+  exporting.value = true
+  try {
+    await api.exportQueryLogs({ ...applied })
+  } catch (e) {
+    alert(e.message || '导出失败')
+  } finally {
+    exporting.value = false
+  }
+}
+
+// 清除当前筛选条件下的 Query 日志（无筛选时清空全部），不可恢复
+async function clearLogs() {
+  if (clearing.value) return
+  const scope = hasFilter.value ? '当前筛选条件下的' : '全部'
+  if (!confirm(`确定清除${scope} Query 日志吗？清除后不可恢复，建议先导出备份。`)) return
+  clearing.value = true
+  try {
+    const res = await api.clearQueryLogs({ ...applied })
+    resetList()
+    await load()
+    alert(`已清除 ${res.removed ?? 0} 条日志`)
+  } catch (e) {
+    alert(e.message || '清除失败')
+  } finally {
+    clearing.value = false
+  }
+}
+
+// ---- 工具结果折叠：超过 FOLD_CHARS 字符默认只显示前 FOLD_CHARS 个字符 ----
+function charCount(text) {
+  return Array.from(text || '').length
+}
+
+function isLongText(text) {
+  return typeof text === 'string' && charCount(text) > FOLD_CHARS
+}
+
+function resultKey(log, index) {
+  return `${log.id}:${index}`
+}
+
+function resultExpanded(log, index) {
+  return expandedResults.has(resultKey(log, index))
+}
+
+function shownResult(log, index, text) {
+  if (!isLongText(text) || resultExpanded(log, index)) return text
+  return Array.from(text).slice(0, FOLD_CHARS).join('')
+}
+
+function toggleResult(log, index) {
+  const key = resultKey(log, index)
+  if (expandedResults.has(key)) expandedResults.delete(key)
+  else expandedResults.add(key)
 }
 
 // Esc 关闭详情弹窗

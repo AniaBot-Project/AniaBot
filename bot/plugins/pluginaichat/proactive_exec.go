@@ -224,7 +224,7 @@ func (readOnlyHistory) Replace(context.Context, []aichat.Message) error { return
 func (readOnlyHistory) Clear(context.Context) error                     { return nil }
 
 // chat 构建一次性会话并生成「这一次要说什么」（不发送）。返回本次执行的
-// Query 日志记录器（日志未启用时为 nil），由 execute 在发送 / 跳过 / 失败后收尾。
+// Query 日志记录器（记录器不可用时为 nil），由 execute 在发送 / 跳过 / 失败后收尾。
 func (m *proactiveManager) chat(ctx context.Context, it *ProactiveIntention, id message.QID, isGroup bool, b bot.Bot) (proactiveResult, aichat.TokenUsage, *queryRecorder, error) {
 	p := m.plugin
 

@@ -59,7 +59,7 @@ func (s *fakeStore) Clear(_ context.Context) bool             { s.data = map[str
 func (s *fakeStore) Clone(_ string) storage.PersistentStorage { return s } // 测试不复用前缀
 
 func TestRecordAndRecent(t *testing.T) {
-	l, _ := newSQLLogger(t, 3)
+	l, _ := newSQLLogger(t)
 
 	e1 := l.Record(Entry{ChatType: "group", TargetID: "10001", Query: "你好"})
 	e2 := l.Record(Entry{ChatType: "friend", TargetID: "20002", Query: "在吗"})
@@ -77,23 +77,23 @@ func TestRecordAndRecent(t *testing.T) {
 	}
 }
 
-func TestRecordCapacity(t *testing.T) {
-	l, _ := newSQLLogger(t, 2)
+func TestRecordNoEviction(t *testing.T) {
+	l, _ := newSQLLogger(t)
 	l.Record(Entry{Query: "q1"})
 	l.Record(Entry{Query: "q2"})
 	l.Record(Entry{Query: "q3"})
 
 	recent := l.Recent(0)
-	if len(recent) != 2 {
-		t.Fatalf("应滚动保留 2 条，实际 %d 条", len(recent))
+	if len(recent) != 3 {
+		t.Fatalf("日志应全部保留，实际 %d 条", len(recent))
 	}
-	if recent[0].Query != "q3" || recent[1].Query != "q2" {
-		t.Fatalf("应保留最新的两条: %+v", recent)
+	if recent[0].Query != "q3" || recent[2].Query != "q1" {
+		t.Fatalf("应保留全部记录: %+v", recent)
 	}
 }
 
 func TestUpdate(t *testing.T) {
-	l, _ := newSQLLogger(t, 10)
+	l, _ := newSQLLogger(t)
 	e := l.Record(Entry{Query: "q"})
 
 	l.Update(e.ID, func(en *Entry) {
@@ -126,11 +126,11 @@ func TestSeqPersistAcrossReload(t *testing.T) {
 	t.Cleanup(func() { db.Close() })
 	newStore := func() *sqlFakeStore { return &sqlFakeStore{fakeStore: newFakeStore(), db: db} }
 
-	l1 := New(newStore(), 10, nil)
+	l1 := New(newStore(), nil)
 	e := l1.Record(Entry{Query: "q"})
 
 	// 模拟重启：同一存储重建 Logger，序号应继续递增而非重置
-	l2 := New(newStore(), 10, nil)
+	l2 := New(newStore(), nil)
 	e2 := l2.Record(Entry{Query: "q2"})
 	if e2.ID == e.ID {
 		t.Fatalf("重启后 ID 冲突: %q", e2.ID)
@@ -138,7 +138,7 @@ func TestSeqPersistAcrossReload(t *testing.T) {
 }
 
 func TestMarkRunningInterrupted(t *testing.T) {
-	l, _ := newSQLLogger(t, 10)
+	l, _ := newSQLLogger(t)
 	now := time.Now()
 	l.Record(Entry{Query: "q1", Status: StatusRunning, Time: now.Add(-time.Minute)})
 	l.Record(Entry{Query: "q2", Status: StatusSuccess, Time: now.Add(-3 * time.Minute)})
@@ -176,7 +176,7 @@ func TestTruncate(t *testing.T) {
 }
 
 func TestQueryFilter(t *testing.T) {
-	l, _ := newSQLLogger(t, 100)
+	l, _ := newSQLLogger(t)
 	base := time.Date(2026, 7, 26, 12, 0, 0, 0, time.Local)
 	l.Record(Entry{Time: base.Add(-2 * time.Hour), ChatType: "group", TargetID: "10001", Senders: []string{"111"}, Query: "今天天气怎么样"})
 	l.Record(Entry{Time: base.Add(-1 * time.Hour), ChatType: "group", TargetID: "10001", Senders: []string{"222", "111"}, Query: "帮我看看新闻"})
@@ -216,7 +216,7 @@ func TestQueryFilter(t *testing.T) {
 }
 
 func TestQueryBeforeCursor(t *testing.T) {
-	l, _ := newSQLLogger(t, 10)
+	l, _ := newSQLLogger(t)
 	for _, q := range []string{"a", "b", "c", "d", "e"} {
 		l.Record(Entry{ChatType: "group", TargetID: "1", Query: q})
 	}

@@ -35,6 +35,32 @@ function qs(params = {}) {
   return s ? '?' + s : ''
 }
 
+// 下载接口返回的文件（登录态失效时抛错；文件名优先取 Content-Disposition）
+async function download(path, fallbackName) {
+  const resp = await fetch(path, { credentials: 'same-origin' })
+  if (resp.status === 401) {
+    auth.loggedIn = false
+    throw new Error('未登录或会话已过期')
+  }
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}))
+    throw new Error(data.error || `请求失败 (${resp.status})`)
+  }
+  const blob = await resp.blob()
+  let filename = fallbackName
+  const cd = resp.headers.get('Content-Disposition')
+  const m = cd && cd.match(/filename="?([^";]+)"?/)
+  if (m) filename = m[1]
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export const api = {
   async checkLogin() {
     try {
@@ -67,30 +93,7 @@ export const api = {
   getSchema: () => request('/api/config/schema'),
   getConfig: () => request('/api/config'),
   // 导出完整配置为 JSON 文件下载（含敏感字段真实值，需妥善保管）
-  async exportConfig() {
-    const resp = await fetch('/api/config/export', { credentials: 'same-origin' })
-    if (resp.status === 401) {
-      auth.loggedIn = false
-      throw new Error('未登录或会话已过期')
-    }
-    if (!resp.ok) {
-      const data = await resp.json().catch(() => ({}))
-      throw new Error(data.error || `请求失败 (${resp.status})`)
-    }
-    const blob = await resp.blob()
-    let filename = 'aniabot-config.json'
-    const cd = resp.headers.get('Content-Disposition')
-    const m = cd && cd.match(/filename="?([^";]+)"?/)
-    if (m) filename = m[1]
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
-  },
+  exportConfig: () => download('/api/config/export', 'aniabot-config.json'),
 
   saveConfig: (updates) =>
     request('/api/config', { method: 'PUT', body: JSON.stringify(updates) }),
@@ -155,8 +158,16 @@ export const api = {
   getMsgLogs: (params = {}) => request(`/api/msglogs${qs(params)}`),
   // 定时任务执行日志分页查询：{ target_type, target_id, task_id, status, start, end, keyword, limit, before }（均可选）
   getTaskLogs: (params = {}) => request(`/api/tasklogs${qs(params)}`),
+  // 按当前筛选条件导出定时任务执行日志（JSON 文件下载）
+  exportTaskLogs: (params = {}) => download(`/api/tasklogs/export${qs(params)}`, 'tasklogs.json'),
+  // 清除当前筛选条件下的执行日志（无筛选时清空全部），返回 { ok, removed }
+  clearTaskLogs: (params = {}) => request(`/api/tasklogs${qs(params)}`, { method: 'DELETE' }),
   // Query 日志分页查询：{ chat_type, target_id, sender, start, end, keyword, limit, before }（均可选）
   getQueryLogs: (params = {}) => request(`/api/querylogs${qs(params)}`),
+  // 按当前筛选条件导出 Query 日志（JSON 文件下载）
+  exportQueryLogs: (params = {}) => download(`/api/querylogs/export${qs(params)}`, 'querylogs.json'),
+  // 清除当前筛选条件下的 Query 日志（无筛选时清空全部），返回 { ok, removed }
+  clearQueryLogs: (params = {}) => request(`/api/querylogs${qs(params)}`, { method: 'DELETE' }),
   // 控制台日志分页查询：{ limit, before }（均可选），返回 { items, has_more }
   getConsoleLogs: (params = {}) => request(`/api/consolelogs${qs(params)}`),
   // 操作日志分页查询：{ category, start, end, keyword, limit, before }（均可选），返回 { items, has_more }

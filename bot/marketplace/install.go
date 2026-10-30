@@ -158,12 +158,9 @@ func (s *Service) stepCmd(ctx context.Context, dir, name string, args ...string)
 	return nil
 }
 
-// preflight 环境检查：开关、运行模式、工具链、源码目录。
+// preflight 环境检查：运行模式、工具链、源码目录。
 // 返回错误信息；ok=false 表示不可用。
 func (s *Service) preflight(ctx context.Context) (string, bool) {
-	if !s.Enabled() {
-		return "插件市场未开启，请先在「配置管理」中设置 bot.marketplace.enable=true", false
-	}
 	if isDevRun() {
 		return "当前为 go run 开发模式运行，插件市场不可用，请以编译后的二进制部署", false
 	}
@@ -183,7 +180,7 @@ func (s *Service) preflight(ctx context.Context) (string, bool) {
 	}
 	srcDir := s.sourceDir()
 	if srcDir == "" {
-		return "未配置源码目录（bot.marketplace.source_dir 或 bot.update.source_dir），请先在「配置管理」中设置", false
+		return "未配置源码目录（bot.update.source_dir），请先在「配置管理 → 自动更新」中设置", false
 	}
 	if _, err := os.Stat(filepath.Join(srcDir, "go.mod")); err != nil {
 		return fmt.Sprintf("源码目录 %s 不是 AniaBot 仓库（缺少 go.mod），请先完成一次自动更新", srcDir), false
@@ -218,9 +215,6 @@ type operation struct {
 // Batch 批量安装/升级/卸载插件（可混合，异步）。
 // 所有操作共用一次生成注册代码、拉取依赖、编译与重启，比逐个操作快得多。
 func (s *Service) Batch(installIDs, uninstallIDs []string) error {
-	if !s.Enabled() {
-		return fmt.Errorf("插件市场未开启")
-	}
 	ops, err := s.buildOps(installIDs, uninstallIDs)
 	if err != nil {
 		return err
@@ -230,9 +224,6 @@ func (s *Service) Batch(installIDs, uninstallIDs []string) error {
 
 // Install 开始安装/升级单个插件（异步）。
 func (s *Service) Install(id, commit string) error {
-	if !s.Enabled() {
-		return fmt.Errorf("插件市场未开启")
-	}
 	ops, err := s.buildOps([]string{id}, nil)
 	if err != nil {
 		return err
@@ -243,9 +234,6 @@ func (s *Service) Install(id, commit string) error {
 
 // Uninstall 开始卸载单个插件（异步）。
 func (s *Service) Uninstall(id string) error {
-	if !s.Enabled() {
-		return fmt.Errorf("插件市场未开启")
-	}
 	ops, err := s.buildOps(nil, []string{id})
 	if err != nil {
 		return err
@@ -665,9 +653,6 @@ func (s *Service) fireUnloadHook(ctx context.Context, id string) {
 
 // Rollback 开始回滚（异步）：恢复上次替换前的二进制与插件清单。
 func (s *Service) Rollback() error {
-	if !s.Enabled() {
-		return fmt.Errorf("插件市场未开启")
-	}
 	if !s.state.tryBegin() {
 		return fmt.Errorf("已有插件任务正在进行中或正在重启")
 	}

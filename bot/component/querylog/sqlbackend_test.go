@@ -22,7 +22,7 @@ func (s *sqlFakeStore) SQLDB() *sql.DB                 { return s.db }
 func (s *sqlFakeStore) SQLDialect() storage.SQLDialect { return storage.SQLDialectSQLite }
 
 // newSQLLogger 构造走 SQL 后端的 Logger（sqlite :memory:，单连接）。
-func newSQLLogger(t *testing.T, maxEntries int) (*Logger, *sql.DB) {
+func newSQLLogger(t *testing.T) (*Logger, *sql.DB) {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -30,11 +30,11 @@ func newSQLLogger(t *testing.T, maxEntries int) (*Logger, *sql.DB) {
 	}
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
-	return New(&sqlFakeStore{fakeStore: newFakeStore(), db: db}, maxEntries, nil), db
+	return New(&sqlFakeStore{fakeStore: newFakeStore(), db: db}, nil), db
 }
 
 func TestSQLBackendRecordRecent(t *testing.T) {
-	l, _ := newSQLLogger(t, 3)
+	l, _ := newSQLLogger(t)
 
 	e1 := l.Record(Entry{ChatType: "group", TargetID: "10001", Query: "你好"})
 	e2 := l.Record(Entry{ChatType: "friend", TargetID: "20002", Query: "在吗"})
@@ -70,20 +70,19 @@ func TestSQLBackendRecordRecent(t *testing.T) {
 	}
 }
 
-func TestSQLBackendCapacity(t *testing.T) {
-	l, db := newSQLLogger(t, 2)
+func TestSQLBackendNoEviction(t *testing.T) {
+	l, db := newSQLLogger(t)
 	l.Record(Entry{Query: "q1"})
 	l.Record(Entry{Query: "q2"})
 	l.Record(Entry{Query: "q3"})
 
 	recent := l.Recent(0)
-	if len(recent) != 2 || recent[0].Query != "q3" || recent[1].Query != "q2" {
-		t.Fatalf("应滚动保留最新两条: %+v", recent)
+	if len(recent) != 3 || recent[0].Query != "q3" || recent[2].Query != "q1" {
+		t.Fatalf("日志应全部保留: %+v", recent)
 	}
-	// 旧行已从表中删除
 	var n int
-	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM ania_query_log`).Scan(&n); err != nil || n != 2 {
-		t.Fatalf("表中行数 = %d,%v want 2", n, err)
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM ania_query_log`).Scan(&n); err != nil || n != 3 {
+		t.Fatalf("表中行数 = %d,%v want 3", n, err)
 	}
 }
 
@@ -96,11 +95,11 @@ func TestSQLBackendSeqAcrossReload(t *testing.T) {
 	defer db.Close()
 
 	store := &sqlFakeStore{fakeStore: newFakeStore(), db: db}
-	l1 := New(store, 10, nil)
+	l1 := New(store, nil)
 	e1 := l1.Record(Entry{Query: "q1"})
 
 	// 模拟重启：同一数据库重建 Logger，序号继续递增而非重置
-	l2 := New(store, 10, nil)
+	l2 := New(store, nil)
 	e2 := l2.Record(Entry{Query: "q2"})
 	if e2.ID == e1.ID {
 		t.Fatalf("重启后 ID 冲突: %q", e2.ID)
@@ -111,7 +110,7 @@ func TestSQLBackendSeqAcrossReload(t *testing.T) {
 }
 
 func TestSQLBackendQueryFilter(t *testing.T) {
-	l, _ := newSQLLogger(t, 100)
+	l, _ := newSQLLogger(t)
 	base := time.Date(2026, 7, 26, 12, 0, 0, 0, time.Local)
 	l.Record(Entry{Time: base.Add(-2 * time.Hour), ChatType: "group", TargetID: "10001", Senders: []string{"111"}, Query: "今天天气怎么样"})
 	l.Record(Entry{Time: base.Add(-1 * time.Hour), ChatType: "group", TargetID: "10001", Senders: []string{"222", "111"}, Query: "帮我看看新闻 News"})
@@ -153,7 +152,7 @@ func TestSQLBackendQueryFilter(t *testing.T) {
 
 // TestSQLBackendKindFilter 主动互动日志按 Kind 与普通对话区分，支持组合筛选。
 func TestSQLBackendKindFilter(t *testing.T) {
-	l, _ := newSQLLogger(t, 100)
+	l, _ := newSQLLogger(t)
 	l.Record(Entry{ChatType: "group", TargetID: "1", Query: "用户提问"})
 	l.Record(Entry{Kind: KindProactive, ChatType: "group", TargetID: "1", Query: "【主动互动 · 冷场触发】", Status: StatusSkipped, Note: "没有具体由头"})
 	l.Record(Entry{Kind: KindProactive, ChatType: "friend", TargetID: "2", Query: "【主动互动 · 手动触发】", Reply: "在吗"})
@@ -196,7 +195,7 @@ func TestSQLBackendUpgradeAddsKindColumn(t *testing.T) {
 		t.Fatalf("写入旧记录失败: %v", err)
 	}
 
-	l := New(&sqlFakeStore{fakeStore: newFakeStore(), db: db}, 10, nil)
+	l := New(&sqlFakeStore{fakeStore: newFakeStore(), db: db}, nil)
 	if got := l.Query(Filter{Kind: KindChat, Limit: 10}); len(got) != 1 || got[0].Query != "旧记录" {
 		t.Fatalf("旧记录应视为普通对话: %+v", got)
 	}
@@ -210,7 +209,7 @@ func TestSQLBackendUpgradeAddsKindColumn(t *testing.T) {
 }
 
 func TestSQLBackendQueryBeforeCursor(t *testing.T) {
-	l, _ := newSQLLogger(t, 10)
+	l, _ := newSQLLogger(t)
 	for _, q := range []string{"a", "b", "c", "d", "e"} {
 		l.Record(Entry{ChatType: "group", TargetID: "1", Query: q})
 	}
@@ -227,7 +226,7 @@ func TestSQLBackendQueryBeforeCursor(t *testing.T) {
 
 // TestSQLBackendMarkRunningInterrupted SQL 后端的 running → interrupted 标记。
 func TestSQLBackendMarkRunningInterrupted(t *testing.T) {
-	sqlm, _ := newSQLLogger(t, 10)
+	sqlm, _ := newSQLLogger(t)
 
 	now := time.Now()
 	inputs := []Entry{
@@ -254,5 +253,32 @@ func TestSQLBackendMarkRunningInterrupted(t *testing.T) {
 	// 二次调用无新增更新
 	if n := sqlm.MarkRunningInterrupted(); n != 0 {
 		t.Fatalf("二次调用应返回 0，实际 %d", n)
+	}
+}
+
+// TestSQLBackendClear 按条件清除与清空全部。
+func TestSQLBackendClear(t *testing.T) {
+	l, db := newSQLLogger(t)
+	l.Record(Entry{ChatType: "group", TargetID: "1", Query: "q1"})
+	l.Record(Entry{ChatType: "friend", TargetID: "2", Query: "q2"})
+	l.Record(Entry{ChatType: "group", TargetID: "1", Query: "q3"})
+
+	if n := l.Clear(Filter{ChatType: "group"}); n != 2 {
+		t.Fatalf("按类型清除应删除 2 条, got %d", n)
+	}
+	if got := l.Recent(0); len(got) != 1 || got[0].Query != "q2" {
+		t.Fatalf("清除后剩余记录异常: %+v", got)
+	}
+	if n := l.Clear(Filter{}); n != 1 {
+		t.Fatalf("清空全部应删除 1 条, got %d", n)
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM ania_query_log`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("表中行数 = %d,%v want 0", count, err)
+	}
+	// 清空后序号继续递增（不复用），新记录可正常写入
+	e := l.Record(Entry{Query: "after"})
+	if e.ID == "" {
+		t.Fatal("清空后应可继续写入")
 	}
 }

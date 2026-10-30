@@ -281,8 +281,8 @@ X-Proxy-Route: team-a
 ::: tip 关于 API 格式
 三种格式的对话能力（工具调用、流式回复、token 统计、备用模型切换）行为一致。差异说明：
 
-- `anthropic`：深度思考（`thinking.mode`）映射为 `budget_tokens`，思考块会随历史持久化并在多轮中原样回传；`top_k` 原生支持，但开启思考时 temperature/top_p/top_k 按 API 要求不下发
-- `responses`：`top_k` 不支持会被忽略
+- `anthropic`：深度思考（`thinking.mode`）映射为 `budget_tokens`，思考块会随历史持久化并在多轮中原样回传；未开启思考时按模型 API 默认采样参数请求
+- `responses`：与 `chat_completions` 行为一致，按模型 API 默认采样参数请求
 - 上下文压缩器（`plugin.ai_chat_bot.compressor.api_format`）、备用模型（`plugin.ai_chat_bot.fallback.api_format`）可独立选择格式，留空跟随主模型；子代理与 Agent 团队成员固定跟随主模型格式
 :::
 
@@ -301,13 +301,11 @@ X-Proxy-Route: team-a
 | --- | --- | --- |
 | `plugin.ai_chat_bot.max_context_tokens` | `128000` | 上下文 token 预算，超过 80% 自动压缩历史 |
 | `plugin.ai_chat_bot.max_iterations` | `20` | 主对话单次回复的最大工具调用轮数，超出后强制结束 |
-| `plugin.ai_chat_bot.temperature` | `1.2` | 采样温度 |
-| `plugin.ai_chat_bot.top_p` | `0.9` | 核采样 |
-| `plugin.ai_chat_bot.top_k` | `100` | Top-K 采样 |
-| `plugin.ai_chat_bot.max_token` | 未设置 | 单次回复最大输出 token；留空不传该参数，使用模型 API 最大输出上限（anthropic 格式必填，留空时按 8192 下发）。设得过低会把长内容（如 write_file 的参数）拦腰截断 |
 | `plugin.ai_chat_bot.thinking.enable` | `false` | 深度思考开关 |
 | `plugin.ai_chat_bot.thinking.mode` | `auto` | `none` / `low` / `medium` / `high` / `auto` |
 | `plugin.ai_chat_bot.prompt` | 内置场景化 system prompt，按工具场景选择并说明异常处理方式（完整默认值见 `bot/plugins/pluginaichat/config.go` 的 `defaultPrompt`） | 系统提示词（system prompt） |
+
+采样参数（温度 / Top P / Top K / 最大输出 token）不再单独配置，统一使用模型 API 的默认值（anthropic 格式未指定 `max_tokens` 时按 8192 下发）。
 
 ::: tip 按群/按人定制人格（保存后立即生效，无需重启）
 在面板的「文件编辑 → Prompt 覆盖」页（配置键 `files.prompt_json`，原 `aniabot.prompt.json`），可为特定群聊或好友覆盖 system prompt：
@@ -398,9 +396,8 @@ X-Proxy-Route: team-a
 | --- | --- | --- |
 | `plugin.ai_chat_bot.clock.enable` | `true` | 启用后 AI 可自主创建定时任务 |
 | `plugin.ai_chat_bot.clock.default_timeout_sec` | `120` | 单次触发默认超时（秒） |
-| `plugin.ai_chat_bot.clock.max_log_entries` | `500` | 执行日志保留条数（滚动覆盖） |
 
-与框架的 `StartCron` 静态任务不同，clock 任务由 AI / 用户**动态创建**、持久化保存、重启不丢。执行日志可在面板「状态总览」页查看。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
+与框架的 `StartCron` 静态任务不同，clock 任务由 AI / 用户**动态创建**、持久化保存、重启不丢。执行日志全量保留（不滚动淘汰），可在面板「AI 定时任务」页查看、导出或清除。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
 
 ### AI 主动互动（proactive）
 
@@ -437,7 +434,7 @@ AI 也可以用 `proactive_create` / `proactive_list` / `proactive_cancel` 自�
 
 子代理默认启用、无独立配置项：AI 通过 `subagent_run` 工具把复杂/耗时的子任务委派给一次性子代理执行，子代理以全新一次性上下文运行、拥有与主 AI 一致的工具能力，但**不能再委派子代理**。
 
-执行参数全部跟随主模型：模型与 API 格式、生成参数（Temperature / 参数 / 深度思考等）取「AI 对话 · 模型」配置；工具调用轮数取主模型的「最大工具调用轮数」；超时取框架级「消息处理超时」（`bot.msg_event_timeout_sec`，默认 5 分钟，单次调用可覆盖、上限 1800 秒，实际还会按主请求剩余预算自动收缩并预留收尾时间）。子代理结果不截断，完整回填给主 AI。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
+执行参数全部跟随主模型：模型与 API 格式、生成参数（深度思考等）取「AI 对话 · 模型」配置；工具调用轮数取主模型的「最大工具调用轮数」；超时取框架级「消息处理超时」（`bot.msg_event_timeout_sec`，默认 5 分钟，单次调用可覆盖、上限 1800 秒，实际还会按主请求剩余预算自动收缩并预留收尾时间）。子代理结果不截断，完整回填给主 AI。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
 
 
 ### AI 知识库（knowledge）
@@ -476,14 +473,7 @@ AI 也可以用 `proactive_create` / `proactive_list` / `proactive_cancel` 自�
 
 ### Query 日志（query_log）
 
-在面板记录每次 AI 回复的完整执行过程：
-
-| 配置键 | 默认值 | 说明 |
-| --- | --- | --- |
-| `plugin.ai_chat_bot.query_log.enable` | `true` | 启用 Query 日志 |
-| `plugin.ai_chat_bot.query_log.max_entries` | `200` | 日志保留条数（滚动覆盖） |
-| `plugin.ai_chat_bot.query_log.max_tool_records` | `200` | 单条日志保留的工具调用明细条数，超出部分仅保留总数；`0` 表示不限制 |
-| `plugin.ai_chat_bot.query_log.max_result_runes` | `1000` | 工具执行结果写入日志时的截断上限（字符数）；`0` 表示不限制。仅影响日志记录，不影响 AI 实际收到的完整输出；用户输入、工具参数、最终回复始终完整记录 |
+Query 日志默认开启且无独立配置项，在面板记录每次 AI 回复的完整执行过程。日志全量保留（不做容量淘汰、不截断工具结果，单条日志的工具调用明细也完整保存），由管理员在「Query 日志」页按当前筛选条件**导出**（JSON）或**清除**；前端展示工具结果超过 1000 字符时默认折叠，点击可展开。
 
 每条日志包含：触发会话、发送者、用户输入、LLM 轮数、工具调用明细（名称/参数/结果/耗时）、token 用量与最终回复，状态区分 `running` / `success` / `skipped`（主动互动中 AI 判断无需发言）/ `stopped` / `timeout` / `error`。面板「Query 日志」页可筛选查看；主动互动的执行（来源标记为「主动互动」）也会记录在这里，以触发说明替代用户输入。
 

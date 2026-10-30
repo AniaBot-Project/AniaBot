@@ -127,6 +127,8 @@
           <input v-model="autoRefresh" type="checkbox" />
           自动刷新
         </label>
+        <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors disabled:opacity-50" :disabled="exporting" @click="exportLogs">导出日志</button>
+        <button class="text-xs text-zinc-500 hover:text-[#ff3b30] font-medium transition-colors disabled:opacity-50" :disabled="clearing" @click="clearLogs">清除日志</button>
         <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="load">刷新</button>
       </div>
     </div>
@@ -563,6 +565,8 @@ const PAGE = 50 // 每页条数
 
 const logs = ref([]) // 新在前
 const autoRefresh = ref(true)
+const exporting = ref(false)
+const clearing = ref(false)
 // detail 为当前弹窗展示的日志（null 表示弹窗关闭）
 const detail = ref(null)
 const hasMore = ref(false) // 是否还有更早的日志可加载
@@ -591,6 +595,37 @@ function resetList() {
   logs.value = []
   hasMore.value = false
   loadedOlder.value = false
+}
+
+// 按当前筛选条件导出执行日志（后端返回 JSON 附件）
+async function exportLogs() {
+  if (exporting.value) return
+  exporting.value = true
+  try {
+    await api.exportTaskLogs({ ...applied })
+  } catch (e) {
+    alert(e.message || '导出失败')
+  } finally {
+    exporting.value = false
+  }
+}
+
+// 清除当前筛选条件下的执行日志（无筛选时清空全部），不可恢复
+async function clearLogs() {
+  if (clearing.value) return
+  const scope = hasFilter.value ? '当前筛选条件下的' : '全部'
+  if (!confirm(`确定清除${scope}任务执行日志吗？清除后不可恢复，建议先导出备份。`)) return
+  clearing.value = true
+  try {
+    const res = await api.clearTaskLogs({ ...applied })
+    resetList()
+    await load()
+    alert(`已清除 ${res.removed ?? 0} 条日志`)
+  } catch (e) {
+    alert(e.message || '清除失败')
+  } finally {
+    clearing.value = false
+  }
 }
 
 // Esc 关闭详情弹窗 / 任务表单弹窗

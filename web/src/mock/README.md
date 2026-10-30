@@ -6,7 +6,7 @@
 
 `seed/*.json` 全部来自**真实运行的实例**：用临时 SQLite 目录启动 AniaBot，通过面板 API 完成初始化、写入演示配置、创建定时任务/记忆/团队/知识库后，把各端点的真实 JSON 响应原样抓取而来：
 
-- `config_schema.json`（171 个字段）、`config.json`、`plugins.json`、`team_roles.json`、`oplogs.json`、`consolelogs.json`（真实启动日志）等 —— 直接来自真实 API；
+- `config_schema.json`（156 个字段）、`config.json`、`plugins.json`、`team_roles.json`、`oplogs.json`、`consolelogs.json`（真实启动日志）等 —— 直接来自真实 API；
 - `marketplace_plugins.json` 与 `marketplace_detail_*.json` —— 通过插件市场的真实管道（AniaBot-Project/AniaBot-Plugins 的 index.json + README）抓取的 16 个真实插件；
 - `status.json`（适配器状态改为 connected）、`host.json`（换成中立的 Linux 容器画像）、`balance.json`（启用并给演示值）—— 结构保持真实，仅替换了演示值；已清除真实主机名/用户名等隐私信息；
 - 消息/Query/任务日志、Token 统计、配额、通讯录、技能 —— 真实实例为空，由 `synthetic.js` 按真实 DTO 的字段形状（参考 `bot/adminpanel` 各结构体）合成合理数值。

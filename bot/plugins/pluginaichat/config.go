@@ -155,7 +155,6 @@ type ocrConfig struct {
 type clockConfig struct {
 	Enable            bool `cfg:"enable" label:"启用 AI 定时任务" group:"AI 对话 · 定时任务" default:"true"`
 	DefaultTimeoutSec int  `cfg:"default_timeout_sec" label:"默认超时(秒)" group:"AI 对话 · 定时任务" default:"120"`
-	MaxLogEntries     int  `cfg:"max_log_entries" label:"日志保留条数" group:"AI 对话 · 定时任务" default:"20000"`
 }
 
 // proactiveConfig 主动互动配置：让 AI 在合适的时候主动开口。
@@ -215,13 +214,6 @@ type kbConfig struct {
 	AutoInject bool `cfg:"auto_inject" label:"自动注入上下文" group:"AI 对话 · 知识库" default:"true" help:"每次对话前自动检索相关文档并注入上下文。启用向量检索后按语义+关键词混合检索（每轮一次 embed，带缓存），未启用则纯关键词"`
 
 	Embedding kbEmbeddingConfig `cfg:"embedding"`
-}
-
-type queryLogConfig struct {
-	Enable         bool `cfg:"enable" label:"启用 Query 日志" group:"AI 对话 · 查询日志" help:"在面板记录每次 AI 回复的完整执行过程（耗时、token、工具调用详情）" default:"true"`
-	MaxEntries     int  `cfg:"max_entries" label:"日志保留条数" group:"AI 对话 · 查询日志" default:"20000"`
-	MaxToolRecords int  `cfg:"max_tool_records" label:"单条日志工具明细上限" group:"AI 对话 · 查询日志" help:"每条 Query 日志最多保留的工具调用明细条数，超出部分仅保留总数不存明细；0 表示不限制（实际条数受最大工具轮数约束）" default:"200"`
-	MaxResultRunes int  `cfg:"max_result_runes" label:"日志中工具结果截断上限(字符)" group:"AI 对话 · 查询日志" help:"仅控制工具执行结果写入 Query 日志时的保留长度，不影响 AI 实际收到的完整输出；0 表示不限制。仅此字段限长（网页抓取、命令执行等外部输出可能很大），用户输入、工具参数、最终回复始终完整记录" default:"1000"`
 }
 
 // hooksConfig AI 钩子配置：按 files.hooks_json（面板「扩展配置」页编辑）在会话事件
@@ -312,13 +304,6 @@ type aiChatConfig struct {
 	RateLimit        int    `cfg:"plugin.ai_chat_bot.rate_limit" label:"并发限制" group:"AI 对话 · 模型" help:"同时处理的 AI 请求数上限，超出后直接拒绝" default:"2"`
 	MaxContextTokens int    `cfg:"plugin.ai_chat_bot.max_context_tokens" label:"上下文 Token 上限" group:"AI 对话 · 模型" default:"128000"`
 	MaxIterations    int    `cfg:"plugin.ai_chat_bot.max_iterations" label:"最大工具调用轮数" group:"AI 对话 · 模型" help:"单次回复中 AI 最多连续调用工具的轮数，超出后强制结束" default:"100"`
-	// 指针字段：nil 表示不向下游 LLM 传该参数（保持未设置语义）。
-	// MaxToken 不设默认值：留空即不传，用模型 API 的最大输出上限——单次输出
-	// 被人为限低会把长内容（如 write_file 的参数）拦腰截断
-	MaxToken    *int     `cfg:"plugin.ai_chat_bot.max_token" label:"最大输出 Token" group:"AI 对话 · 模型" help:"留空则不传该参数，使用模型 API 最大输出上限（anthropic 格式必填，留空时按 8192 下发）；已有值可清空保存恢复为不传"`
-	Temperature *float64 `cfg:"plugin.ai_chat_bot.temperature" label:"Temperature" group:"AI 对话 · 模型" help:"留空则不传该参数，使用模型 API 默认值；已有值可清空保存恢复为不传"`
-	TopP        *float64 `cfg:"plugin.ai_chat_bot.top_p" label:"Top P" group:"AI 对话 · 模型" help:"留空则不传该参数，使用模型 API 默认值；已有值可清空保存恢复为不传"`
-	TopK        *int     `cfg:"plugin.ai_chat_bot.top_k" label:"Top K" group:"AI 对话 · 模型" help:"留空则不传该参数，使用模型 API 默认值；已有值可清空保存恢复为不传"`
 	// 自定义请求头：附加到全部 LLM 请求（主对话/子代理/定时任务/上下文压缩/
 	// 备用识图/备用模型），用于网关鉴权、路由标记等场景；每行一个，
 	// 支持 "Name: Value" 或 "Name=Value"，同名覆盖默认头（含 User-Agent）。
@@ -352,7 +337,6 @@ type aiChatConfig struct {
 	Proactive proactiveConfig `cfg:"plugin.ai_chat_bot.proactive"`
 	Memory    memoryConfig    `cfg:"plugin.ai_chat_bot.memory"`
 	Kb        kbConfig        `cfg:"plugin.ai_chat_bot.kb"`
-	QueryLog  queryLogConfig  `cfg:"plugin.ai_chat_bot.query_log"`
 
 	Stream   streamConfig   `cfg:"plugin.ai_chat_bot.stream"`
 	Reply    replyConfig    `cfg:"plugin.ai_chat_bot.reply"`

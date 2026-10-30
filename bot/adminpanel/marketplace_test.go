@@ -22,13 +22,11 @@ func (c *marketTestConfig) Set(k string, v any) error {
 
 // TestMarketplaceBatchRequestBatch 批量接口的请求校验与错误路径。
 func TestMarketplaceBatchRequestValidation(t *testing.T) {
-	mkServer := func(enabled bool) *Server {
-		cfg := &marketTestConfig{m: map[string]any{
-			"bot.marketplace.enable":     enabled,
-			"bot.marketplace.plugin_dir": t.TempDir(),
-			"bot.marketplace.cache_dir":  t.TempDir(),
-		}}
-		return &Server{opt: Options{Marketplace: marketplace.New(cfg, nil)}}
+	mkServer := func() *Server {
+		return &Server{opt: Options{Marketplace: marketplace.New(
+			&marketTestConfig{m: map[string]any{}}, nil,
+			marketplace.WithPluginDir(t.TempDir()), marketplace.WithCacheDir(t.TempDir()),
+		)}}
 	}
 
 	t.Run("市场不可用", func(t *testing.T) {
@@ -41,7 +39,7 @@ func TestMarketplaceBatchRequestValidation(t *testing.T) {
 	})
 
 	t.Run("空列表", func(t *testing.T) {
-		s := mkServer(true)
+		s := mkServer()
 		rec := httptest.NewRecorder()
 		s.handleMarketplaceBatch(rec, httptest.NewRequest("POST", "/api/marketplace/batch", strings.NewReader(`{"install":[],"uninstall":[]}`)))
 		if rec.Code != http.StatusBadRequest {
@@ -50,18 +48,8 @@ func TestMarketplaceBatchRequestValidation(t *testing.T) {
 	})
 
 	t.Run("非法 ID", func(t *testing.T) {
-		s := mkServer(true)
+		s := mkServer()
 		body, _ := json.Marshal(map[string]any{"install": []string{"../escape"}})
-		rec := httptest.NewRecorder()
-		s.handleMarketplaceBatch(rec, httptest.NewRequest("POST", "/api/marketplace/batch", bytes.NewReader(body)))
-		if rec.Code != http.StatusConflict {
-			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-		}
-	})
-
-	t.Run("市场未开启", func(t *testing.T) {
-		s := mkServer(false)
-		body, _ := json.Marshal(map[string]any{"install": []string{"aa"}})
 		rec := httptest.NewRecorder()
 		s.handleMarketplaceBatch(rec, httptest.NewRequest("POST", "/api/marketplace/batch", bytes.NewReader(body)))
 		if rec.Code != http.StatusConflict {

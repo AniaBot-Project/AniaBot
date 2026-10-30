@@ -144,7 +144,7 @@ func TestSendFinalOutputSkipSuppresses(t *testing.T) {
 	p := &AIChatPlugin{}
 	p.Logger = slog.Default()
 	p.PersistentStorage = newSQLPFake()
-	m := newClockManager(p, 30*time.Second, 100)
+	m := newClockManager(p, 30*time.Second)
 	fb := &recordBot{}
 	m.bot = fb
 

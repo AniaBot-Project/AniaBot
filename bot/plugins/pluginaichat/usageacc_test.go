@@ -41,16 +41,16 @@ func TestMergeTokenUsage(t *testing.T) {
 }
 
 func TestExtraUsageGatedByQueryLogger(t *testing.T) {
-	// Query 日志未启用：不暂存（无人消费，避免累计器无限增长）
+	// Query 日志不可用（记录器未初始化）：不暂存（无人消费，避免累计器无限增长）
 	p := &AIChatPlugin{}
 	p.addExtraUsage("g:1", aichat.TokenUsage{PromptTokens: 10, TotalTokens: 10})
 	if u := p.takeExtraUsage("g:1"); u.TotalTokens != 0 {
-		t.Fatalf("日志未启用时不应暂存, got %+v", u)
+		t.Fatalf("日志不可用时应不暂存, got %+v", u)
 	}
 }
 
 func TestExtraUsageRoundTrip(t *testing.T) {
-	p := &AIChatPlugin{queryLogger: querylog.New(newSQLPFake(), 10, testLogger())}
+	p := &AIChatPlugin{queryLogger: querylog.New(newSQLPFake(), testLogger())}
 	p.addExtraUsage("g:1", aichat.TokenUsage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12})
 	p.addExtraUsage("g:1", aichat.TokenUsage{PromptTokens: 3, CompletionTokens: 1, TotalTokens: 4})
 	// 零值不入账
@@ -74,7 +74,7 @@ func TestExtraUsageRoundTrip(t *testing.T) {
 // TestFinishQueryMergesExtraUsage 派生用量（子代理/团队成员/图片识别）并入
 // Query 日志条目：统计口径为「主请求 + 全部派生调用」的完整成本。
 func TestFinishQueryMergesExtraUsage(t *testing.T) {
-	p := &AIChatPlugin{queryLogger: querylog.New(newSQLPFake(), 10, testLogger())}
+	p := &AIChatPlugin{queryLogger: querylog.New(newSQLPFake(), testLogger())}
 	chat, err := aichat.NewChatBot("http://127.0.0.1:1", "k", "m", "prompt", 0, nil, nil)
 	if err != nil {
 		t.Fatalf("创建 ChatBot 失败: %v", err)
@@ -109,7 +109,7 @@ func TestFinishQueryMergesExtraUsage(t *testing.T) {
 	}
 }
 
-// TestFinishQueryNilRecorderNoPanic 日志未启用时 finishQuery 直接跳过。
+// TestFinishQueryNilRecorderNoPanic 日志记录器不可用时 finishQuery 直接跳过。
 func TestFinishQueryNilRecorderNoPanic(t *testing.T) {
 	p := &AIChatPlugin{}
 	chat, err := aichat.NewChatBot("http://127.0.0.1:1", "k", "m", "prompt", 0, nil, nil)

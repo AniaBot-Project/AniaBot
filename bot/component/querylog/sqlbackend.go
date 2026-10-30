@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,8 +49,8 @@ var queryLogTables = []storage.TableDDL{
 	},
 }
 
-// sqlBackend SQL 版日志存储：过滤条件下推 WHERE、容量淘汰走范围删除，
-// 避免 KV 后端每次读取全量列键 + 逐键加载的开销。SQLite 单连接下读取
+// sqlBackend SQL 版日志存储：过滤条件下推 WHERE、清除按条件删除，
+// 避免每次读取全量列键 + 逐键加载的开销。SQLite 单连接下读取
 // 遵循"收集→关闭 rows→解析"纪律。
 type sqlBackend struct {
 	db      *sql.DB
@@ -164,15 +165,50 @@ func (b *sqlBackend) overwrite(seq uint64, e Entry) {
 	}
 }
 
-func (b *sqlBackend) evict(maxSeq uint64, maxEntries int) {
-	if maxEntries <= 0 || maxSeq <= uint64(maxEntries) {
-		return
+// clear 清除满足条件的日志。无过滤条件时直接整表删除；有条件时先用
+// query 求出精确命中集（兼容旧库缺 kind 列等无法完全下推的情况），再按
+// 序号分批删除，保证 SQL 与 Go 侧匹配语义一致。
+func (b *sqlBackend) clear(f Filter) int {
+	if f == (Filter{}) {
+		res, err := b.db.ExecContext(context.Background(), `DELETE FROM ania_query_log`)
+		if err != nil {
+			b.logger.Error("querylog 清除失败", "error", err)
+			return 0
+		}
+		n, _ := res.RowsAffected()
+		return int(n)
 	}
-	// 序号单调递增不复用：淘汰线以下的一定是最旧的记录
-	if _, err := b.db.ExecContext(context.Background(),
-		`DELETE FROM ania_query_log WHERE seq <= ?`, maxSeq-uint64(maxEntries)); err != nil {
-		b.logger.Error("querylog 淘汰失败", "error", err)
+	matched := b.query(f, 0, 0)
+	if len(matched) == 0 {
+		return 0
 	}
+	const chunk = 500
+	removed := 0
+	for start := 0; start < len(matched); start += chunk {
+		end := min(start+chunk, len(matched))
+		placeholders := make([]string, 0, end-start)
+		args := make([]any, 0, end-start)
+		for _, e := range matched[start:end] {
+			seq, err := strconv.ParseUint(e.ID, 36, 64)
+			if err != nil || seq == 0 {
+				continue
+			}
+			placeholders = append(placeholders, "?")
+			args = append(args, seq)
+		}
+		if len(args) == 0 {
+			continue
+		}
+		res, err := b.db.ExecContext(context.Background(),
+			`DELETE FROM ania_query_log WHERE seq IN (`+strings.Join(placeholders, ",")+`)`, args...)
+		if err != nil {
+			b.logger.Error("querylog 清除失败", "error", err)
+			continue
+		}
+		n, _ := res.RowsAffected()
+		removed += int(n)
+	}
+	return removed
 }
 
 func (b *sqlBackend) markRunningInterrupted(now time.Time) int {
@@ -280,8 +316,8 @@ func (b *sqlBackend) query(f Filter, beforeSeq uint64, limit int) []Entry {
 		q += ` WHERE ` + strings.Join(where, ` AND `)
 	}
 	q += ` ORDER BY seq DESC`
-	// 表总量受容量淘汰约束（默认 200 条），不加 LIMIT 全扫有界；
-	// 凑满 limit 条匹配即停（SQL 下推只是收窄，match 才是终判）
+	// 日志不做容量淘汰，表可能很大；凑满 limit 条匹配即停
+	//（limit<=0 时读到底，仅导出等场景使用；SQL 下推只是收窄，match 才是终判）
 	return b.loadPayloads(q, args, f.match, limit)
 }
 

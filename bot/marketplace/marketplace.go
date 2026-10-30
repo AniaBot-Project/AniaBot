@@ -2,7 +2,7 @@
 // 在本地源码树中安装/卸载/升级第三方插件（custom/plugins），重新编译并重启 Bot。
 //
 // 安全模型：安装插件 = 在 Bot 所在机器上编译并执行插件代码（与 Bot 同进程）。
-// 功能默认关闭（bot.marketplace.enable=false），面板安装前会再次提示风险。
+// 功能默认开启（无需配置），面板安装前会再次提示风险。
 // 插件来源是独立仓库（默认 AniaBot-Project/AniaBot-Plugins），由维护者人工审查后合并。
 package marketplace
 
@@ -20,6 +20,12 @@ import (
 
 	"github.com/jeanhua/AniaBot/bot/component/sysrestart"
 	"github.com/jeanhua/AniaBot/common/pluginmeta"
+)
+
+// 插件市场固定目录：已安装插件的持久副本与索引/下载缓存。
+const (
+	DefaultPluginDir = "./data/plugins"
+	DefaultCacheDir  = "./data/marketplace"
 )
 
 // Config 市场依赖的配置中心能力（configstore.Store 满足）。
@@ -43,16 +49,28 @@ func WithUnloader(u PluginUnloader) Option {
 	return func(s *Service) { s.unloader = u }
 }
 
+// WithPluginDir 覆盖已安装插件的持久副本目录（仅测试等场景使用）。
+func WithPluginDir(dir string) Option {
+	return func(s *Service) { s.pluginDirOverride = dir }
+}
+
+// WithCacheDir 覆盖索引/下载缓存目录（仅测试等场景使用）。
+func WithCacheDir(dir string) Option {
+	return func(s *Service) { s.cacheDirOverride = dir }
+}
+
 // Service 插件市场服务。
 type Service struct {
-	cfg      Config
-	logger   *slog.Logger
-	state    *taskState
-	oauth    *oauthFlow
-	unloader PluginUnloader
-	mu       sync.Mutex
-	gh       *githubClient // 按最新配置懒重建
-	man      *manifestStore
+	cfg               Config
+	logger            *slog.Logger
+	state             *taskState
+	oauth             *oauthFlow
+	unloader          PluginUnloader
+	pluginDirOverride string
+	cacheDirOverride  string
+	mu                sync.Mutex
+	gh                *githubClient // 按最新配置懒重建
+	man               *manifestStore
 }
 
 // New 创建插件市场服务。
@@ -87,54 +105,32 @@ func (s *Service) cfgStr(key string) string {
 	return strings.TrimSpace(str)
 }
 
-func (s *Service) cfgBool(key string) bool {
-	v, ok := s.cfg.Get(key)
-	if !ok {
-		return false
-	}
-	b, _ := v.(bool)
-	return b
-}
+// Enabled 插件市场功能是否开启（移除配置后固定开启）。
+func (s *Service) Enabled() bool { return true }
 
-// Enabled 插件市场功能是否开启。
-func (s *Service) Enabled() bool { return s.cfgBool("bot.marketplace.enable") }
+func (s *Service) repo() string { return defaultRepo }
 
-func (s *Service) repo() string {
-	if r := s.cfgStr("bot.marketplace.repo"); r != "" {
-		return r
-	}
-	return defaultRepo
-}
-
-func (s *Service) branch() string {
-	if b := s.cfgStr("bot.marketplace.branch"); b != "" {
-		return b
-	}
-	return defaultBranch
-}
+func (s *Service) branch() string { return defaultBranch }
 
 func (s *Service) token() string { return s.cfgStr("bot.marketplace.token") }
 
-// sourceDir 编译用源码目录：优先市场专属配置，回退到自动更新目录。
+// sourceDir 编译用源码目录：回退到自动更新目录。
 func (s *Service) sourceDir() string {
-	if d := s.cfgStr("bot.marketplace.source_dir"); d != "" {
-		return d
-	}
 	return s.cfgStr("bot.update.source_dir")
 }
 
 func (s *Service) pluginDir() string {
-	if d := s.cfgStr("bot.marketplace.plugin_dir"); d != "" {
-		return d
+	if s.pluginDirOverride != "" {
+		return s.pluginDirOverride
 	}
-	return "./data/plugins"
+	return DefaultPluginDir
 }
 
 func (s *Service) cacheDir() string {
-	if d := s.cfgStr("bot.marketplace.cache_dir"); d != "" {
-		return d
+	if s.cacheDirOverride != "" {
+		return s.cacheDirOverride
 	}
-	return "./data/marketplace"
+	return DefaultCacheDir
 }
 
 func (s *Service) manifest() *manifestStore {

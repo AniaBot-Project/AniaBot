@@ -6,16 +6,12 @@ import (
 	"time"
 )
 
-// newBatchService 构造一个已开启市场、插件目录在临时目录的服务，
+// newBatchService 构造一个插件目录在临时目录的服务，
 // 并预置若干已安装插件（pluginID -> name/version 任意）。
 func newBatchService(t *testing.T, installed ...string) *Service {
 	t.Helper()
-	cfg := &mapConfig{m: map[string]any{
-		"bot.marketplace.enable":     true,
-		"bot.marketplace.plugin_dir": t.TempDir(),
-		"bot.marketplace.cache_dir":  t.TempDir(),
-	}}
-	svc := New(cfg, nil)
+	svc := New(&mapConfig{m: map[string]any{}}, nil,
+		WithPluginDir(t.TempDir()), WithCacheDir(t.TempDir()))
 	for _, id := range installed {
 		if err := svc.manifest().set(InstalledPlugin{ID: id, Name: id, Version: "1.0.0"}); err != nil {
 			t.Fatalf("预置已安装插件失败: %v", err)

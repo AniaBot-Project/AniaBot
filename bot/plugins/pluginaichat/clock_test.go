@@ -90,7 +90,7 @@ func TestClockManagerCRUDAndPersist(t *testing.T) {
 	p.Logger = slog.Default()
 	p.PersistentStorage = newSQLPFake()
 
-	m := newClockManager(p, 30*time.Second, 100)
+	m := newClockManager(p, 30*time.Second)
 
 	// 无效 cron 应失败
 	if _, err := m.Add(&ClockTask{Cron: "not a cron", Content: "c", TargetType: "group", TargetID: "1"}); err == nil {
@@ -139,7 +139,7 @@ func TestClockManagerCRUDAndPersist(t *testing.T) {
 	}
 
 	// 重启模拟：用同一存储新建 manager，任务应恢复
-	m2 := newClockManager(p, 30*time.Second, 100)
+	m2 := newClockManager(p, 30*time.Second)
 	loaded := m2.List()
 	if len(loaded) != 1 {
 		t.Fatalf("after reload want 1 task, got %d", len(loaded))
@@ -156,7 +156,7 @@ func TestClockManagerCRUDAndPersist(t *testing.T) {
 		t.Fatal("expected 0 after delete")
 	}
 	// 再次 reload 确认已落盘删除
-	m3 := newClockManager(p, 30*time.Second, 100)
+	m3 := newClockManager(p, 30*time.Second)
 	if len(m3.List()) != 0 {
 		t.Fatal("expected 0 after reload following delete")
 	}
@@ -167,7 +167,7 @@ func TestClockUpdateCreatedBy(t *testing.T) {
 	p.Logger = slog.Default()
 	p.PersistentStorage = newSQLPFake()
 
-	m := newClockManager(p, 30*time.Second, 100)
+	m := newClockManager(p, 30*time.Second)
 	id, err := m.Add(&ClockTask{Cron: "@every 1h", Title: "喝水", Content: "提醒喝水", TargetType: "group", TargetID: "123", Enabled: true})
 	if err != nil {
 		t.Fatalf("Add failed: %v", err)
@@ -202,7 +202,7 @@ func TestBuildTriggerPrompt(t *testing.T) {
 	p := &AIChatPlugin{}
 	p.Logger = slog.Default()
 	p.PersistentStorage = newSQLPFake()
-	m := newClockManager(p, 30*time.Second, 100)
+	m := newClockManager(p, 30*time.Second)
 
 	got := m.buildTriggerPrompt(&ClockTask{Title: "早安", Content: "大家早上好"})
 	want := "【定时任务】早安\n大家早上好"
@@ -229,7 +229,7 @@ func TestTryStartTaskSkipWhileRunning(t *testing.T) {
 	p := &AIChatPlugin{}
 	p.Logger = slog.Default()
 	p.PersistentStorage = newSQLPFake()
-	m := newClockManager(p, 30*time.Second, 100)
+	m := newClockManager(p, 30*time.Second)
 
 	if !m.tryStartTask("task-1") {
 		t.Fatal("first tryStartTask should succeed")
@@ -262,7 +262,7 @@ func TestRunOnceDestroyAfterTrigger(t *testing.T) {
 	p := &AIChatPlugin{}
 	p.Logger = slog.Default()
 	p.PersistentStorage = newSQLPFake()
-	m := newClockManager(p, 30*time.Second, 100)
+	m := newClockManager(p, 30*time.Second)
 
 	id, err := m.Add(&ClockTask{
 		Cron: "@every 1h", Title: "只跑一次", Content: "内容",
@@ -291,7 +291,7 @@ func TestRunOnceDestroyAfterTrigger(t *testing.T) {
 	}
 
 	// 重启模拟：单次任务销毁后不应再被加载
-	m2 := newClockManager(p, 30*time.Second, 100)
+	m2 := newClockManager(p, 30*time.Second)
 	if len(m2.List()) != 0 {
 		t.Fatalf("expected 0 tasks after reload, got %d", len(m2.List()))
 	}
@@ -301,7 +301,7 @@ func TestRunOncePersistedAcrossReload(t *testing.T) {
 	p := &AIChatPlugin{}
 	p.Logger = slog.Default()
 	p.PersistentStorage = newSQLPFake()
-	m := newClockManager(p, 30*time.Second, 100)
+	m := newClockManager(p, 30*time.Second)
 
 	id, err := m.Add(&ClockTask{
 		Cron: "@every 1h", Title: "单次", Content: "x",
@@ -312,7 +312,7 @@ func TestRunOncePersistedAcrossReload(t *testing.T) {
 	}
 	_ = id
 
-	m2 := newClockManager(p, 30*time.Second, 100)
+	m2 := newClockManager(p, 30*time.Second)
 	loaded := m2.List()
 	if len(loaded) != 1 || !loaded[0].RunOnce {
 		t.Fatalf("RunOnce flag not persisted: %+v", loaded)
@@ -323,7 +323,7 @@ func TestRunOncePersistedAcrossReload(t *testing.T) {
 	if _, err := m2.Update(loaded[0].ID, ClockUpdateFields{RunOnce: &no}, "tester"); err != nil {
 		t.Fatalf("Update failed: %v", err)
 	}
-	m3 := newClockManager(p, 30*time.Second, 100)
+	m3 := newClockManager(p, 30*time.Second)
 	if g := m3.List(); len(g) != 1 || g[0].RunOnce {
 		t.Fatalf("RunOnce should be false after update: %+v", g)
 	}
@@ -351,7 +351,7 @@ func TestClockToolsScopeIsolation(t *testing.T) {
 	p := &AIChatPlugin{}
 	p.Logger = slog.Default()
 	p.PersistentStorage = newSQLPFake()
-	m := newClockManager(p, 30*time.Second, 100)
+	m := newClockManager(p, 30*time.Second)
 
 	// 群 A（123）创建任务
 	ta, err := m.Add(&ClockTask{Cron: "@every 1h", Title: "A群任务", Content: "内容", TargetType: clockTargetGroup, TargetID: "123", Enabled: true})
@@ -452,7 +452,7 @@ func TestClockNextRunRefreshedOnRead(t *testing.T) {
 	p.Logger = slog.Default()
 	p.PersistentStorage = newSQLPFake()
 
-	m := newClockManager(p, 30*time.Second, 100)
+	m := newClockManager(p, 30*time.Second)
 	id, err := m.Add(&ClockTask{Cron: "@every 1h", Title: "喝水", Content: "提醒喝水", TargetType: "group", TargetID: "123", Enabled: true})
 	if err != nil {
 		t.Fatalf("Add failed: %v", err)

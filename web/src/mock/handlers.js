@@ -182,6 +182,32 @@ const inRange = (timeStr, query) => {
   return true
 }
 const hasKeyword = (item, kw) => !kw || JSON.stringify(item).toLowerCase().includes(kw.toLowerCase())
+
+// Query 日志筛选（列表与导出共用）
+function filterQueryLogs(c) {
+  let list = state.queryLogs
+  const chatType = c.query.get('chat_type')
+  const targetId = c.query.get('target_id')
+  const sender = c.query.get('sender')
+  const kind = c.query.get('kind')
+  if (chatType) list = list.filter((x) => x.chat_type === chatType)
+  if (targetId) list = list.filter((x) => x.target_id === targetId)
+  if (sender) list = list.filter((x) => (x.senders || []).some((s) => String(s).includes(sender)))
+  if (kind) list = list.filter((x) => (x.kind || 'chat') === kind)
+  return list.filter((x) => inRange(x.time, c.query) && hasKeyword({ q: x.query, r: x.reply, e: x.error }, c.query.get('keyword')))
+}
+
+// 任务执行日志筛选（列表与导出共用）
+function filterTaskLogs(c) {
+  let list = state.taskLogs
+  const f = (k, fn) => { const v = c.query.get(k); if (v) list = list.filter(fn(v)) }
+  f('target_type', (v) => (x) => x.target_type === v)
+  f('target_id', (v) => (x) => x.target_id === v)
+  f('task_id', (v) => (x) => x.task_id === v)
+  f('status', (v) => (x) => x.status === v)
+  return list.filter((x) => inRange(x.trigger_time, c.query) && hasKeyword(x, c.query.get('keyword')))
+}
+
 const scopeCounts = (entries) => {
   const map = new Map()
   for (const e of entries) {
@@ -384,30 +410,39 @@ const routes = [
     },
   },
   {
-    m: 'GET', re: /^\/api\/querylogs$/, h: (c) => {
-      let list = state.queryLogs
-      const chatType = c.query.get('chat_type')
-      const targetId = c.query.get('target_id')
-      const sender = c.query.get('sender')
-      const kind = c.query.get('kind')
-      if (chatType) list = list.filter((x) => x.chat_type === chatType)
-      if (targetId) list = list.filter((x) => x.target_id === targetId)
-      if (sender) list = list.filter((x) => (x.senders || []).some((s) => String(s).includes(sender)))
-      if (kind) list = list.filter((x) => (x.kind || 'chat') === kind)
-      list = list.filter((x) => inRange(x.time, c.query) && hasKeyword({ q: x.query, r: x.reply, e: x.error }, c.query.get('keyword')))
-      return paginate(list, c.query, (x) => x.id)
+    m: 'GET', re: /^\/api\/querylogs$/, h: (c) => paginate(filterQueryLogs(c), c.query, (x) => x.id),
+  },
+  {
+    m: 'GET', re: /^\/api\/querylogs\/export$/, h: (c) => {
+      const items = filterQueryLogs(c)
+      return { exported_at: new Date().toISOString(), total: items.length, items }
     },
   },
   {
-    m: 'GET', re: /^\/api\/tasklogs$/, h: (c) => {
-      let list = state.taskLogs
-      const f = (k, fn) => { const v = c.query.get(k); if (v) list = list.filter(fn(v)) }
-      f('target_type', (v) => (x) => x.target_type === v)
-      f('target_id', (v) => (x) => x.target_id === v)
-      f('task_id', (v) => (x) => x.task_id === v)
-      f('status', (v) => (x) => x.status === v)
-      list = list.filter((x) => inRange(x.trigger_time, c.query) && hasKeyword(x, c.query.get('keyword')))
-      return paginate(list, c.query, (x) => x.id)
+    m: 'DELETE', re: /^\/api\/querylogs$/, h: (c) => {
+      const drop = new Set(filterQueryLogs(c).map((x) => x.id))
+      const before = state.queryLogs.length
+      state.queryLogs = state.queryLogs.filter((x) => !drop.has(x.id))
+      addOpLog('system', 'query_log_clear', `面板清除 Query 日志 ${before - state.queryLogs.length} 条`)
+      return { ok: true, removed: before - state.queryLogs.length }
+    },
+  },
+  {
+    m: 'GET', re: /^\/api\/tasklogs$/, h: (c) => paginate(filterTaskLogs(c), c.query, (x) => x.id),
+  },
+  {
+    m: 'GET', re: /^\/api\/tasklogs\/export$/, h: (c) => {
+      const items = filterTaskLogs(c)
+      return { exported_at: new Date().toISOString(), total: items.length, items }
+    },
+  },
+  {
+    m: 'DELETE', re: /^\/api\/tasklogs$/, h: (c) => {
+      const drop = new Set(filterTaskLogs(c).map((x) => x.id))
+      const before = state.taskLogs.length
+      state.taskLogs = state.taskLogs.filter((x) => !drop.has(x.id))
+      addOpLog('system', 'task_log_clear', `面板清除定时任务执行日志 ${before - state.taskLogs.length} 条`)
+      return { ok: true, removed: before - state.taskLogs.length }
     },
   },
 

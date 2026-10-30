@@ -8,21 +8,12 @@
         请以编译后的二进制方式部署（容器内可直接使用）。
       </div>
     </div>
-    <div v-else-if="info && !info.enabled" class="tcard p-4 border-l-2 border-l-amber-400 flex items-start gap-3">
-      <span class="tdot bg-[#ff9f0a] mt-1.5 shrink-0" />
-      <div class="text-xs text-zinc-600 leading-relaxed">
-        插件市场未开启。请先在
-        <RouterLink to="/config" class="font-semibold text-zinc-900 underline underline-offset-2">配置管理</RouterLink>
-        的「插件市场」分组中设置 <span class="font-mono">bot.marketplace.enable=true</span>。
-      </div>
-    </div>
     <div v-else-if="info && !info.configured" class="tcard p-4 border-l-2 border-l-amber-400 flex items-start gap-3">
       <span class="tdot bg-[#ff9f0a] mt-1.5 shrink-0" />
       <div class="text-xs text-zinc-600 leading-relaxed">
         尚未配置源码目录。请先在
         <RouterLink to="/config" class="font-semibold text-zinc-900 underline underline-offset-2">配置管理</RouterLink>
-        中设置 <span class="font-mono">bot.marketplace.source_dir</span>（或自动更新的
-        <span class="font-mono">bot.update.source_dir</span>），并确保已完成一次自动更新。
+        的「自动更新」分组中设置 <span class="font-mono">bot.update.source_dir</span>，并确保已完成一次自动更新。
       </div>
     </div>
 
@@ -459,7 +450,7 @@ const oauthOpen = ref(false)
 const oauth = reactive({ status: '', user_code: '', verification_uri: '', expires_at: '', error: '', user: '' })
 let oauthTimer = null
 
-const areaReady = computed(() => !!info.value && info.value.enabled && info.value.mode === 'binary' && info.value.configured)
+const areaReady = computed(() => !!info.value && info.value.mode === 'binary' && info.value.configured)
 const busy = computed(() => status.running || status.restarting || rebooting.value)
 const canBrowse = computed(() => areaReady.value && !busy.value)
 const canOperate = computed(() => areaReady.value && !busy.value)

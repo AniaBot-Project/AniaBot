@@ -224,7 +224,7 @@ func TestPlanBlockedToolsAreRealToolNames(t *testing.T) {
 	// 会话级工具（与 getChat/registerScopedTools 的注册来源一致）
 	collect(newMemoryTools(newTestMemoryManager(0), "g:1", ""))
 	collect(newKnowledgeTools(newTestKnowledgeManager(0), "g:1", ""))
-	collect(newClockTools(newClockManager(p, time.Second, 10), clockTargetGroup, "1"))
+	collect(newClockTools(newClockManager(p, time.Second), clockTargetGroup, "1"))
 	collect(newSkillTools(newTestSkillPlugin(t)))
 	collect(newMCPTools(newMCPToolPlugin(t)))
 	collect(newSubagentTools(p, nil, message.FromUint64(1), true))

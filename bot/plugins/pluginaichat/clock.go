@@ -102,11 +102,11 @@ type clockManager struct {
 	bot         bot.Bot
 }
 
-func newClockManager(p *AIChatPlugin, defaultTimeout time.Duration, maxLog int) *clockManager {
+func newClockManager(p *AIChatPlugin, defaultTimeout time.Duration) *clockManager {
 	m := &clockManager{
 		plugin:         p,
 		store:          p.PersistentStorage.Clone("clock:"),
-		log:            tasklog.New(p.PersistentStorage, maxLog, p.Logger.WithGroup("tasklog")),
+		log:            tasklog.New(p.PersistentStorage, p.Logger.WithGroup("tasklog")),
 		logger:         p.Logger.WithGroup("clock"),
 		defaultTimeout: defaultTimeout,
 		tasks:          map[string]*ClockTask{},
@@ -131,6 +131,14 @@ func (p *AIChatPlugin) TaskLogQuery(f tasklog.Filter) []tasklog.Entry {
 		return nil
 	}
 	return p.clockManager.log.Query(f)
+}
+
+// TaskLogClear 清除满足条件的执行日志（零值条件清除全部），实现 adminpanel.TaskLogSource。
+func (p *AIChatPlugin) TaskLogClear(f tasklog.Filter) int {
+	if p.clockManager == nil {
+		return 0
+	}
+	return p.clockManager.log.Clear(f)
 }
 
 // taskInfos 返回所有任务的面板展示信息（供 Web 控制面板）。

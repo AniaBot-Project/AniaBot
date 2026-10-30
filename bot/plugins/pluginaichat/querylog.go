@@ -12,32 +12,16 @@ import (
 
 // Query 日志：记录每次 AI 回复（群 @ / 私聊触发）从收到消息到最终响应的完整过程，
 // 持久化到 PersistentStorage（querylog: 命名空间），供 Web 面板「Query 日志」页展示。
+// 日志默认启用、全量保留（不淘汰、不截断），由管理员在面板导出或清除。
 
-// initQueryLogger 按配置初始化 Query 日志记录器；未启用时保持 nil（埋点自动跳过）。
+// initQueryLogger 初始化 Query 日志记录器。
 func (p *AIChatPlugin) initQueryLogger() {
-	if !p.cfg.QueryLog.Enable {
-		p.Logger.Info("Query 日志功能未启用（plugin.ai_chat_bot.query_log.enable=false）")
-		return
-	}
-	maxEntries := p.cfg.QueryLog.MaxEntries
-	if maxEntries <= 0 {
-		maxEntries = 20000
-	}
-	p.queryLogger = querylog.New(p.PersistentStorage, maxEntries, p.Logger.WithGroup("querylog"))
+	p.queryLogger = querylog.New(p.PersistentStorage, p.Logger.WithGroup("querylog"))
 	// 重启前未正常收尾的执行中记录（如等待工具审批时进程退出）统一标记为中断，
 	// 避免面板一直显示「执行中」；内存中的审批/会话状态已随进程消失，无法恢复
 	if n := p.queryLogger.MarkRunningInterrupted(); n > 0 {
 		p.Logger.Info("已将重启前遗留的执行中 Query 日志标记为中断", "count", n)
 	}
-}
-
-// queryLogMaxToolRecords 单条 Query 日志保留的工具调用明细条数；0 表示不限制
-// （实际条数受工具轮数上限 max_iterations 约束）。
-func (p *AIChatPlugin) queryLogMaxToolRecords() int {
-	if p.cfg.QueryLog.MaxToolRecords <= 0 {
-		return 0
-	}
-	return p.cfg.QueryLog.MaxToolRecords
 }
 
 // QueryLogRecent 按条件查询 Query 日志（新在前），实现 adminpanel.QueryLogSource。
@@ -48,20 +32,27 @@ func (p *AIChatPlugin) QueryLogRecent(f querylog.Filter) []querylog.Entry {
 	return p.queryLogger.Query(f)
 }
 
+// QueryLogClear 清除满足条件的 Query 日志（零值条件清除全部），实现 adminpanel.QueryLogSource。
+func (p *AIChatPlugin) QueryLogClear(f querylog.Filter) int {
+	if p.queryLogger == nil {
+		return 0
+	}
+	return p.queryLogger.Clear(f)
+}
+
 // queryRecorder 一次 Query 的日志记录上下文。processChatBatch 在会话锁内串行执行，
 // 且工具观测回调与 Chat 同 goroutine，因此 toolCalls 无需额外加锁。
 type queryRecorder struct {
 	entry          querylog.Entry
 	toolCalls      []querylog.ToolCallRecord
-	toolCallsTotal int // 工具调用总数（含超出上限被丢弃的）
-	maxRecords     int // 明细保留条数上限，0 表示不限制
+	toolCallsTotal int // 工具调用总数
 	start          time.Time
 	key            string // 会话 key（takeExtraUsage 用）
 }
 
 // beginQuery 开始记录一次 Query：写入 running 状态的日志并挂载工具调用观察者。
 // 观察者把每次工具调用增量落盘（明细 + 已耗时），面板执行中即可见进度。
-// 日志功能未启用时返回 nil，调用方直接跳过。
+// 日志记录器不可用（如持久化不支持 SQL）时返回 nil，调用方直接跳过。
 func (p *AIChatPlugin) beginQuery(chat *aichat.ChatBot, id message.QID, isGroup bool, batch []message.Message, query string) *queryRecorder {
 	if p.queryLogger == nil {
 		return nil
@@ -80,7 +71,7 @@ func (p *AIChatPlugin) beginQuery(chat *aichat.ChatBot, id message.QID, isGroup 
 		seen[uid] = struct{}{}
 		senders = append(senders, uid.String())
 	}
-	r := &queryRecorder{start: time.Now(), key: sessionKey(id, isGroup), maxRecords: p.queryLogMaxToolRecords()}
+	r := &queryRecorder{start: time.Now(), key: sessionKey(id, isGroup)}
 	r.entry = p.queryLogger.Record(querylog.Entry{
 		ChatType: chatType,
 		TargetID: id.String(),
@@ -102,15 +93,13 @@ func (p *AIChatPlugin) onToolCall(r *queryRecorder, info aichat.ToolCallInfo) {
 	rec := querylog.ToolCallRecord{
 		Name:       info.Name,
 		Arguments:  info.Arguments, // 模型生成的执行意图，完整记录便于审计
-		Result:     querylog.Truncate(info.Result, p.cfg.QueryLog.MaxResultRunes),
+		Result:     info.Result,    // 完整记录，不做截断（前端按需折叠展示）
 		DurationMs: info.DurationMs,
 	}
 	if info.Err != nil {
 		rec.Error = info.Err.Error()
 	}
-	if r.maxRecords <= 0 || len(r.toolCalls) < r.maxRecords {
-		r.toolCalls = append(r.toolCalls, rec) // 明细按配置上限保留，总数始终计入 ToolCallsTotal
-	}
+	r.toolCalls = append(r.toolCalls, rec)
 	p.queryLogger.Update(r.entry.ID, func(e *querylog.Entry) {
 		// 复制 slice 再存入，避免与后续 append 共享底层数组
 		e.ToolCalls = append([]querylog.ToolCallRecord(nil), r.toolCalls...)
@@ -155,7 +144,7 @@ func (p *AIChatPlugin) beginProactiveQuery(chat *aichat.ChatBot, id message.QID,
 	if isGroup {
 		chatType = "group"
 	}
-	r := &queryRecorder{start: time.Now(), key: sessionKey(id, isGroup), maxRecords: p.queryLogMaxToolRecords()}
+	r := &queryRecorder{start: time.Now(), key: sessionKey(id, isGroup)}
 	r.entry = p.queryLogger.Record(querylog.Entry{
 		Kind:     querylog.KindProactive,
 		ChatType: chatType,

@@ -3,8 +3,10 @@
 // 与控制台日志（log/slog）不同，tasklog 将结构化执行记录落盘到 PersistentStorage，
 // 供事后查询与上报（如定时任务的触发 / 成功 / 超时 / 失败记录）。持久化存储固定
 // 为 SQL 后端（sqlite/mysql），日志每条一行（ania_task_log 表，过滤条件下推
-// WHERE、容量淘汰走范围删除）；探测或建表失败时降级为禁用后端（写入静默丢弃），
+// WHERE、清除按条件走范围删除）；探测或建表失败时降级为禁用后端（写入静默丢弃），
 // 仅记录错误日志。日志 ID 为自增序号的 base36。
+//
+// 日志不做容量淘汰：一旦写入即长期保留，由管理员在面板手动导出或清除。
 package tasklog
 
 import (
@@ -76,8 +78,6 @@ type Entry struct {
 	FinishedAt       time.Time        `json:"finished_at"`
 }
 
-const defaultMax = 20000
-
 // Truncate 按符文数截断字符串，超出时追加省略标记。max<=0 时不截断。
 func Truncate(s string, max int) string {
 	if max <= 0 || utf8.RuneCountInString(s) <= max {
@@ -98,8 +98,8 @@ type backend interface {
 	load(seq uint64) (Entry, bool)
 	// overwrite 按序号覆盖一条日志（Update 落盘用）。
 	overwrite(seq uint64, e Entry)
-	// evict 淘汰旧记录，仅保留序号最大的 maxEntries 条；maxSeq 为当前最大序号。
-	evict(maxSeq uint64, maxEntries int)
+	// clear 清除满足条件的日志（零值条件清除全部），返回删除条数。
+	clear(f Filter) int
 	// recent 返回最近 limit 条日志（新在前）；limit<=0 时返回全部。
 	recent(limit int) []Entry
 	// query 按条件过滤日志（新在前），beforeSeq>0 时仅返回序号更小的记录，
@@ -115,21 +115,17 @@ type backend interface {
 // 内部用互斥串行化 Record/Update；读取（Recent 等）每次直接从存储加载
 // 最新快照，不持有内存缓存，保证与落盘状态一致。日志 ID 为自增序号的 base36。
 type Logger struct {
-	backend    backend
-	maxEntries int
-	logger     *slog.Logger
-	mu         sync.Mutex
-	seq        uint64
+	backend backend
+	logger  *slog.Logger
+	mu      sync.Mutex
+	seq     uint64
 }
 
-// New 创建日志记录器。maxEntries<=0 时取默认值。持久化存储固定为 SQL 后端
-// （sqlite/mysql），日志走 ania_task_log 行级存储；探测或建表失败时降级为
-// 禁用后端（写入静默丢弃、读取返回空），仅记录错误日志。
-func New(store storage.PersistentStorage, maxEntries int, logger *slog.Logger) *Logger {
-	if maxEntries <= 0 {
-		maxEntries = defaultMax
-	}
-	l := &Logger{maxEntries: maxEntries, logger: logger}
+// New 创建日志记录器。持久化存储固定为 SQL 后端（sqlite/mysql），日志走
+// ania_task_log 行级存储；探测或建表失败时降级为禁用后端（写入静默丢弃、
+// 读取返回空），仅记录错误日志。日志不做容量淘汰，全部保留。
+func New(store storage.PersistentStorage, logger *slog.Logger) *Logger {
+	l := &Logger{logger: logger}
 	if l.logger == nil {
 		l.logger = slog.Default()
 	}
@@ -156,7 +152,7 @@ func (disabledBackend) maxSeq() uint64                       { return 0 }
 func (disabledBackend) insert(uint64, Entry)                 {}
 func (disabledBackend) load(uint64) (Entry, bool)            { return Entry{}, false }
 func (disabledBackend) overwrite(uint64, Entry)              {}
-func (disabledBackend) evict(uint64, int)                    {}
+func (disabledBackend) clear(Filter) int                     { return 0 }
 func (disabledBackend) recent(int) []Entry                   { return nil }
 func (disabledBackend) query(Filter, uint64, int) []Entry    { return nil }
 func (disabledBackend) markRunningInterrupted(time.Time) int { return 0 }
@@ -176,7 +172,6 @@ func (l *Logger) Record(e Entry) Entry {
 	}
 
 	l.backend.insert(l.seq, e)
-	l.backend.evict(l.seq, l.maxEntries)
 	return e
 }
 
@@ -281,16 +276,19 @@ func (f Filter) match(e Entry) bool {
 	return true
 }
 
-// Query 按条件过滤日志（新在前），最多返回 f.Limit 条（<=0 时取默认值）。
+// Query 按条件过滤日志（新在前），最多返回 f.Limit 条（<=0 返回全部）。
 // f.Before 非空时作为分页游标，仅返回比它更旧的记录。
 func (l *Logger) Query(f Filter) []Entry {
-	limit := f.Limit
-	if limit <= 0 {
-		limit = defaultMax
-	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.backend.query(f, parseBeforeSeq(f.Before), limit)
+	return l.backend.query(f, parseBeforeSeq(f.Before), f.Limit)
+}
+
+// Clear 清除满足条件的日志（零值条件清除全部），返回删除条数。
+func (l *Logger) Clear(f Filter) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.backend.clear(f)
 }
 
 // parseBeforeSeq 把分页游标（日志 ID，序号的 base36）解析为序号；非法时为 0（不生效）。

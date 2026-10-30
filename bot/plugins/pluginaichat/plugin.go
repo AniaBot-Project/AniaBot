@@ -812,20 +812,7 @@ func (p *AIChatPlugin) buildAdminPromptSender(b bot.Bot) func(text string) bool 
 }
 
 func (p *AIChatPlugin) buildChatOptions() aichat.ChatOptions {
-	opts := p.thinkingOpts()
-	if p.cfg.MaxToken != nil {
-		opts.MaxToken = p.cfg.MaxToken
-	}
-	if p.cfg.Temperature != nil {
-		opts.Temperature = p.cfg.Temperature
-	}
-	if p.cfg.TopP != nil {
-		opts.TopP = p.cfg.TopP
-	}
-	if p.cfg.TopK != nil {
-		opts.TopK = p.cfg.TopK
-	}
-	return opts
+	return p.thinkingOpts()
 }
 
 func (p *AIChatPlugin) buildOCRChatOptions() aichat.ChatOptions {
@@ -1061,11 +1048,7 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 		if defaultTimeoutSec > clockMaxTimeoutSec {
 			defaultTimeoutSec = clockMaxTimeoutSec
 		}
-		maxLog := p.cfg.Clock.MaxLogEntries
-		if maxLog <= 0 {
-			maxLog = 20000
-		}
-		p.clockManager = newClockManager(p, time.Duration(defaultTimeoutSec)*time.Second, maxLog)
+		p.clockManager = newClockManager(p, time.Duration(defaultTimeoutSec)*time.Second)
 		p.Logger.Info("已启用AI定时任务功能", "tasks", len(p.clockManager.List()), "default_timeout_sec", defaultTimeoutSec)
 	} else {
 		p.Logger.Info("AI定时任务功能未启用（plugin.ai_chat_bot.clock.enable=false）")

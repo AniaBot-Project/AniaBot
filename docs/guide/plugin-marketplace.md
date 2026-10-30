@@ -2,7 +2,7 @@
 
 AniaBot 提供插件市场：从独立的官方插件仓库（[AniaBot-Project/AniaBot-Plugins](https://github.com/AniaBot-Project/AniaBot-Plugins)）浏览插件介绍，并在面板上**在线安装 / 升级 / 卸载**第三方插件。安装会自动下载插件源码、生成注册代码、重新编译并重启 Bot。
 
-> ⚠️ **安全提示**：安装插件等于在 Bot 所在机器上编译并执行插件代码（与 Bot 同进程）。请只安装你信任的插件。市场仓库的插件经过维护者人工审查，但无法保证第三方依赖与未来版本绝对安全。插件市场默认关闭。
+> ⚠️ **安全提示**：安装插件等于在 Bot 所在机器上编译并执行插件代码（与 Bot 同进程）。请只安装你信任的插件。市场仓库的插件经过维护者人工审查，但无法保证第三方依赖与未来版本绝对安全。插件市场默认开启，安装前面板会再次提示风险。
 
 ## 工作原理
 
@@ -20,9 +20,8 @@ Go 不支持跨平台热加载插件，因此 AniaBot 采用「**源码级安装
 ## 前置条件
 
 1. **以编译后的二进制部署**（推荐容器部署，见 [容器部署](./docker)），`go run` 开发模式下不可用
-2. 已配置源码目录：`bot.marketplace.source_dir`（留空时回退用自动更新的 `bot.update.source_dir`），且至少完成过一次自动更新（源码树需包含前端产物与 `tools/plugingen`）
-3. 开启插件市场：配置管理 → 插件市场 → `bot.marketplace.enable=true`，重启后生效
-4. 机器上装有 `git` 与 `go`（容器镜像已内置）
+2. 已配置自动更新源码目录 `bot.update.source_dir`，且至少完成过一次自动更新（源码树需包含前端产物与 `tools/plugingen`）
+3. 机器上装有 `git` 与 `go`（容器镜像已内置）
 
 ## 使用
 
@@ -30,12 +29,10 @@ Go 不支持跨平台热加载插件，因此 AniaBot 采用「**源码级安装
 
 GitHub API 未登录限流 60 次/小时，登录后可提升到 5000 次/小时。插件市场只支持在线登录（不再提供手动 Token 输入）。
 
-> 开箱即用：默认已内置 AniaBot 官方 OAuth App 的 Client ID（`bot.marketplace.oauth_client_id` 默认值），面板直接点「使用 GitHub 登录」即可；多人共用官方 App 时可能触发 GitHub 设备流限流（每小时 50 次），如遇限流或想独立配额，再按下面步骤创建自己的 App 并覆盖配置。
+> 开箱即用：内置 AniaBot 官方 OAuth App 的 Client ID（`Ov23li6fHYmQOGOmliT4`），面板直接点「使用 GitHub 登录」即可，无需任何配置。多人共用官方 App 时可能触发 GitHub 设备流限流（每小时 50 次），稍后重试即可。
 
-1. 在 GitHub 创建一个 OAuth App：<https://github.com/settings/developers> → OAuth Apps → New OAuth App（Authorization callback URL 可随便填，如 `http://localhost`，设备流不使用回调地址）
-2. 在应用设置中启用 **Device flow**（OAuth App → 应用设置 → Enable Device Flow）
-3. 把应用的 **Client ID** 填入面板「配置管理 → 插件市场」的 `bot.marketplace.oauth_client_id`，重启后生效
-4. 在插件市场页点击「使用 GitHub 登录」→ 弹出授权码与链接 → 浏览器打开 <https://github.com/login/device> 输入授权码 → 自动完成登录
+1. 在插件市场页点击「使用 GitHub 登录」→ 弹出授权码与链接
+2. 浏览器打开 <https://github.com/login/device> 输入授权码 → 自动完成登录
 
 ### 浏览与安装
 
@@ -65,19 +62,19 @@ GitHub API 未登录限流 60 次/小时，登录后可提升到 5000 次/小时
 ### 自动更新与容器重建
 
 - 自动更新流水线在拉取最新代码后会**自动重放**已安装的插件并重新生成注册代码，再编译，插件不会因更新丢失
-- 插件持久副本存放在 `bot.marketplace.plugin_dir`（默认 `./data/plugins`，位于持久卷），容器重建后依然保留
+- 插件持久副本固定存放在 `./data/plugins`（位于持久卷），容器重建后依然保留
 
-## 配置项
+## 固定配置
 
-| 配置键 | 默认值 | 说明 |
-| --- | --- | --- |
-| `bot.marketplace.enable` | `false` | 是否启用插件市场 |
-| `bot.marketplace.repo` | `AniaBot-Project/AniaBot-Plugins` | 插件仓库 owner/repo |
-| `bot.marketplace.branch` | `main` | 插件仓库分支 |
-| `bot.marketplace.source_dir` | 空 | 编译用源码目录，留空回退 `bot.update.source_dir` |
-| `bot.marketplace.plugin_dir` | `./data/plugins` | 已安装插件持久副本目录 |
-| `bot.marketplace.cache_dir` | `./data/marketplace` | 市场索引/下载缓存目录 |
-| `bot.marketplace.oauth_client_id` | `Ov23li6fHYmQOGOmliT4` | GitHub OAuth App Client ID（在线登录用，默认官方 App，可覆盖） |
+插件市场不再提供配置项，以下参数固定：
+
+| 项目 | 固定值 |
+| --- | --- |
+| 插件仓库 | `AniaBot-Project/AniaBot-Plugins`（`main` 分支） |
+| 编译源码目录 | 自动更新的 `bot.update.source_dir` |
+| 已安装插件持久副本 | `./data/plugins` |
+| 市场索引/下载缓存 | `./data/marketplace` |
+| GitHub OAuth Client ID | `Ov23li6fHYmQOGOmliT4` |
 
 ## 提交自己的插件
 
