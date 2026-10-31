@@ -54,7 +54,7 @@ func TestPlanGateBlocking(t *testing.T) {
 	if !blocked || result == "" {
 		t.Fatalf("计划模式下 bash 应被阻断并携带提示, blocked=%v result=%q", blocked, result)
 	}
-	for _, name := range []string{"time", "webSearch", "memory_search", "config_get", "todo_write"} {
+	for _, name := range []string{"time", "load_images", "memory_search", "config_get", "todo_write"} {
 		if blocked, _ := call(name); blocked {
 			t.Fatalf("计划模式下只读/中性工具 %s 不应被阻断", name)
 		}

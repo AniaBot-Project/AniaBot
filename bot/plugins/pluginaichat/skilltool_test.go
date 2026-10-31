@@ -36,7 +36,7 @@ func TestSkillListTool_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if !strings.Contains(out, "没有已安装的 skill") {
+	if !strings.Contains(out, "没有已启用的 skill") {
 		t.Fatalf("空列表提示不符: %s", out)
 	}
 }

@@ -70,7 +70,6 @@ AI 可在对话中自主调用：
 | 工具 | 说明 |
 | --- | --- |
 | `time` | 获取当前时间 |
-| `webSearch` / `webExplore` | 联网搜索 / 抓取网页（需配置 Jina token） |
 | `get_msg_history` | 读取群/私聊最近消息 |
 | `load_images` | 加载用户消息中的图片（多模态或 OCR 识别） |
 | `get_private_file_url` / `file` | 私聊文件链接获取与发送生成的文件（`file` 需配置开启） |
@@ -78,6 +77,8 @@ AI 可在对话中自主调用：
 | `local_image` | 读取宿主机本地图片（默认关闭） |
 | `screenshot` / `mouse_click` / `mousemove` / `mouse_scroll` / `keyboard_type` / `keyboard_press` / `active_window` / `list_windows` | 电脑操作：截图查看宿主机屏幕并控制鼠标键盘（默认关闭，仅 Windows 宿主机；可配合工具审批逐次确认） |
 | `todo_write` | 维护当前会话的任务清单，复杂多步任务逐项推进 |
+
+联网搜索/浏览不再内置为工具，改由内置 `web` 技能 + CLI 提供（先 `skill_read` 读取用法，再用 `bash` 调用；需配置 `DEEPSEEK_API_KEY` 并开启 bash 工具）。内置技能不可删除/禁用，外置技能可在面板「技能管理」页启用/禁用。
 
 此外还有 MCP 发现/加载工具与 `skill_read`，见 [配置详解](/guide/configuration#files-mcp-json-——-mcp-服务定义)。
 

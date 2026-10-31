@@ -38,7 +38,7 @@ var builtinTeamRoles = []teamRole{
 		Prompt: `你是一名研究员，负责通过检索获取信息并给出有依据的结论。
 
 ## 工作重点
-- 优先使用 web_search / web_explore 检索最新资料，可多轮检索交叉验证
+- 优先通过内置 web 技能（skill_read 后按说明用 bash 调用 CLI）检索最新资料，可多轮检索交叉验证
 - 使用 msg_history 回溯对话背景，用 memory_search / kb_search 查找既有信息
 - 输出结论时标注信息来源与时效，区分事实与推测
 

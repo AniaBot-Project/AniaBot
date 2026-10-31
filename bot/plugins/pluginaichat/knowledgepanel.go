@@ -135,15 +135,17 @@ func (p *AIChatPlugin) KnowledgeDelete(scope, id string) error {
 	return nil
 }
 
-// KnowledgeImportURL 抓取网页正文导入知识库。复用 Jina Reader API
-// （与 webExplore 工具同一端点），抓取结果截断后入库。
-// 标题取抓取文本中的一级 Markdown 标题，否则用 URL。
+// KnowledgeImportURL 抓取网页正文导入知识库。复用 Jina Reader API，
+// 抓取结果截断后入库；标题取抓取文本中的一级 Markdown 标题，否则用 URL。
 func (p *AIChatPlugin) KnowledgeImportURL(scope, targetURL string) (string, error) {
 	if p.knowledgeManager == nil {
 		return "", errKnowledgeDisabled
 	}
 	if !validKbScope(scope) {
 		return "", fmt.Errorf("非法的知识库作用域: %s", scope)
+	}
+	if strings.TrimSpace(p.cfg.Search.Token) == "" {
+		return "", fmt.Errorf("未配置 Jina AI Token（面板「AI 对话 · 知识库」），无法导入 URL")
 	}
 	targetURL = strings.TrimSpace(targetURL)
 	if !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
@@ -164,7 +166,7 @@ func (p *AIChatPlugin) KnowledgeImportURL(scope, targetURL string) (string, erro
 	}
 	if resp.StatusCode() != http.StatusOK {
 		// 402（无配额）/404/5xx 返回的是错误页而非正文，不能入库
-		return "", fmt.Errorf("抓取网页失败: Jina 返回 HTTP %d（请检查 URL 是否有效及搜索 token 配额）", resp.StatusCode())
+		return "", fmt.Errorf("抓取网页失败: Jina 返回 HTTP %d（请检查 URL 是否有效及 Jina Token 配额）", resp.StatusCode())
 	}
 	text := resp.String()
 	if strings.TrimSpace(text) == "" {

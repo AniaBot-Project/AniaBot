@@ -9,18 +9,20 @@
 一个工具是嵌入 `llmtool.BaseTool[ParamsType]` 的结构体，参数结构体用 `json` 标签命名、`desc` 标签描述：
 
 ```go
-type WebSearchParams struct {
-    Query string `json:"query" desc:"搜索关键词"`
+type EchoParams struct {
+    Text string `json:"text" desc:"要回显的文本"`
 }
 
-type WebSearchTool struct {
-    llmtool.BaseTool[WebSearchParams]
+type EchoTool struct {
+    llmtool.BaseTool[EchoParams]
 }
 
-func (t *WebSearchTool) Name() string        { return "webSearch" }
-func (t *WebSearchTool) Description() string { return "联网搜索" }
-func (t *WebSearchTool) Execute(ctx context.Context, params *WebSearchParams, callbacks llmtool.CallBackFuncs) (string, error) {
-    // ...
+func NewEchoTool() *EchoTool {
+    return &EchoTool{BaseTool: llmtool.MakeBaseTool("echo", "回显文本", EchoParams{})}
+}
+
+func (t *EchoTool) Execute(ctx context.Context, params any, callbacks llmtool.CallBackFuncs) (string, error) {
+    return params.(*EchoParams).Text, nil
 }
 ```
 
@@ -57,9 +59,9 @@ type SessionToolExecutor struct { // 会话层：每个会话独立
 
 | 层级 | 内容 |
 | --- | --- |
-| `CreateDefaultTools()` | 常开：`time`、`webSearch`/`webExplore`（Jina）、`get_msg_history`、`get_private_file_url`、`load_images`；配置门控：`bash`（黑白名单正则）、`send_file`、`local_image`、`computer_use` 工具组（`screenshot`/`mouse_click`/`mousemove`/`mouse_scroll`/`keyboard_type`/`keyboard_press`/`active_window`/`list_windows`，仅 Windows 宿主机注册） |
+| `CreateDefaultTools()` | 常开：`time`、`get_msg_history`、`get_private_file_url`、`load_images`；配置门控：`bash`（黑白名单正则）、`send_file`、`local_image`、`computer_use` 工具组（`screenshot`/`mouse_click`/`mousemove`/`mouse_scroll`/`keyboard_type`/`keyboard_press`/`active_window`/`list_windows`，仅 Windows 宿主机注册）。**联网搜索/浏览不再内置**，改由内置 `web` 技能 + CLI 提供（见下节） |
 | `CreateToolsWithMCP()` | 追加 MCP 工具（`mcpLazyLoad` 决定发现/加载模式或全量注册） |
-| `CreateToolsWithSkill()` | 追加 `skill_read` / `skill_reload` 工具与 SkillManager |
+| `CreateToolsWithSkill()` | 追加 `skill_read` / `skill_reload` 工具与 SkillManager（同时加载内置技能） |
 
 另由 aichat 插件在会话层注册：`config_get`/`config_set`（配置中心读写，敏感字段掩码、仅注册键可写、重启生效——重启由管理员发送 `/reboot` 命令执行，AI 只负责引导）、`config_file_get`/`config_file_set`（扩展配置读写：`files.mcp_json`/`files.prompt_json`/`files.hooks_json`/`files.commands_json`，只校验 JSON 语法，hooks/commands/prompt 保存后数秒热生效、mcp 重启生效）、`mcp_list`/`mcp_add`/`mcp_remove`/`mcp_reconnect`（MCP 服务器自管理，写 `files.mcp_json` 持久化 + 运行时热注册/注销）、会话绑定的 clock/memory/knowledge/team/subagent 工具。其中配置修改类工具（`config_set`/`config_file_set`）执行前恒需管理员审批（与审批开关无关，请求者本人不能批准）。
 
@@ -124,10 +126,12 @@ sequenceDiagram
 Skill 把领域知识封装成 `SKILL.md`（支持 frontmatter 的 `name` / `description`），AI **按需阅读**而非全量塞入：
 
 - 目录结构：`skills/<name>/SKILL.md`（可带 reference.md、script.sh 等附属文件）或单文件 `skills/SKILL.md`
-- `SkillManager` 启动时加载（`skills` 白名单可只加载指定项），`Reload` 原子替换注册表（面板上传/删除后热更新）；常驻的 `skill_reload` 工具走 `Refresh`（按最近一次的目录与白名单原地重载），供 AI 经 `bash` 等直接编辑本地 skill 文件后刷新缓存
+- **内置技能与外置技能**：内置技能随二进制发布（`bot/component/llmtool/builtinskills`，`//go:embed`），加载时物化到 `<skillsDir>/.builtin`（隐藏目录，脚本有可执行权限供 `bash` 调用）；内置技能**不可删除、不可禁用、不受 `skills` 白名单限制**。外置技能从 `skillsDir` 加载，可在面板「技能管理」页启用/禁用——禁用后描述不进入 `available_skills`，`skill_read` 也拒绝读取；禁用列表持久化在 `plugin.ai_chat_bot.skills_disabled`
+- **内置 `web` 技能**：自带 CLI `webctl.py`，通过 `--deepseek` 调用 DeepSeek Search / Fetch API（`POST /v1/tools/search`、`POST /v1/tools/fetch`），AI 先 `skill_read` 拿到脚本绝对路径，再用 `bash` 执行 `search` / `fetch` 子命令；需要 `DEEPSEEK_API_KEY` 环境变量与 `bash` 工具。新增搜索平台只需在 CLI 的 `PROVIDERS` 注册表增加实现与 `--<platform>` 参数，无需改 Go 代码
+- `SkillManager` 启动时加载，`Reload` 原子替换注册表（面板上传/删除/启停后热更新）并保留内置技能与禁用状态；常驻的 `skill_reload` 工具走 `Refresh`（按最近一次的目录与白名单原地重载），供 AI 经 `bash` 等直接编辑本地 skill 文件后刷新缓存
 - system prompt 注入 `available_skills` 注册表（名称 + 一句话描述），模型判断需要时调用 `skill_read` 读取完整内容
 - 输出确定性：skill 列表按名称排序（作为工具结果文本回填给 LLM）
-- **AI 自管理技能**：开启 `plugin.ai_chat_bot.skill_tool.enable`（默认关闭）后，会话注册 `skill_list` / `skill_install` / `skill_remove` 三个工具——找资源不做专用搜索工具（GitHub API 搜索有频控），AI 直接用已有的 `webSearch` / `webExplore` 上网搜索技能仓库或 zip 直链，再从 zip 直链 / GitHub 仓库（自动转 codeload zip）/ SKILL.md 直链下载安装，或直接撰写 SKILL.md 全文创建技能；安装/卸载复用面板同款磁盘逻辑（zip-slip / 体积 / 校验防护），热重载立即生效，操作记入操作日志
+- **AI 自管理技能**：开启 `plugin.ai_chat_bot.skill_tool.enable`（默认关闭）后，会话注册 `skill_list` / `skill_install` / `skill_remove` 三个工具——找资源不做专用搜索工具（GitHub API 搜索有频控），AI 可直接用内置 `web` 技能联网搜索技能仓库或 zip 直链，再从 zip 直链 / GitHub 仓库（自动转 codeload zip）/ SKILL.md 直链下载安装，或直接撰写 SKILL.md 全文创建技能；安装/卸载复用面板同款磁盘逻辑（zip-slip / 体积 / 校验防护，内置技能不可删除、名称冲突会被拒绝），热重载立即生效，操作记入操作日志
 - **AI 自管理 MCP 服务器**：开启 `plugin.ai_chat_bot.mcp_tool.enable`（默认关闭）后，会话注册 `mcp_list` / `mcp_add` / `mcp_remove` / `mcp_reconnect` 四个工具——添加/删除经 DI 注入的 `ConfigEditor` 写入 `files.mcp_json` 持久化（名称校验满足 LLM 工具名规范，环境变量/请求头以 `KEY=VALUE` 列表传参），同时调用 `ToolExecuter.AddMCP` / `RemoveMCP` 运行时热注册/注销立即生效（持久化失败会回滚运行时注册；删除时运行时未注册的服务器容忍注销错误，保证配置层面删除总可用）；`mcp_reconnect` 对启动时连接失败从未注册的服务器会从配置读取定义重新注册
 
 ## AI 定时任务（clock）

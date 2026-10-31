@@ -102,6 +102,7 @@ const state = {
     { scope: 'f:qq:10000', name: 'research', desc: '资料检索与整理', members: [{ name: 'searcher' }], created_at: toLocalIso(new Date(now0 - 5400_000)) },
   ],
   knowledge: rebase(seedKnowledgeList).map((x) => ({ ...x, scope: 'g:qq:123456' })),
+  skillDisabled: new Set(),
   opLogs: rebase(seedOpLogs.items),
   consoleLogs: rebase(seedConsoleLogs.items),
   msgLogs: buildMsgLogs(now0),
@@ -507,10 +508,22 @@ const routes = [
   },
 
   // 技能
-  { m: 'GET', re: /^\/api\/skills$/, h: () => buildSkills() },
-  { m: 'GET', re: /^\/api\/skills\/([^/]+)$/, h: (c) => buildSkillDetail(decodeURIComponent(c.params[0])) || { status: 404, body: { error: '技能不存在' } } },
+  { m: 'GET', re: /^\/api\/skills$/, h: () => buildSkills(state.skillDisabled) },
+  { m: 'GET', re: /^\/api\/skills\/([^/]+)$/, h: (c) => buildSkillDetail(decodeURIComponent(c.params[0]), state.skillDisabled) || { status: 404, body: { error: '技能不存在' } } },
   { m: 'POST', re: /^\/api\/skills$/, h: () => ({ ok: true }) },
-  { m: 'DELETE', re: /^\/api\/skills\/([^/]+)$/, h: () => ({ ok: true }) },
+  {
+    m: 'POST', re: /^\/api\/skills\/([^/]+)\/toggle$/, h: (c) => {
+      const name = decodeURIComponent(c.params[0])
+      const builtin = ['web'].includes(name)
+      if (builtin) return { status: 400, body: { error: '内置 skill 不能禁用' } }
+      const enabled = !!(c.body && c.body.enabled)
+      if (enabled) state.skillDisabled.delete(name)
+      else state.skillDisabled.add(name)
+      addOpLog('skill', 'skill_toggle', `面板${enabled ? '启用' : '禁用'} skill: ${name}`)
+      return { ok: true }
+    },
+  },
+  { m: 'DELETE', re: /^\/api\/skills\/([^/]+)$/, h: (c) => { state.skillDisabled.delete(decodeURIComponent(c.params[0])); return { ok: true } } },
 
   // 记忆
   { m: 'GET', re: /^\/api\/memory\/scopes$/, h: () => scopeCounts(state.memories) },

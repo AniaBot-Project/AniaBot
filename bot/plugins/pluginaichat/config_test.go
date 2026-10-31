@@ -25,8 +25,8 @@ func TestDefaultPromptContainsToolGuidance(t *testing.T) {
 	tools := []string{
 		"get_msg_history",
 		"load_images",
-		"webSearch",
-		"webExplore",
+		"skill_read",
+		"web 技能",
 		"memory_search",
 		"memory_save",
 		"memory_update",

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/jeanhua/AniaBot/bot/component/llmtool"
 	"github.com/jeanhua/AniaBot/common/plugininfo"
@@ -225,5 +226,79 @@ func TestSkillUpload_InvalidZip(t *testing.T) {
 	data := makeZip(t, map[string]string{"readme.md": "hi"})
 	if err := p.SkillUpload("noskill.zip", data); err == nil {
 		t.Fatal("缺少 SKILL.md 应报错")
+	}
+}
+
+func TestSkillSetEnabledPersists(t *testing.T) {
+	p := newTestSkillPlugin(t)
+	editor := newStubConfigEditor()
+	p.ConfigEditor = editor
+
+	if err := p.SkillUpload("my-skill.zip", makeZip(t, map[string]string{"my-skill/SKILL.md": testSkillMD})); err != nil {
+		t.Fatalf("SkillUpload 失败: %v", err)
+	}
+
+	if err := p.SkillSetEnabled("test-skill", false); err != nil {
+		t.Fatalf("禁用失败: %v", err)
+	}
+	if !p.skillManager.IsDisabled("test-skill") {
+		t.Fatal("禁用未生效")
+	}
+	got, ok := editor.Get(skillsDisabledConfigKey)
+	if !ok {
+		t.Fatal("禁用状态未写入配置中心")
+	}
+	names, ok := got.([]string)
+	if !ok || len(names) != 1 || names[0] != "test-skill" {
+		t.Fatalf("写入的禁用列表不符: %#v", got)
+	}
+	if len(p.cfg.SkillsDisabled) != 1 || p.cfg.SkillsDisabled[0] != "test-skill" {
+		t.Fatalf("内存配置未同步: %#v", p.cfg.SkillsDisabled)
+	}
+
+	if err := p.SkillSetEnabled("test-skill", true); err != nil {
+		t.Fatalf("启用失败: %v", err)
+	}
+	if p.skillManager.IsDisabled("test-skill") {
+		t.Fatal("启用未生效")
+	}
+	raw, _ := editor.Get(skillsDisabledConfigKey)
+	after, afterOK := raw.([]string)
+	if !afterOK || len(after) != 0 {
+		t.Fatalf("启用后禁用列表应为空: %#v", raw)
+	}
+}
+
+func TestSkillSetEnabled_RejectsBuiltin(t *testing.T) {
+	p := newTestSkillPlugin(t)
+	fsys := fstest.MapFS{
+		"skills/web/SKILL.md": &fstest.MapFile{Data: []byte("---\nname: web\ndescription: 内置\n---\n")},
+	}
+	p.skillManager.EnableBuiltinSkills(fsys, "skills")
+	if err := p.skillManager.LoadFromDir(p.skillsDir); err != nil {
+		t.Fatalf("加载内置技能失败: %v", err)
+	}
+	if err := p.SkillSetEnabled("web", false); err == nil {
+		t.Fatal("内置技能禁用应报错")
+	}
+	if p.skillManager.IsDisabled("web") {
+		t.Fatal("内置技能不应被禁用")
+	}
+}
+
+func TestSkillDelete_RejectsBuiltin(t *testing.T) {
+	p := newTestSkillPlugin(t)
+	fsys := fstest.MapFS{
+		"skills/web/SKILL.md": &fstest.MapFile{Data: []byte("---\nname: web\ndescription: 内置\n---\n")},
+	}
+	p.skillManager.EnableBuiltinSkills(fsys, "skills")
+	if err := p.skillManager.LoadFromDir(p.skillsDir); err != nil {
+		t.Fatalf("加载内置技能失败: %v", err)
+	}
+	if err := p.SkillDelete("web"); err == nil {
+		t.Fatal("内置技能删除应报错")
+	}
+	if _, err := os.Stat(filepath.Join(p.skillsDir, ".builtin", "web", "SKILL.md")); err != nil {
+		t.Fatalf("内置技能文件不应被删除: %v", err)
 	}
 }

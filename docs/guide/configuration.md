@@ -322,17 +322,27 @@ X-Proxy-Route: team-a
 
 | 配置键 | 默认值 | 说明 |
 | --- | --- | --- |
-| `plugin.ai_chat_bot.skills_dir` | `./skills` | Skill 目录 |
-| `plugin.ai_chat_bot.skills` | `[]` | 指定加载的 skill 名称，空 = 加载全部 |
-| `plugin.ai_chat_bot.skill_tool.enable` | `false` | 启用 AI Skill 管理工具（`skill_list` / `skill_install` / `skill_remove`），允许 AI 用 `webSearch` / `webExplore` 上网搜索技能资源后自行下载安装（zip 链接 / GitHub 仓库 / SKILL.md 直链），或直接撰写 SKILL.md 内容创建技能，安装后热重载立即生效 |
+| `plugin.ai_chat_bot.skills_dir` | `./skills` | Skill 目录（内置技能会物化到该目录下的 `.builtin`） |
+| `plugin.ai_chat_bot.skills` | `[]` | 指定加载的外置 skill 名称，空 = 加载全部；内置 skill 始终加载 |
+| `plugin.ai_chat_bot.skills_disabled` | `[]` | 被禁用的外置 skill（面板「技能管理」页开关维护）：禁用后描述不进入上下文、不可被 `skill_read` 读取；内置 skill 不可禁用 |
+| `plugin.ai_chat_bot.skill_tool.enable` | `false` | 启用 AI Skill 管理工具（`skill_list` / `skill_install` / `skill_remove`），允许 AI 用内置 `web` 技能联网搜索技能资源后自行下载安装（zip 链接 / GitHub 仓库 / SKILL.md 直链），或直接撰写 SKILL.md 内容创建技能，安装后热重载立即生效 |
 
 常驻的 `skill_reload` 工具（无需开关）用于 AI 直接编辑本地 skill 文件（如经 `bash`）后刷新缓存——面板/管理工具的安装删除会自动热重载，绕过管理器直接改文件则需调用它刷新。
 
-### 联网搜索
+内置 `web` 技能随二进制发布、不可删除/禁用，自带 `webctl.py` CLI：
+
+```bash
+python3 "<webctl.py 绝对路径>" search --deepseek "查询词" [--count 8] [--content]
+python3 "<webctl.py 绝对路径>" fetch  --deepseek "https://example.com/article" [--offset 8000]
+```
+
+需要在运行 AniaBot 的环境中配置 `DEEPSEEK_API_KEY`（或在面板 bash 工具的「环境变量」中追加），并开启 `plugin.ai_chat_bot.bash.enable`。搜索/抓取平台通过 `--deepseek` 参数选择，后续可在 CLI 的 `PROVIDERS` 注册表中扩展其他平台。
+
+### 知识库网页导入
 
 | 配置键 | 默认值 | 说明 |
 | --- | --- | --- |
-| `plugin.ai_chat_bot.search.token` | 空 | Jina AI token，用于 `web_search` / `web_explore` 工具 |
+| `plugin.ai_chat_bot.search.token` | 空 | Jina AI token，仅用于知识库页「导入 URL」通过 Jina Reader 抓取正文 |
 
 ### OCR 备用识图
 

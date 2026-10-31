@@ -7,6 +7,8 @@ type SkillInfo struct {
 	Location    string   `json:"location"` // skill 在 skills 目录下的相对位置（目录名或文件名）
 	Refs        []string `json:"refs"`     // 附属 Markdown 文档
 	Extras      []string `json:"extras"`   // 其他附带文件（脚本等）
+	Builtin     bool     `json:"builtin"`  // 内置技能：不可删除、不可禁用
+	Disabled    bool     `json:"disabled"` // 外置技能是否被禁用（禁用后描述不进入上下文）
 }
 
 // SkillFileInfo 是 skill 详情中的附属文件信息。
@@ -24,4 +26,6 @@ type SkillDetail struct {
 	Location    string          `json:"location"`
 	Content     string          `json:"content"` // SKILL.md 完整内容（含 frontmatter）
 	Files       []SkillFileInfo `json:"files"`
+	Builtin     bool            `json:"builtin"`
+	Disabled    bool            `json:"disabled"`
 }

@@ -44,26 +44,26 @@ ChatBot.Chat()
 | 文件 | 工具 | 说明 |
 |------|------|------|
 | `time.go` | `time` | 返回当前时间 |
-| `jina.go` | `webSearch` / `webExplore` | 基于 Jina API 的网页搜索与浏览 |
 | `sendfile.go` | `file` | 向用户发送生成的文件（需启用 file 配置）|
 | `bash.go` | `bash` | 在宿主机执行 shell 命令（需启用 bash 配置，支持黑白名单）|
 | `loadimages.go` | `load_images` | 加载消息中的图片供模型查看 |
 | `localimage.go` | `local_image` | 读取本地图片（需启用 local_image 配置）|
-| `msghistory.go` | `get_msg_history` | 获取当前会话历史消息（支持翻页）|
 | `privatefile.go` | `get_private_file_url` | 获取私聊文件的下载链接 |
 | `tools.go` | — | 工厂函数，按需组合工具执行器 |
+
+历史消息工具已平台化（`aitool.NewMsgHistoryTool`），联网搜索/浏览改由内置 `web` 技能 + CLI 提供（`llmtool/builtinskills`），均不在本包内。
 
 **工厂函数（按需选用）：**
 
 ```go
 // 仅内置工具
-CreateDefaultTools(searchToken, bashConfig, fileConfig, localImageConfig)
+CreateDefaultTools(bashConfig, fileConfig, localImageConfig, fileToolsConfig)
 
 // 内置工具 + MCP（mcpLazyLoad=true 走工具发现模式，false 全量注册）
-CreateToolsWithMCP(searchToken, mcpConfigs, bashConfig, fileConfig, localImageConfig, mcpLazyLoad)
+CreateToolsWithMCP(mcpConfigs, bashConfig, fileConfig, localImageConfig, fileToolsConfig, mcpLazyLoad)
 
-// 内置工具 + MCP + Skill（skills 非空时只加载指定名称的 skill）
-CreateToolsWithSkill(searchToken, mcpConfigs, skillsDir, bashConfig, fileConfig, localImageConfig, skills, mcpLazyLoad)
+// 内置工具 + MCP + Skill（skills 非空时只加载指定名称的外置 skill，内置 skill 始终加载）
+CreateToolsWithSkill(mcpConfigs, skillsDir, bashConfig, fileConfig, localImageConfig, fileToolsConfig, skills, mcpLazyLoad)
 ```
 
 三个工厂函数均返回 `error`（`CreateToolsWithSkill` 返回 `(*ToolExecuter, *SkillManager, error)`）。
@@ -81,7 +81,8 @@ CreateToolsWithSkill(searchToken, mcpConfigs, skillsDir, bashConfig, fileConfig,
 | `toolexecuter.go` | `ToolExecuter`（共享工具注册表）+ `SessionToolExecutor`（会话级隔离）|
 | `parser.go` | 将 Go struct 或 MCP JSON Schema 转换为 OpenAI tool schema |
 | `mcp.go` | MCP 客户端、工具包装、发现/加载模式（支持 stdio / SSE / Streamable HTTP）|
-| `skill.go` | `SkillManager`：加载 SKILL.md 文件，注入 skill 列表到 system prompt |
+| `skill.go` | `SkillManager`：加载内置/外置 SKILL.md、维护禁用状态，注入 skill 列表到 system prompt |
+| `builtinskills/` | 随二进制发布的内置技能（内置 `web` 技能与 `webctl.py` 联网 CLI） |
 
 **工具注册两种模式：**
 

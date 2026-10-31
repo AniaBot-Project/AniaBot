@@ -214,6 +214,12 @@ export const api = {
   },
   deleteSkill: (name) =>
     request(`/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  // 启用/禁用外置 skill（内置 skill 不可禁用）
+  setSkillEnabled: (name, enabled) =>
+    request(`/api/skills/${encodeURIComponent(name)}/toggle`, {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    }),
 
   getMemoryScopes: () => request('/api/memory/scopes'),
   getMemories: (scope) => request(`/api/memory/list?scope=${encodeURIComponent(scope)}`),

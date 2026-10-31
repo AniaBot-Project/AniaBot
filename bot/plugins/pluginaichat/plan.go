@@ -36,10 +36,10 @@ func (m *planManager) Set(key string, on bool) {
 // planBlockedTools 计划模式下被阻止的副作用工具（对照工具注册处逐一核对）。
 // todo_write 刻意放行：任务清单是规划工作流的一部分，无副作用；
 // screenshot/active_window/list_windows 是只读观察，不阻断（计划模式下
-// AI 可以看屏幕做分析）；其余只读/中性工具（time/webSearch/webExplore/
-// 历史消息（qq_get_msg_history 等）/load_images/local_image/config_get/
-// memory_search/kb_search/skill_*/mcp_list/clock_list/clock_get/clock_log/
-// subagent_list/subagent_cancel/team_list）不受影响。
+// AI 可以看屏幕做分析）；其余只读/中性工具（time/历史消息（qq_get_msg_history 等）/
+// load_images/local_image/config_get/memory_search/kb_search/skill_*/
+// mcp_list/clock_list/clock_get/clock_log/subagent_list/subagent_cancel/team_list）
+// 不受影响。内置 web 技能依赖 bash，bash 已被阻断，计划模式下无法联网。
 //
 // MCP 工具无法静态列出（服务器在运行时增删），由 isPlanBlockedTool 的动态腿兜住。
 var planBlockedTools = map[string]struct{}{

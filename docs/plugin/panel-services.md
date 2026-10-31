@@ -46,7 +46,7 @@ for _, p := range ania.plugins {
 | 消息日志 | `adminpanel.MsgLogSource` | 日志打印插件（`pluginlog`） |
 | 任务日志 | `adminpanel.TaskLogSource` | AI 对话插件（clock） |
 | 定时任务 | `adminpanel.ClockTaskSource` | AI 对话插件（clock） |
-| 技能管理 | `adminpanel.SkillSource` | AI 对话插件 |
+| 技能管理 | `adminpanel.SkillSource` + `adminpanel.SkillToggleSource`（可选） | AI 对话插件 |
 | 记忆管理 | `adminpanel.MemorySource` | AI 对话插件 |
 | 知识库 | `adminpanel.KnowledgeBaseSource` | AI 对话插件 |
 | Agent 团队 | `adminpanel.TeamSource` | AI 对话插件 |
@@ -97,7 +97,14 @@ type SkillSource interface {
     SkillDelete(name string) error
     SkillUpload(filename string, data []byte) error // 从 zip 内容安装并热重载
 }
+
+// 可选：启用/禁用外置 skill（内置 skill 由实现方拒绝禁用）
+type SkillToggleSource interface {
+    SkillSetEnabled(name string, enabled bool) error
+}
 ```
+
+`plugininfo.SkillInfo` 的 `Builtin` / `Disabled` 字段用于面板展示内置标识与禁用状态。
 
 ### MemorySource —— 记忆管理页
 

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 const testSkillContent = `---
@@ -84,6 +85,76 @@ func TestSkillReloadTool(t *testing.T) {
 	}
 	if !strings.Contains(out, "1 个 skill") || !strings.Contains(out, "test-skill") {
 		t.Fatalf("刷新结果提示不符: %s", out)
+	}
+}
+
+// TestBuiltinSkills 校验内置技能：物化到磁盘、不可禁用、不受白名单影响，
+// 且外置技能的启用/禁用与持久化重载行为正确。
+func TestBuiltinSkills(t *testing.T) {
+	dir := t.TempDir()
+	writeTestSkill(t, dir, testSkillContent)
+
+	fsys := fstest.MapFS{
+		"skills/web/SKILL.md":  &fstest.MapFile{Data: []byte("---\nname: web\ndescription: 内置联网技能\n---\n\n# web\n")},
+		"skills/web/webctl.py": &fstest.MapFile{Data: []byte("print('hi')\n")},
+	}
+	m := NewSkillManager()
+	m.EnableBuiltinSkills(fsys, "skills")
+	// 显式白名单只列外置技能：内置技能仍应加载
+	if err := m.LoadFromDirWithFilter(dir, []string{"test-skill"}); err != nil {
+		t.Fatalf("LoadFromDirWithFilter error: %v", err)
+	}
+
+	web, ok := m.Get("web")
+	if !ok || !web.Builtin {
+		t.Fatalf("内置技能未加载或未标记 Builtin: %+v", web)
+	}
+	if _, ok := web.ExtraFiles["webctl.py"]; !ok {
+		t.Fatalf("内置技能脚本未登记为附带文件: %+v", web.ExtraFiles)
+	}
+	scriptPath := filepath.Join(dir, ".builtin", "web", "webctl.py")
+	if _, err := os.Stat(scriptPath); err != nil {
+		t.Fatalf("内置脚本未物化到磁盘: %v", err)
+	}
+
+	// 内置技能不可禁用
+	if err := m.SetEnabled("web", false); err == nil {
+		t.Fatal("禁用内置技能应报错")
+	}
+	// 外置技能可禁用：描述不再进入 prompt，skill_read 拒绝读取
+	if err := m.SetEnabled("test-skill", false); err != nil {
+		t.Fatalf("禁用外置技能失败: %v", err)
+	}
+	if !m.IsDisabled("test-skill") {
+		t.Fatal("外置技能禁用状态未生效")
+	}
+	prompt := m.BuildAvailableSkillsPrompt()
+	if !strings.Contains(prompt, "<name>web</name>") || strings.Contains(prompt, "test-skill") {
+		t.Fatalf("禁用后 prompt 内容不符: %s", prompt)
+	}
+	readTool := NewSkillReadTool(m)
+	if _, err := readTool.Execute(context.Background(), &SkillReadParams{SkillName: "test-skill"}, CallBackFuncs{}); err == nil {
+		t.Fatal("读取已禁用技能应报错")
+	}
+
+	// 重新加载后禁用状态与内置技能都保留
+	if err := m.Reload(dir, nil); err != nil {
+		t.Fatalf("Reload error: %v", err)
+	}
+	if !m.IsDisabled("test-skill") {
+		t.Fatal("Reload 后禁用状态丢失")
+	}
+	if _, ok := m.Get("web"); !ok {
+		t.Fatal("Reload 后内置技能丢失")
+	}
+
+	// SetDisabled 忽略内置技能（即使配置里写了）
+	m.SetDisabled([]string{"web", "test-skill"})
+	if m.IsDisabled("web") {
+		t.Fatal("内置技能不应出现在禁用集合")
+	}
+	if names := m.DisabledNames(); len(names) != 1 || names[0] != "test-skill" {
+		t.Fatalf("禁用集合不符: %v", names)
 	}
 }
 

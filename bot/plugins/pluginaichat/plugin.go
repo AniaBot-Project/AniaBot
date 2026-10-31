@@ -892,7 +892,7 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	}
 
 	if p.cfg.Search.Token == "" {
-		p.Logger.Warn("Jina AI Token 未设置，将无法使用网页浏览和搜索功能")
+		p.Logger.Warn("Jina AI Token 未设置，知识库「导入 URL」功能将不可用")
 	}
 
 	if p.cfg.Multimodal {
@@ -995,7 +995,6 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	}
 	var err error
 	p.toolExecutor, p.skillManager, err = functool.CreateToolsWithSkill(
-		p.cfg.Search.Token,
 		p.mcpConfigs,
 		skillsDir,
 		bashConfig,
@@ -1007,6 +1006,11 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	)
 	if err != nil {
 		return fmt.Errorf("%w: 创建工具执行器失败: %w", aniaerror.ParameterInitializeError, err)
+	}
+	// 应用技能禁用列表（内置技能不可禁用，管理器会忽略对应项）
+	p.skillManager.SetDisabled(p.cfg.SkillsDisabled)
+	if disabled := p.skillManager.DisabledNames(); len(disabled) > 0 {
+		p.Logger.Info("已禁用部分 skill（描述不进入上下文）", "skills", strings.Join(disabled, ", "))
 	}
 
 	// 配置管理工具（默认关闭，配置中心读写能力由 core 经 DI 注入）

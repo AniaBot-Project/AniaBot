@@ -96,13 +96,20 @@ type MsgLogSource interface {
 
 // SkillSource 可选接口：插件实现后，面板可对其 AI skill 做列表 / 上传 / 删除
 // （当前由 AI 对话插件实现）。上传/删除后插件负责热重载 skill 注册表。
+// 内置 skill 由插件侧拒绝删除，面板按 SkillInfo.Builtin 隐藏删除入口。
 type SkillSource interface {
-	// SkillList 返回当前已加载的 skill 列表、skills 目录与白名单（空表示加载全部）
+	// SkillList 返回当前 skill 列表（含内置与已禁用）、skills 目录与白名单（空表示加载全部）
 	SkillList() (skills []plugininfo.SkillInfo, dir string, whitelist []string)
-	// SkillDelete 按名称删除 skill（同时从磁盘移除）并热重载
+	// SkillDelete 按名称删除 skill（同时从磁盘移除）并热重载；内置 skill 不可删除
 	SkillDelete(name string) error
 	// SkillUpload 从 zip 压缩包内容安装 skill 并热重载，filename 为原始文件名
 	SkillUpload(filename string, data []byte) error
+}
+
+// SkillToggleSource 可选接口：启用/禁用外置 skill（内置 skill 不可禁用）。
+// 禁用后 skill 描述不进入上下文、不可被 skill_read 读取；改动即时生效并持久化。
+type SkillToggleSource interface {
+	SkillSetEnabled(name string, enabled bool) error
 }
 
 // SkillDetailSource 可选接口：在 SkillSource 之外提供 SKILL 详情查看能力。
@@ -287,6 +294,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/skills", s.requireAuth(http.HandlerFunc(s.handleSkillUpload)))
 	s.mux.Handle("GET /api/skills/{name}", s.requireAuth(http.HandlerFunc(s.handleSkillDetail)))
 	s.mux.Handle("DELETE /api/skills/{name}", s.requireAuth(http.HandlerFunc(s.handleSkillDelete)))
+	s.mux.Handle("POST /api/skills/{name}/toggle", s.requireAuth(http.HandlerFunc(s.handleSkillToggle)))
 	s.mux.Handle("GET /api/memory/scopes", s.requireAuth(http.HandlerFunc(s.handleMemoryScopes)))
 	s.mux.Handle("GET /api/memory/list", s.requireAuth(http.HandlerFunc(s.handleMemoryList)))
 	s.mux.Handle("POST /api/memory", s.requireAuth(http.HandlerFunc(s.handleMemoryCreate)))
@@ -1297,6 +1305,39 @@ func (s *Server) handleSkillDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	s.opt.Logger.Info("skill 已通过 Web 面板删除", "skill", name)
 	oplog.Record(oplog.CategorySkill, "skill_delete", "面板删除 skill: "+name)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleSkillToggle 启用/禁用外置 skill（内置 skill 不可禁用）。
+// 禁用后 skill 描述不进入上下文、不可被 skill_read 读取，改动即时生效。
+func (s *Server) handleSkillToggle(w http.ResponseWriter, r *http.Request) {
+	if s.opt.Skills == nil {
+		writeError(w, http.StatusNotFound, "skill 功能未启用")
+		return
+	}
+	src, ok := s.opt.Skills.(SkillToggleSource)
+	if !ok {
+		writeError(w, http.StatusNotFound, "skill 启停功能未启用")
+		return
+	}
+	name := r.PathValue("name")
+	var body struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := readJSON(r, &body); err != nil || body.Enabled == nil {
+		writeError(w, http.StatusBadRequest, `请求体需为 {"enabled": true|false}`)
+		return
+	}
+	if err := src.SkillSetEnabled(name, *body.Enabled); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	action := "启用"
+	if !*body.Enabled {
+		action = "禁用"
+	}
+	s.opt.Logger.Info("skill 启停状态已通过 Web 面板修改", "skill", name, "enabled", *body.Enabled)
+	oplog.Record(oplog.CategorySkill, "skill_toggle", "面板"+action+" skill: "+name)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

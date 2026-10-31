@@ -5,7 +5,7 @@
       <div class="text-xs text-slate-500">
         <template v-if="dir">
           Skills 目录：<span class="font-mono text-zinc-700">{{ dir }}</span>
-          <span class="ml-2 text-slate-400">上传/删除立即生效，无需重启</span>
+          <span class="ml-2 text-slate-400">上传/删除/启停立即生效，无需重启</span>
         </template>
       </div>
       <div class="flex items-center gap-3">
@@ -23,7 +23,7 @@
 
     <!-- 白名单提示 -->
     <div v-if="whitelist.length" class="bg-amber-50 border border-amber-200/70 rounded-xl px-4 py-3 text-xs text-amber-700">
-      当前启用了 Skills 白名单（{{ whitelist.join('、') }}），不在白名单中的 skill 不会被加载。可在「配置管理」中调整。
+      当前启用了 Skills 白名单（{{ whitelist.join('、') }}），不在白名单中的外置 skill 不会被加载；内置 skill 始终加载。可在「配置管理」中调整。
     </div>
 
     <!-- 上传结果提示 -->
@@ -35,13 +35,15 @@
         <li v-if="skills.length === 0" class="py-12 text-sm text-slate-400 text-center list-none">
           暂无已加载的 skill，点击右上角上传 zip 压缩包（需包含 SKILL.md）
         </li>
-        <li v-for="s in skills" :key="s.name" class="px-5 py-4 flex items-start gap-4">
+        <li v-for="s in skills" :key="s.name" class="px-5 py-4 flex items-start gap-4 transition-opacity" :class="s.disabled ? 'opacity-60' : ''">
           <div class="w-9 h-9 rounded-lg bg-zinc-100 flex items-center justify-center shrink-0 text-zinc-500">
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z"/></svg>
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-sm font-semibold text-slate-800">{{ s.name }}</span>
+              <span v-if="s.builtin" class="text-[10px] px-1.5 py-0.5 rounded-full bg-[#0071e3]/10 text-[#0071e3] font-medium" title="内置技能：不可删除、不可禁用">内置</span>
+              <span v-else-if="s.disabled" class="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-200/70 text-zinc-500 font-medium" title="已禁用：描述不进入上下文">已禁用</span>
               <span class="text-[11px] font-mono text-slate-400">{{ s.location }}</span>
             </div>
             <p v-if="s.description" class="text-xs text-slate-500 mt-0.5 leading-relaxed">{{ s.description }}</p>
@@ -58,6 +60,14 @@
               详情
             </button>
             <button
+              v-if="!s.builtin"
+              class="text-xs text-zinc-600 hover:text-zinc-900 hover:bg-white/60 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
+              @click="onToggle(s)"
+            >
+              {{ s.disabled ? '启用' : '禁用' }}
+            </button>
+            <button
+              v-if="!s.builtin"
               class="text-xs text-[#ff3b30] hover:text-[#ff3b30] hover:bg-red-50 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
               @click="onDelete(s)"
             >
@@ -233,6 +243,20 @@ async function onUpload(e) {
     msg.value = err.message
   } finally {
     uploading.value = false
+  }
+}
+
+async function onToggle(s) {
+  const enabled = !!s.disabled
+  msg.value = ''
+  try {
+    await api.setSkillEnabled(s.name, enabled)
+    msgOk.value = true
+    msg.value = `「${s.name}」已${enabled ? '启用' : '禁用'}`
+    await load()
+  } catch (e) {
+    msgOk.value = false
+    msg.value = e.message
   }
 }
 

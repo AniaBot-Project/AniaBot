@@ -18,8 +18,11 @@ import (
 )
 
 // skill 面板管理接口（实现 adminpanel.SkillSource）。
-// 上传/删除后立即从磁盘热重载 skill 注册表，无需重启；
-// 若配置了 skills 白名单，未列入白名单的 skill 不会加载。
+// 上传/删除/启停后立即从磁盘热重载或更新 skill 注册表，无需重启；
+// 若配置了 skills 白名单，未列入白名单的外置技能不会加载（内置技能始终加载）。
+
+// skillsDisabledConfigKey 保存被禁用的外置 skill 名称（面板开关持久化位置）。
+const skillsDisabledConfigKey = "plugin.ai_chat_bot.skills_disabled"
 
 // 单个 skill 解压后的体积与文件数上限
 const (
@@ -33,12 +36,12 @@ const (
 	skillPreviewMaxBytes = 512 << 10 // 512 KiB
 )
 
-// SkillList 返回当前已加载的 skill 列表、skills 目录与白名单（供 Web 面板展示）。
+// SkillList 返回当前 skill 列表（含内置与已禁用的）、skills 目录与白名单（供 Web 面板展示）。
 func (p *AIChatPlugin) SkillList() ([]plugininfo.SkillInfo, string, []string) {
 	if p.skillManager == nil {
 		return nil, p.skillsDir, p.cfg.Skills
 	}
-	metas := p.skillManager.List()
+	metas := p.skillManager.ListAll()
 	infos := make([]plugininfo.SkillInfo, 0, len(metas))
 	for _, meta := range metas {
 		infos = append(infos, p.buildSkillInfo(meta))
@@ -54,6 +57,8 @@ func (p *AIChatPlugin) buildSkillInfo(meta *llmtool.SkillMeta) plugininfo.SkillI
 		Description: meta.Description,
 	}
 	if skill, ok := p.skillManager.Get(meta.Name); ok {
+		info.Builtin = skill.Builtin
+		info.Disabled = p.skillManager.IsDisabled(meta.Name)
 		info.Location = skillLocation(p.skillsDir, skill.Path)
 		for name := range skill.References {
 			info.Refs = append(info.Refs, name)
@@ -81,6 +86,8 @@ func (p *AIChatPlugin) SkillDetail(name string) (plugininfo.SkillDetail, error) 
 		Description: skill.Meta.Description,
 		Location:    skillLocation(p.skillsDir, skill.Path),
 		Content:     skill.Content,
+		Builtin:     skill.Builtin,
+		Disabled:    p.skillManager.IsDisabled(name),
 	}
 	for rel, content := range skill.References {
 		detail.Files = append(detail.Files, plugininfo.SkillFileInfo{
@@ -129,6 +136,7 @@ func readTextPreview(absPath string, size int64) (string, bool) {
 }
 
 // SkillDelete 按名称删除 skill：从磁盘移除对应目录/文件后热重载注册表。
+// 内置 skill 不允许删除。
 func (p *AIChatPlugin) SkillDelete(name string) error {
 	if p.skillManager == nil {
 		return fmt.Errorf("skill 功能未初始化")
@@ -136,6 +144,9 @@ func (p *AIChatPlugin) SkillDelete(name string) error {
 	skill, ok := p.skillManager.Get(name)
 	if !ok {
 		return fmt.Errorf("skill '%s' 不存在", name)
+	}
+	if skill.Builtin {
+		return fmt.Errorf("内置 skill '%s' 不能删除", name)
 	}
 
 	skillDirAbs, err1 := filepath.Abs(filepath.Dir(skill.Path))
@@ -159,8 +170,48 @@ func (p *AIChatPlugin) SkillDelete(name string) error {
 	if err := p.skillManager.Reload(p.skillsDir, p.cfg.Skills); err != nil {
 		return fmt.Errorf("已删除，但重载 skill 失败: %w", err)
 	}
+	if p.skillManager.ForgetDisabled(name) {
+		p.persistDisabledSkills()
+	}
 	p.Logger.Info("skill 已删除", "skill", name)
 	return nil
+}
+
+// SkillSetEnabled 启用/禁用外置 skill：立即更新注册表（禁用后描述不再进入
+// available_skills，skill_read 也会拒绝），并把禁用列表写入配置中心持久化。
+// 内置 skill 不可禁用；配置中心不可用时仅本次运行内生效。
+func (p *AIChatPlugin) SkillSetEnabled(name string, enabled bool) error {
+	if p.skillManager == nil {
+		return fmt.Errorf("skill 功能未初始化")
+	}
+	if err := p.skillManager.SetEnabled(name, enabled); err != nil {
+		return err
+	}
+	p.cfg.SkillsDisabled = p.skillManager.DisabledNames()
+	action := "启用"
+	if !enabled {
+		action = "禁用"
+	}
+	if p.ConfigEditor == nil {
+		p.Logger.Warn("配置中心不可用，skill 启停状态仅在本次运行内生效", "skill", name, "action", action)
+		return nil
+	}
+	if err := p.ConfigEditor.Set(skillsDisabledConfigKey, p.cfg.SkillsDisabled); err != nil {
+		return fmt.Errorf("已%s skill %s，但写入配置失败（重启后会恢复）：%w", action, name, err)
+	}
+	p.Logger.Info("skill 启停状态已更新", "skill", name, "action", action)
+	return nil
+}
+
+// persistDisabledSkills 把当前禁用列表写回配置中心（删除 skill 后清理残留名称）。
+func (p *AIChatPlugin) persistDisabledSkills() {
+	p.cfg.SkillsDisabled = p.skillManager.DisabledNames()
+	if p.ConfigEditor == nil {
+		return
+	}
+	if err := p.ConfigEditor.Set(skillsDisabledConfigKey, p.cfg.SkillsDisabled); err != nil {
+		p.Logger.Warn("写入 skill 禁用状态失败", "error", err.Error())
+	}
 }
 
 // SkillUpload 从 zip 压缩包内容安装 skill 并热重载（面板入口，行为不变）。
@@ -291,7 +342,7 @@ func (p *AIChatPlugin) SkillInstallFromContent(name, content string) (plugininfo
 // frontmatter name 可能与目录名不同，因此按路径匹配而非名称。
 func (p *AIChatPlugin) skillInfoByDir(dirName string) (plugininfo.SkillInfo, error) {
 	prefix := filepath.ToSlash(dirName) + "/"
-	for _, meta := range p.skillManager.List() {
+	for _, meta := range p.skillManager.ListAll() {
 		skill, ok := p.skillManager.Get(meta.Name)
 		if !ok {
 			continue
@@ -299,6 +350,13 @@ func (p *AIChatPlugin) skillInfoByDir(dirName string) (plugininfo.SkillInfo, err
 		loc := filepath.ToSlash(skillLocation(p.skillsDir, skill.Path))
 		if loc == filepath.ToSlash(dirName)+"/SKILL.md" || strings.HasPrefix(loc, prefix) {
 			return p.buildSkillInfo(meta), nil
+		}
+	}
+	// 目录已落盘但注册表里没有对应条目：可能是白名单排除，或名称与内置技能冲突
+	if data, err := os.ReadFile(filepath.Join(p.skillsDir, dirName, "SKILL.md")); err == nil {
+		name := llmtool.SkillNameFromContent(string(data))
+		if s, ok := p.skillManager.Get(name); ok && s.Builtin {
+			return plugininfo.SkillInfo{}, fmt.Errorf("技能名 %s 与内置技能冲突，未被加载，请修改 frontmatter 的 name 后重新安装", name)
 		}
 	}
 	return plugininfo.SkillInfo{}, fmt.Errorf("skill 已安装但未加载（可能不在 skills 白名单中）")
@@ -357,13 +415,17 @@ func detectSkillRoot(zr *zip.Reader, filename string) (string, string, error) {
 	return "", "", fmt.Errorf("压缩包中未找到 SKILL.md（应位于根目录或单一顶层目录下）")
 }
 
-// sanitizeSkillDirName 校验/清洗 skill 目录名（禁止路径分隔符与 ..）。
+// sanitizeSkillDirName 校验/清洗 skill 目录名（禁止路径分隔符、.. 与隐藏目录）。
 func sanitizeSkillDirName(name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" || name == "." || name == ".." {
 		return ""
 	}
 	if strings.ContainsAny(name, `/\`) {
+		return ""
+	}
+	// 以 . 开头的是保留目录（如 .builtin 内置技能物化目录、上传临时目录）
+	if strings.HasPrefix(name, ".") {
 		return ""
 	}
 	return name

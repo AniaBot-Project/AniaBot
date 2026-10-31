@@ -111,12 +111,12 @@ export function buildMsgLogs(now) {
 
 const QUERIES = [
   { q: '帮我总结一下今天的群聊都聊了什么', tools: [['qq_get_msg_history', '读取群最近 200 条消息'], ['subagent_run', '归纳话题并写成简报']] },
-  { q: 'MCP 的 streamable 和 sse 有什么区别？', tools: [['web_search', '搜索 MCP 传输协议对比']] },
-  { q: '今天有什么科技新闻', tools: [['web_search', '搜索今日科技新闻'], ['web_explore', '阅读其中 3 篇原文']] },
+  { q: 'MCP 的 streamable 和 sse 有什么区别？', tools: [['skill_read', '读取内置 web 技能用法'], ['bash', 'webctl.py search --deepseek "MCP 传输协议"']] },
+  { q: '今天有什么科技新闻', tools: [['bash', 'webctl.py search --deepseek "今日科技新闻"'], ['bash', 'webctl.py fetch --deepseek "https://example.com/news"']] },
   { q: '记一下：周五晚上团建', tools: [['memory_save', '保存到群聊长期记忆']] },
   { q: '看看这张图里报错是什么意思', tools: [['load_images', '加载用户发送的截图']] },
   { q: '帮我建个每天早上 8 点的早报任务', tools: [['clock_create', '创建定时任务「每日早报」']] },
-  { q: 'AniaBot 怎么部署到 docker', tools: [['web_explore', '阅读官方文档部署章节']] },
+  { q: 'AniaBot 怎么部署到 docker', tools: [['bash', 'webctl.py fetch --deepseek "https://docs.aniabot.dev/deploy"']] },
   { q: '写一个快速排序，Go 语言的', tools: [] },
   { q: '群友小张的 QQ 号是多少', tools: [['qq_get_group_member_list', '检索群成员列表']] },
   { q: '现在服务器负载怎么样', tools: [['bash', 'uptime && free -h']] },
@@ -425,9 +425,17 @@ export function buildContacts(kind) {
 
 const SKILLS = [
   {
+    name: 'web', description: '联网搜索与网页抓取（内置 CLI，需启用 bash 工具）',
+    location: '.builtin/web/SKILL.md', builtin: true, refs: [], extras: ['webctl.py'],
+    content: '---\nname: web\ndescription: 联网搜索与网页抓取（内置 CLI，需启用 bash 工具）：查最新资料、核实外部事实、读取网页正文\n---\n\n# 联网搜索与网页抓取\n\n需要最新资讯、外部事实或网页正文时，先读取本技能，再按说明用 bash 执行附带脚本。\n\n## 命令\n\n```bash\npython3 "<webctl.py 的绝对路径>" search --deepseek "查询词" [--count 8] [--content]\npython3 "<webctl.py 的绝对路径>" fetch --deepseek "https://example.com/article" [--offset 8000]\n```\n\n- 需要 DEEPSEEK_API_KEY 环境变量\n- 搜索结果摘要够用就不必抓正文；长文用 --offset 续读\n',
+    files: [
+      { name: 'webctl.py', kind: 'extra', size: 8214, content: '#!/usr/bin/env python3\n"""AniaBot 内置 web 技能 CLI：搜索与抓取（DeepSeek）"""\n' },
+    ],
+  },
+  {
     name: 'daily-news', description: '按主题抓取 RSS 与搜索结果，生成每日新闻早报',
     location: 'daily-news', refs: ['sources.md'], extras: ['render.py'],
-    content: '---\nname: daily-news\ndescription: 按主题抓取 RSS 与搜索结果，生成每日新闻早报\n---\n\n# 每日早报技能\n\n## 步骤\n\n1. 读取 `sources.md` 中的订阅源列表\n2. 调用 web_search 补充当日热点\n3. 挑选 5 条，用 `render.py` 渲染为 Markdown 早报\n4. 发送到目标群聊\n\n## 注意\n\n- 每条新闻附原文链接\n- 早报开头写一句轻松的问候语\n',
+    content: '---\nname: daily-news\ndescription: 按主题抓取 RSS 与搜索结果，生成每日新闻早报\n---\n\n# 每日早报技能\n\n## 步骤\n\n1. 读取 `sources.md` 中的订阅源列表\n2. 使用内置 web 技能搜索补充当日热点\n3. 挑选 5 条，用 `render.py` 渲染为 Markdown 早报\n4. 发送到目标群聊\n\n## 注意\n\n- 每条新闻附原文链接\n- 早报开头写一句轻松的问候语\n',
     files: [
       { name: 'sources.md', kind: 'reference', size: 512, content: '# 订阅源\n\n- https://example.com/feed/tech.xml\n- https://example.com/feed/ai.xml\n' },
       { name: 'render.py', kind: 'extra', size: 1204 },
@@ -449,17 +457,25 @@ const SKILLS = [
   },
 ]
 
-export function buildSkills() {
+export function buildSkills(disabled = new Set()) {
   return {
-    skills: SKILLS.map(({ name, description, location, refs, extras }) => ({ name, description, location, refs, extras })),
+    skills: SKILLS.map(({ name, description, location, refs, extras, builtin }) => ({
+      name, description, location, refs, extras,
+      builtin: !!builtin,
+      disabled: !builtin && disabled.has(name),
+    })),
     dir: './data/skills',
     whitelist: [],
   }
 }
-export function buildSkillDetail(name) {
+export function buildSkillDetail(name, disabled = new Set()) {
   const sk = SKILLS.find((x) => x.name === name)
   if (!sk) return null
-  return { name: sk.name, description: sk.description, location: sk.location, content: sk.content, files: sk.files }
+  return {
+    name: sk.name, description: sk.description, location: sk.location,
+    content: sk.content, files: sk.files,
+    builtin: !!sk.builtin, disabled: !sk.builtin && disabled.has(name),
+  }
 }
 
 //  主机动态指标（hostinfo.go HostSnapshot 形状）

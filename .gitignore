@@ -55,6 +55,9 @@ web/dist-demo/
 # data
 data/
 
+# 内置 skill 运行时物化目录（随二进制发布，启动时自动生成）
+skills/.builtin/
+
 # custom plugin
 # 如果fork仓库保留自己的自定义插件，请把下面项删掉加入git管理
 custom/plugins

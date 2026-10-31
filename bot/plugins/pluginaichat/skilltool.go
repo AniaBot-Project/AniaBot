@@ -33,21 +33,21 @@ type skillToolBase struct {
 
 // newSkillTools 创建 skill 管理工具（skill_list / skill_install / skill_remove），
 // 注册到会话执行器中（主会话与子代理一致），仅在配置开启时被 registerScopedTools 调用。
-// 找技能资源不单独做搜索工具：让 AI 用已有的 webSearch / webExplore 上网搜索
+// 找技能资源不单独做搜索工具：让 AI 用内置 web 技能联网搜索
 // （GitHub API 搜索有频控，通用网页搜索更稳），再把找到的链接交给 skill_install。
 func newSkillTools(p *AIChatPlugin) []llmtool.Tool {
 	base := skillToolBase{plugin: p}
 	return []llmtool.Tool{
 		&skillListTool{
-			BaseTool:      llmtool.MakeBaseTool("skill_list", "列出当前已安装的技能（skill）。当用户提到『技能』『skill』、或你需要确认是否已有某项技能时，先调用本工具；若没有用户需要的技能，可先用 webSearch 在网上搜索技能资源（如 GitHub 上的 skill 仓库、zip 直链），或请用户提供 zip 链接，或用 skill_install 的 content 参数自行编写技能后安装", skillListParams{}),
+			BaseTool:      llmtool.MakeBaseTool("skill_list", "列出当前已安装且启用的技能（skill）。当用户提到『技能』『skill』、或你需要确认是否已有某项技能时，先调用本工具；若没有用户需要的技能，可先 skill_read 读取内置 web 技能并联网搜索技能资源（如 GitHub 上的 skill 仓库、zip 直链），或请用户提供 zip 链接，或用 skill_install 的 content 参数自行编写技能后安装", skillListParams{}),
 			skillToolBase: base,
 		},
 		&skillInstallTool{
-			BaseTool:      llmtool.MakeBaseTool("skill_install", "安装新技能（skill），安装后立即生效、后续对话即可使用。两种方式：1) url：zip 压缩包直链或 GitHub 仓库地址（自动转换为 codeload zip 下载；单个 SKILL.md / .md 文件直链按内容安装）——用户未提供链接时，可先用 webSearch 在网上搜索技能仓库或 zip 直链，再用找到的链接安装；2) content：直接撰写 SKILL.md 全文（需含 --- frontmatter，name/description 必填）创建技能。查看已装技能用 skill_list，卸载用 skill_remove。仅在用户明确要求安装技能时使用", skillInstallParams{}),
+			BaseTool:      llmtool.MakeBaseTool("skill_install", "安装新技能（skill），安装后立即生效、后续对话即可使用。两种方式：1) url：zip 压缩包直链或 GitHub 仓库地址（自动转换为 codeload zip 下载；单个 SKILL.md / .md 文件直链按内容安装）——用户未提供链接时，可先用内置 web 技能搜索技能仓库或 zip 直链，再用找到的链接安装；2) content：直接撰写 SKILL.md 全文（需含 --- frontmatter，name/description 必填）创建技能。内置技能不可覆盖。查看已装技能用 skill_list，卸载用 skill_remove。仅在用户明确要求安装技能时使用", skillInstallParams{}),
 			skillToolBase: base,
 		},
 		&skillRemoveTool{
-			BaseTool:      llmtool.MakeBaseTool("skill_remove", "卸载指定名称的技能（skill），name 用 skill_list 查看。仅在用户明确要求删除技能时使用", skillRemoveParams{}),
+			BaseTool:      llmtool.MakeBaseTool("skill_remove", "卸载指定名称的技能（skill），name 用 skill_list 查看；内置技能不能卸载。仅在用户明确要求删除技能时使用", skillRemoveParams{}),
 			skillToolBase: base,
 		},
 	}
@@ -63,14 +63,26 @@ type skillListTool struct {
 }
 
 func (t *skillListTool) Execute(ctx context.Context, params any, _ llmtool.CallBackFuncs) (string, error) {
-	infos, _, _ := t.plugin.SkillList()
+	all, _, _ := t.plugin.SkillList()
+	infos := make([]plugininfo.SkillInfo, 0, len(all))
+	for _, info := range all {
+		// 被禁用的 skill 描述不进入上下文（面板「技能管理」页可重新启用）
+		if info.Disabled {
+			continue
+		}
+		infos = append(infos, info)
+	}
 	if len(infos) == 0 {
-		return "当前没有已安装的 skill。若用户要求你掌握某项新能力，可先用 webSearch 在网上搜索技能资源（如 GitHub skill 仓库、zip 直链，可用 webExplore 打开链接确认）后用 skill_install 安装，也可由你调用 skill_install 的 content 参数自行编写技能。", nil
+		return "当前没有已启用的 skill。若用户要求你掌握某项新能力，可先 skill_read 内置 web 技能并联网搜索技能资源（如 GitHub skill 仓库、zip 直链）后用 skill_install 安装，也可由你调用 skill_install 的 content 参数自行编写技能。", nil
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "已安装的 skill（共 %d 个）：\n", len(infos))
+	fmt.Fprintf(&sb, "已启用的 skill（共 %d 个）：\n", len(infos))
 	for _, info := range infos {
-		fmt.Fprintf(&sb, "- %s：%s", info.Name, info.Description)
+		fmt.Fprintf(&sb, "- %s", info.Name)
+		if info.Builtin {
+			sb.WriteString("（内置）")
+		}
+		fmt.Fprintf(&sb, "：%s", info.Description)
 		if info.Location != "" {
 			fmt.Fprintf(&sb, "（位置 %s", info.Location)
 			if len(info.Refs) > 0 {
