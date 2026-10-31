@@ -366,12 +366,18 @@ func (n *luckyliliaWebSocketAdapter) GetFriendMsgHistory(userId message.QID, cou
 	return &res.Messages, true
 }
 
-func (n *luckyliliaWebSocketAdapter) GetAIChatacter() (*[]message.AIChatacter, bool) {
-	res, ok := request[message.AIChatacterResp](n, "get_ai_chatacter", struct{}{}, "ai_chatacter")
+// GetAICharacters 获取指定群的 AI 语音角色列表（OneBot v11 AI 语音扩展，
+// 角色按群提供，必须带 group_id）。
+func (n *luckyliliaWebSocketAdapter) GetAICharacters(groupId message.QID) (*[]message.AICharacterGroup, bool) {
+	params := map[string]any{
+		"group_id":  rawLil(groupId),
+		"chat_type": 1,
+	}
+	res, ok := request[[]message.AICharacterGroup](n, "get_ai_characters", params, "ai_characters")
 	if !ok || res == nil {
 		return nil, false
 	}
-	return &res.Characters, true
+	return res, true
 }
 
 func (n *luckyliliaWebSocketAdapter) GetPrivateFileURL(userId message.QID, fileId string) (string, bool) {

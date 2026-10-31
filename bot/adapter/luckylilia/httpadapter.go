@@ -427,12 +427,17 @@ func (n *luckyliliaHttpAdapter) GetFriendMsgHistory(userId message.QID, count in
 	return &resp.Data.Messages, true
 }
 
-func (n *luckyliliaHttpAdapter) GetAIChatacter() (*[]message.AIChatacter, bool) {
-	resp := message.Response[message.AIChatacterResp]{}
-	if !n.postAndCheck(n.baseUrl+"/get_ai_chatacter", nil, &resp) || !checkResponseStatus(&resp) {
+// GetAICharacters 获取指定群的 AI 语音角色列表（角色按群提供，必须带 group_id）。
+func (n *luckyliliaHttpAdapter) GetAICharacters(groupId message.QID) (*[]message.AICharacterGroup, bool) {
+	data := map[string]any{
+		"group_id":  rawLil(groupId),
+		"chat_type": 1,
+	}
+	resp := message.Response[[]message.AICharacterGroup]{}
+	if !n.postAndCheck(n.baseUrl+"/get_ai_characters", data, &resp) || !checkResponseStatus(&resp) {
 		return nil, false
 	}
-	return &resp.Data.Characters, true
+	return &resp.Data, true
 }
 
 func (n *luckyliliaHttpAdapter) GetPrivateFileURL(userId message.QID, fileId string) (string, bool) {

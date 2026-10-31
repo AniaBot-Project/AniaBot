@@ -340,12 +340,18 @@ func (n *napcatWebSocketAdapter) GetFriendMsgHistory(userId message.QID, count i
 	return &res.Messages, true
 }
 
-func (n *napcatWebSocketAdapter) GetAIChatacter() (*[]message.AIChatacter, bool) {
-	res, ok := request[message.AIChatacterResp](n, "get_ai_chatacter", struct{}{}, "ai_chatacter")
+// GetAICharacters 获取指定群的 AI 语音角色列表。NapCat 的 get_ai_characters
+// 必须带 group_id（角色按群提供），chat_type=1 表示群聊，data 是按类别分组的数组。
+func (n *napcatWebSocketAdapter) GetAICharacters(groupId message.QID) (*[]message.AICharacterGroup, bool) {
+	params := map[string]any{
+		"group_id":  rawQQ(groupId),
+		"chat_type": 1,
+	}
+	res, ok := request[[]message.AICharacterGroup](n, "get_ai_characters", params, "ai_characters")
 	if !ok || res == nil {
 		return nil, false
 	}
-	return &res.Characters, true
+	return res, true
 }
 
 func (n *napcatWebSocketAdapter) GetPrivateFileURL(userId message.QID, fileId string) (string, bool) {

@@ -99,8 +99,8 @@ func (q *lilBot) GetGroupList() (*[]message.GroupInfo, bool) {
 	return q.qq.GetGroupList()
 }
 
-func (q *lilBot) GetAIChatacter() (*[]message.AIChatacter, bool) {
-	return q.qq.GetAIChatacter()
+func (q *lilBot) GetAICharacters(groupId message.QID) (*[]message.AICharacterGroup, bool) {
+	return q.qq.GetAICharacters(groupId)
 }
 
 func (q *lilBot) GetPrivateFileURL(userId message.QID, fileId string) (string, bool) {

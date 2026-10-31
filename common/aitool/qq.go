@@ -226,23 +226,55 @@ func (t *qqGroupMemberListTool) Execute(ctx context.Context, params any) (string
 	return strings.TrimRight(sb.String(), "\n"), nil
 }
 
+// firstAICharacterID 取第一个分组里的第一个角色 ID（协议端按类别分组返回）。
+func firstAICharacterID(groups []message.AICharacterGroup) string {
+	for _, g := range groups {
+		if len(g.Characters) > 0 {
+			return g.Characters[0].CharacterID
+		}
+	}
+	return ""
+}
+
+type qqAICharactersParams struct {
+	GroupID string `json:"group_id,omitempty" desc:"目标群号；群聊会话可省略（默认当前群），私聊会话必须填写（AI 语音角色按群提供）"`
+}
+
 type qqAICharactersTool struct{ qqBase }
 
 func (t *qqAICharactersTool) Name() string { return "qq_get_ai_characters" }
 func (t *qqAICharactersTool) Description() string {
-	return "获取协议端可用的 QQ AI 语音角色列表（供 qq_send_ai_voice 的 character 参数选择）"
+	return "获取指定群可用的 QQ AI 语音角色列表（供 qq_send_ai_voice 的 character 参数选择）"
 }
-func (t *qqAICharactersTool) Params() any { return &struct{}{} }
+func (t *qqAICharactersTool) Params() any { return &qqAICharactersParams{} }
 func (t *qqAICharactersTool) Execute(ctx context.Context, params any) (string, error) {
-	chars, ok := t.qq.GetAIChatacter()
-	if !ok || chars == nil {
-		return "", fmt.Errorf("获取 AI 语音角色列表失败（协议端可能不支持 AI 语音）")
+	p, _ := params.(*qqAICharactersParams)
+	var groupParam string
+	if p != nil {
+		groupParam = p.GroupID
 	}
-	list := *chars
+	groupID, err := t.resolveGroup(groupParam)
+	if err != nil {
+		return "", fmt.Errorf("AI 语音角色按群提供：%w", err)
+	}
+	groups, ok := t.qq.GetAICharacters(groupID)
+	if !ok || groups == nil {
+		return "", fmt.Errorf("获取群 %s 的 AI 语音角色列表失败（协议端未返回数据，可能未开启 AI 语音）", groupID)
+	}
+	list := *groups
+	total := 0
+	for _, g := range list {
+		total += len(g.Characters)
+	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("共 %d 个可用角色：\n", len(list)))
-	for _, c := range list {
-		sb.WriteString(fmt.Sprintf("%s %s\n", c.CharacterID, c.CharacterName))
+	sb.WriteString(fmt.Sprintf("群 %s 共 %d 个可用角色：\n", groupID, total))
+	for _, g := range list {
+		for _, c := range g.Characters {
+			sb.WriteString(fmt.Sprintf("%s %s\n", c.CharacterID, c.CharacterName))
+		}
+	}
+	if total == 0 {
+		sb.WriteString("（协议端返回空列表：该群可能未开放 AI 语音）\n")
 	}
 	return strings.TrimRight(sb.String(), "\n"), nil
 }
@@ -276,11 +308,14 @@ func (t *qqSendAIVoiceTool) Execute(ctx context.Context, params any) (string, er
 	}
 	character := strings.TrimSpace(p.Character)
 	if character == "" {
-		chars, ok := t.qq.GetAIChatacter()
-		if !ok || chars == nil || len(*chars) == 0 {
-			return "", fmt.Errorf("未指定 character 且获取可用角色列表失败，请先用 qq_get_ai_characters 查询后显式指定")
+		groups, ok := t.qq.GetAICharacters(groupID)
+		if !ok || groups == nil {
+			return "", fmt.Errorf("未指定 character 且获取群 %s 的可用角色列表失败，请先用 qq_get_ai_characters 查询后显式指定", groupID)
 		}
-		character = (*chars)[0].CharacterID
+		character = firstAICharacterID(*groups)
+		if character == "" {
+			return "", fmt.Errorf("未指定 character 且群 %s 没有可用角色，请先用 qq_get_ai_characters 查询后显式指定", groupID)
+		}
 	}
 	msgID, ok := t.qq.SendGroupAIVoiceMsg(groupID, character, p.Text)
 	if !ok {

@@ -135,8 +135,8 @@ type qqGetMsgItf interface {
 	GetFriendList() (*[]message.Friend, bool)
 	// GetGroupList 获取群聊列表
 	GetGroupList() (*[]message.GroupInfo, bool)
-	// GetAIChatacter 获取AI角色列表
-	GetAIChatacter() (*[]message.AIChatacter, bool)
+	// GetAICharacters 获取指定群的 AI 语音角色列表
+	GetAICharacters(groupId message.QID) (*[]message.AICharacterGroup, bool)
 	// GetPrivateFileURL 获取私聊文件URL
 	GetPrivateFileURL(userId message.QID, fileId string) (string, bool)
 }

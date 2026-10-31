@@ -19,7 +19,8 @@ type fakeQQ struct {
 	friends    []message.Friend
 	userInfo   *message.GroupUserInfo
 	members    []message.GroupUserInfo
-	characters []message.AIChatacter
+	characters []message.AICharacterGroup
+	charGroup  message.QID
 
 	voiceGroup message.QID
 	voiceChar  string
@@ -42,7 +43,10 @@ func (f *fakeQQ) GetGroupUserInfo(groupId, userId message.QID) (*message.GroupUs
 func (f *fakeQQ) GetGroupMemberList(groupId message.QID, noCache bool) (*[]message.GroupUserInfo, bool) {
 	return &f.members, true
 }
-func (f *fakeQQ) GetAIChatacter() (*[]message.AIChatacter, bool) { return &f.characters, true }
+func (f *fakeQQ) GetAICharacters(groupId message.QID) (*[]message.AICharacterGroup, bool) {
+	f.charGroup = groupId
+	return &f.characters, true
+}
 func (f *fakeQQ) SendGroupAIVoiceMsg(groupId message.QID, character, msg string) (message.QID, bool) {
 	f.voiceGroup, f.voiceChar, f.voiceText = groupId, character, msg
 	return "qq:10001", f.voiceOK
@@ -209,8 +213,11 @@ func TestMemberListTruncated(t *testing.T) {
 
 func TestSendAIVoiceAutoCharacter(t *testing.T) {
 	fake := &fakeQQ{
-		characters: []message.AIChatacter{{CharacterID: "ch-1", CharacterName: "小雨"}},
-		voiceOK:    true,
+		characters: []message.AICharacterGroup{{
+			Type:       "official",
+			Characters: []message.AICharacter{{CharacterID: "ch-1", CharacterName: "小雨"}},
+		}},
+		voiceOK: true,
 	}
 	tool := &qqSendAIVoiceTool{qqBase{qq: fake, target: "qq:888", isGroup: true}}
 	out, err := tool.Execute(context.Background(), &qqSendAIVoiceParams{Text: "你好呀"})
@@ -229,6 +236,38 @@ func TestSendAIVoiceAutoCharacter(t *testing.T) {
 	tool2 := &qqSendAIVoiceTool{qqBase{qq: fake2, target: "qq:888", isGroup: true}}
 	if _, err := tool2.Execute(context.Background(), &qqSendAIVoiceParams{Text: "hi"}); err == nil {
 		t.Fatal("角色列表不可用且未指定 character 应报错")
+	}
+}
+
+// TestAICharactersPerGroup 角色列表按群查询：群聊省略 group_id 时用当前群，
+// 私聊必须显式指定；返回的分组列表展平成「ID 名称」行。
+func TestAICharactersPerGroup(t *testing.T) {
+	fake := &fakeQQ{characters: []message.AICharacterGroup{
+		{Type: "official", Characters: []message.AICharacter{{CharacterID: "ch-1", CharacterName: "小雨"}}},
+		{Type: "clone", Characters: []message.AICharacter{{CharacterID: "ch-2", CharacterName: "小柔"}}},
+	}}
+	tool := &qqAICharactersTool{qqBase{qq: fake, target: "qq:888", isGroup: true}}
+	out, err := tool.Execute(context.Background(), &qqAICharactersParams{})
+	if err != nil {
+		t.Fatalf("执行失败: %v", err)
+	}
+	if fake.charGroup != "qq:888" {
+		t.Errorf("群聊会话应默认查询当前群，got %q", fake.charGroup)
+	}
+	for _, want := range []string{"共 2 个可用角色", "ch-1 小雨", "ch-2 小柔"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("输出缺少 %q:\n%s", want, out)
+		}
+	}
+
+	// 私聊未指定群号 → 直接报错，不调协议端
+	fake2 := &fakeQQ{}
+	tool2 := &qqAICharactersTool{qqBase{qq: fake2, target: "qq:123", isGroup: false}}
+	if _, err := tool2.Execute(context.Background(), &qqAICharactersParams{}); err == nil {
+		t.Fatal("私聊未指定 group_id 应报错")
+	}
+	if fake2.charGroup != "" {
+		t.Errorf("参数校验失败时不应调用协议端，got %q", fake2.charGroup)
 	}
 }
 

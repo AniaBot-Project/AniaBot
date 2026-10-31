@@ -58,8 +58,8 @@ type QQExt interface {
 	GetGroupMemberList(groupId message.QID, noCache bool) (*[]message.GroupUserInfo, bool)
 	// GetForwardMsg 获取转发消息
 	GetForwardMsg(msgId message.QID) (msgs *[]message.Message, success bool)
-	// GetAIChatacter 获取AI聊天角色
-	GetAIChatacter() (*[]message.AIChatacter, bool)
+	// GetAICharacters 获取指定群的 AI 语音角色列表（角色按群提供，必须传群号）
+	GetAICharacters(groupId message.QID) (*[]message.AICharacterGroup, bool)
 	// GetPrivateFileURL 获取私聊文件URL
 	GetPrivateFileURL(userId message.QID, fileId string) (string, bool)
 }

@@ -76,7 +76,7 @@ func (p *MyPlugin) OnGroupMsg(ctx context.Context, b bot.Bot, cmd command.Comman
 ```go
 type QQ interface {
     // —— 发送 ——
-    // SendGroupAIVoiceMsg 发送群聊 AI 语音（character 为角色 ID，可用 GetAIChatacter 查询）
+    // SendGroupAIVoiceMsg 发送群聊 AI 语音（character 为角色 ID，可用 GetAICharacters 查询）
     SendGroupAIVoiceMsg(groupId message.QID, character, msg string) (msgId message.QID, success bool)
     // SendPokeMsg 戳一戳。groupId 传 nil 表示私聊戳一戳
     SendPokeMsg(userId message.QID, groupId *message.QID) (success bool)
@@ -100,8 +100,8 @@ type QQ interface {
     GetFriendList() (*[]message.Friend, bool)
     // GetGroupList 获取群聊列表
     GetGroupList() (*[]message.GroupInfo, bool)
-    // GetAIChatacter 获取可用的 AI 语音角色列表
-    GetAIChatacter() (*[]message.AIChatacter, bool)
+    // GetAICharacters 获取指定群可用的 AI 语音角色列表（角色按群提供）
+    GetAICharacters(groupId message.QID) (*[]message.AICharacterGroup, bool)
     // GetPrivateFileURL 获取私聊文件的下载地址
     GetPrivateFileURL(userId message.QID, fileId string) (string, bool)
 
