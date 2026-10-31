@@ -112,14 +112,17 @@
             <span class="ml-auto text-xs text-slate-400 font-mono whitespace-nowrap">{{ fmtTime(log.time) }}</span>
           </div>
           <p class="mt-2 text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed line-clamp-3">{{ log.query }}</p>
-          <div class="mt-2 flex items-center gap-3 text-[11px] text-slate-400 font-mono flex-wrap">
+          <div class="mt-2 flex items-center gap-x-3 gap-y-1 text-[11px] text-slate-400 font-mono flex-wrap">
             <span>{{ log.status === 'running' ? '已用时' : '用时' }} {{ fmtDuration(elapsedMs(log)) }}</span>
             <span v-if="log.iterations">LLM {{ log.iterations }} 轮</span>
             <template v-if="log.total_tokens">
-              <span>tokens 总计 {{ log.total_tokens }}</span>
-              <span>输入 {{ log.prompt_tokens }}</span>
-              <span>输出 {{ log.completion_tokens }}</span>
-              <span v-if="log.cached_tokens">缓存命中 {{ log.cached_tokens }}</span>
+              <span>tokens 总计 <span class="tokval">{{ fmtInt(log.total_tokens) }}</span></span>
+              <span>输入 <span class="tokval">{{ fmtInt(log.prompt_tokens) }}</span></span>
+              <span>输出 <span class="tokval">{{ fmtInt(log.completion_tokens) }}</span></span>
+              <span v-if="log.cached_tokens" :title="cacheTip(log)">
+                缓存命中 <span class="tokval">{{ fmtInt(log.cached_tokens) }}</span>
+                <template v-if="cacheRate(log) > 0"> · 命中率 <span class="ratehit">{{ cachePct(log) }}</span></template>
+              </span>
             </template>
             <span v-if="log.senders?.length">来自 {{ log.senders.join(', ') }}</span>
             <span class="ml-auto text-zinc-400">详情 ⤢</span>
@@ -164,14 +167,17 @@
         <!-- 弹窗内容（可滚动） -->
         <div class="px-5 py-4 space-y-4 overflow-y-auto">
           <!-- 概要指标 -->
-          <div class="flex items-center gap-3 text-[11px] text-slate-400 font-mono flex-wrap">
+          <div class="flex items-center gap-x-3 gap-y-1 text-[11px] text-slate-400 font-mono flex-wrap">
             <span>{{ detail.status === 'running' ? '已用时' : '用时' }} {{ fmtDuration(elapsedMs(detail)) }}</span>
             <span v-if="detail.iterations">LLM {{ detail.iterations }} 轮</span>
             <template v-if="detail.total_tokens">
-              <span>tokens 总计 {{ detail.total_tokens }}</span>
-              <span>输入 {{ detail.prompt_tokens }}</span>
-              <span>输出 {{ detail.completion_tokens }}</span>
-              <span v-if="detail.cached_tokens">缓存命中 {{ detail.cached_tokens }}</span>
+              <span>tokens 总计 <span class="tokval">{{ fmtInt(detail.total_tokens) }}</span></span>
+              <span>输入 <span class="tokval">{{ fmtInt(detail.prompt_tokens) }}</span></span>
+              <span>输出 <span class="tokval">{{ fmtInt(detail.completion_tokens) }}</span></span>
+              <span v-if="detail.cached_tokens" :title="cacheTip(detail)">
+                缓存命中 <span class="tokval">{{ fmtInt(detail.cached_tokens) }}</span>
+                <template v-if="cacheRate(detail) > 0"> · 命中率 <span class="ratehit">{{ cachePct(detail) }}</span></template>
+              </span>
             </template>
             <span v-if="detail.senders?.length">来自 {{ detail.senders.join(', ') }}</span>
           </div>
@@ -394,6 +400,28 @@ function fmtDuration(ms) {
   return `${(ms / 1000).toFixed(1)}s`
 }
 
+// token 数量级很大，加千分位后更易扫读
+function fmtInt(n) {
+  const v = Math.round(Number(n) || 0)
+  return v.toLocaleString('en-US')
+}
+
+// 缓存命中率 = 命中 token / 输入 token（与「Token 统计」页口径一致：cached / prompt）
+function cacheRate(log) {
+  const prompt = Number(log?.prompt_tokens) || 0
+  const cached = Number(log?.cached_tokens) || 0
+  if (prompt <= 0 || cached <= 0) return 0
+  return Math.min(1, cached / prompt)
+}
+
+function cachePct(log) {
+  return `${(cacheRate(log) * 100).toFixed(1)}%`
+}
+
+function cacheTip(log) {
+  return `缓存命中 ${fmtInt(log?.cached_tokens)} / 输入 ${fmtInt(log?.prompt_tokens)}`
+}
+
 // elapsedMs 条目耗时：running 条目按开始时间实时计算（随 now 每秒跳动），
 // 已完成条目用落盘的 duration_ms
 function elapsedMs(log) {
@@ -492,3 +520,16 @@ onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
 })
 </script>
+
+<style scoped>
+/* token 数值比标签稍深一档，配合千分位更易扫读 */
+.tokval {
+  color: rgb(100 116 139);
+  font-weight: 500;
+}
+/* 缓存命中率：系统绿加深版，小字号下也有足够对比度 */
+.ratehit {
+  color: #248a3d;
+  font-weight: 500;
+}
+</style>

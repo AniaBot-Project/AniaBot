@@ -210,14 +210,17 @@
             <span class="ml-auto text-xs text-slate-400 font-mono whitespace-nowrap">{{ fmtTime(log.trigger_time) }}</span>
           </div>
           <p class="mt-2 text-sm text-slate-700 font-medium truncate">{{ log.task_title || '(无标题)' }}</p>
-          <div class="mt-2 flex items-center gap-3 text-[11px] text-slate-400 font-mono flex-wrap">
+          <div class="mt-2 flex items-center gap-x-3 gap-y-1 text-[11px] text-slate-400 font-mono flex-wrap">
             <span v-if="log.status !== 'running'">用时 {{ fmtDuration(log.duration_ms) }}</span>
             <span v-if="log.iterations">LLM {{ log.iterations }} 轮</span>
             <template v-if="log.total_tokens">
-              <span>tokens 总计 {{ log.total_tokens }}</span>
-              <span>输入 {{ log.prompt_tokens }}</span>
-              <span>输出 {{ log.completion_tokens }}</span>
-              <span v-if="log.cached_tokens">缓存命中 {{ log.cached_tokens }}</span>
+              <span>tokens 总计 <span class="tokval">{{ fmtInt(log.total_tokens) }}</span></span>
+              <span>输入 <span class="tokval">{{ fmtInt(log.prompt_tokens) }}</span></span>
+              <span>输出 <span class="tokval">{{ fmtInt(log.completion_tokens) }}</span></span>
+              <span v-if="log.cached_tokens" :title="cacheTip(log)">
+                缓存命中 <span class="tokval">{{ fmtInt(log.cached_tokens) }}</span>
+                <template v-if="cacheRate(log) > 0"> · 命中率 <span class="ratehit">{{ cachePct(log) }}</span></template>
+              </span>
             </template>
             <span v-if="log.error" class="text-[#ff3b30] truncate max-w-80">{{ log.error }}</span>
             <span class="ml-auto text-zinc-400">详情 ⤢</span>
@@ -272,10 +275,7 @@
             <dd class="text-zinc-700 font-mono">{{ detail.iterations || '—' }}</dd>
             <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">Token 用量</dt>
             <dd class="text-zinc-700 font-mono">
-              {{ detail.total_tokens
-                ? `总计 ${detail.total_tokens} · 输入 ${detail.prompt_tokens} · 输出 ${detail.completion_tokens}` +
-                  (detail.cached_tokens ? ` · 缓存命中 ${detail.cached_tokens}` : '')
-                : '—' }}
+              {{ detail.total_tokens ? tokenUsageText(detail) : '—' }}
             </dd>
           </dl>
 
@@ -658,6 +658,37 @@ function fmtDuration(ms) {
   return `${(ms / 1000).toFixed(1)}s`
 }
 
+// token 数量级很大，加千分位后更易扫读
+function fmtInt(n) {
+  const v = Math.round(Number(n) || 0)
+  return v.toLocaleString('en-US')
+}
+
+// 缓存命中率 = 命中 token / 输入 token（与「Token 统计」页口径一致：cached / prompt）
+function cacheRate(log) {
+  const prompt = Number(log?.prompt_tokens) || 0
+  const cached = Number(log?.cached_tokens) || 0
+  if (prompt <= 0 || cached <= 0) return 0
+  return Math.min(1, cached / prompt)
+}
+
+function cachePct(log) {
+  return `${(cacheRate(log) * 100).toFixed(1)}%`
+}
+
+function cacheTip(log) {
+  return `缓存命中 ${fmtInt(log?.cached_tokens)} / 输入 ${fmtInt(log?.prompt_tokens)}`
+}
+
+// 详情弹窗里的单行 token 摘要
+function tokenUsageText(e) {
+  const parts = [`总计 ${fmtInt(e.total_tokens)}`, `输入 ${fmtInt(e.prompt_tokens)}`, `输出 ${fmtInt(e.completion_tokens)}`]
+  if (e.cached_tokens) {
+    parts.push(`缓存命中 ${fmtInt(e.cached_tokens)}` + (cacheRate(e) > 0 ? `（命中率 ${cachePct(e)}）` : ''))
+  }
+  return parts.join(' · ')
+}
+
 // 操作人标识人性化：ai / panel 是固定标识，其余为用户 ID 原样展示
 function fmtActor(s) {
   if (!s) return '—'
@@ -785,5 +816,15 @@ onUnmounted(() => {
 .form-input:disabled {
   background: rgb(244 244 245);
   color: rgb(161 161 170);
+}
+/* token 数值比标签稍深一档，配合千分位更易扫读 */
+.tokval {
+  color: rgb(100 116 139);
+  font-weight: 500;
+}
+/* 缓存命中率：系统绿加深版，小字号下也有足够对比度 */
+.ratehit {
+  color: #248a3d;
+  font-weight: 500;
 }
 </style>
