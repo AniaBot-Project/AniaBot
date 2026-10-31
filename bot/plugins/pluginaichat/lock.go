@@ -258,6 +258,11 @@ func (p *AIChatPlugin) bridgeRunContext(ctx context.Context) (context.Context, t
 	detachParent := sync.OnceFunc(func() { stopParentWatch() })
 	cancelRun := func() {
 		detachParent()
+		// 必须先显式终止运行上下文：base 的 AfterFunc 是被摘掉的对象，先
+		// stopBridge 再 cancelBase 会让 terminate 永不执行，Done() 永不关闭——
+		// /stop 便只剩一句「用户停止AI响应」，在跑的 AI 请求照旧跑到自身预算
+		// 到期（面板一直显示执行中）。terminate 幂等，bridge 已触发时无副作用。
+		runCtx.terminate(context.Canceled)
 		stopBridge()
 		cancelBase()
 	}

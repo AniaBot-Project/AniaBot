@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jeanhua/AniaBot/bot/component/aichat"
 	"github.com/jeanhua/AniaBot/common/model/message"
+	"github.com/jeanhua/AniaBot/common/plugin"
 )
 
 // denyExistLockFake 可注入失败的锁存储：验证续期失败/令牌被换的锁丢失自检。
@@ -550,6 +552,120 @@ func TestSweepPendingSessionsNoBot(t *testing.T) {
 
 	if !p.hasPending(sessionKey(id, true)) {
 		t.Fatal("拿不到平台外观时不应消费队列")
+	}
+}
+
+// TestCancelRunCancelsRunContext cancelRun 是 /stop、锁丢失与收尾的统一取消入口：
+// 它必须让运行上下文（以及由它派生的批上下文）立即进入取消态，否则 /stop 只回
+// 一句「用户停止AI响应」，在跑的 AI 请求照旧跑完（面板上一直显示执行中）。
+func TestCancelRunCancelsRunContext(t *testing.T) {
+	p := &AIChatPlugin{msgEventTimeout: 5 * time.Minute}
+	cases := map[string]func() (context.Context, context.CancelFunc){
+		"父无 deadline": func() (context.Context, context.CancelFunc) {
+			return context.WithCancel(context.Background())
+		},
+		"父有 deadline": func() (context.Context, context.CancelFunc) {
+			return context.WithTimeout(context.Background(), time.Minute)
+		},
+	}
+	for name, newParent := range cases {
+		t.Run(name, func(t *testing.T) {
+			parent, cancelParent := newParent()
+			defer cancelParent()
+			runCtx, _, cancelRun := p.bridgeRunContext(parent)
+			batchCtx, cancelBatch := batchContext(runCtx, time.Minute)
+			defer cancelBatch()
+
+			cancelRun() // 等价于 /stop 经 activeRequest.cancel 取消
+
+			select {
+			case <-runCtx.Done():
+			case <-time.After(time.Second):
+				t.Fatal("cancelRun 后运行上下文未取消：/stop 无法中止在跑的 AI 请求")
+			}
+			if runCtx.Err() != context.Canceled {
+				t.Fatalf("取消原因应为 context.Canceled, got %v", runCtx.Err())
+			}
+			select {
+			case <-batchCtx.Done():
+			case <-time.After(time.Second):
+				t.Fatal("运行上下文取消后批上下文未随之取消")
+			}
+		})
+	}
+}
+
+// TestStopRequestAbortsInFlightChat /stop 必须真正中止在跑的请求，而不是只回一句
+// 提示：停止后 processChatBatch 立即返回并告知用户「AI 响应已被停止」，不再等
+// 该批自身的预算到期（旧实现在跑到取消时 Done 永不关闭，请求照旧跑完）。
+func TestStopRequestAbortsInFlightChat(t *testing.T) {
+	reqStarted := make(chan struct{})
+	release := make(chan struct{})
+	var startOnce sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startOnce.Do(func() { close(reqStarted) })
+		// 挂起不响应，模拟模型正在生成；请求被 /stop 中止时 ctx 结束，否则由
+		// 测试收尾释放（避免 httptest.Server.Close 卡在活跃连接上）
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	p := &AIChatPlugin{
+		Meta: plugin.Meta{Name: "AI对话插件"},
+		cfg:  aiChatConfig{BaseURL: srv.URL, APIKey: "k", Model: "m", MaxContextTokens: 128000},
+	}
+	p.Logger = testLogger()
+	p.msgEventTimeout = 30 * time.Second // 远大于断言窗口：能返回只可能是 /stop 生效
+	p.rateCh = make(chan struct{}, 2)
+	p.lockStorage = newLockFake()
+
+	chat, err := aichat.NewChatBot(srv.URL, "k", "m", "系统提示", 128000, nil, nil)
+	if err != nil {
+		t.Fatalf("NewChatBot 失败: %v", err)
+	}
+
+	rb := &recordBot{}
+	id := message.FromUint64(3001)
+	runCtx, _, cancelRun := p.bridgeRunContext(context.Background())
+	defer cancelRun()
+	p.setActiveContext(id, true, &activeRequest{cancel: cancelRun, requester: id})
+
+	done := make(chan bool, 1)
+	go func() {
+		done <- p.processChatBatch(runCtx, rb, id, true, chat, []message.Message{testGroupMsg(3001, "在吗")})
+	}()
+
+	select {
+	case <-reqStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("请求未发出")
+	}
+	if stopped, denied := p.stopRequest(id, true, id, false); !stopped || denied != "" {
+		t.Fatalf("应能停止本人请求: stopped=%v denied=%q", stopped, denied)
+	}
+
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("取消后 processChatBatch 应返回 false")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("/stop 后请求未中止（仍在等待 LLM 响应）")
+	}
+
+	notified := false
+	for _, s := range rb.sent() {
+		if strings.Contains(s, "AI 响应已被停止") {
+			notified = true
+			break
+		}
+	}
+	if !notified {
+		t.Fatalf("停止后应告知用户, got %v", rb.sent())
 	}
 }
 
