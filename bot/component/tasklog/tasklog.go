@@ -53,6 +53,20 @@ type ToolCallRecord struct {
 	Error      string `json:"error,omitempty"`
 }
 
+// StatRow 一条日志的统计字段（不含完整 payload 与工具明细），供 Token 统计聚合。
+// SQL 后端从冗余统计列读取，避免为了统计反复解析大体积 payload。
+type StatRow struct {
+	Time             time.Time
+	TargetType       string
+	TargetID         string
+	Status           Status
+	Iterations       int
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	CachedTokens     int
+}
+
 // Entry 一条执行日志
 type Entry struct {
 	ID               string           `json:"id"` // 日志 ID（自增序号的 base36）
@@ -100,6 +114,8 @@ type backend interface {
 	overwrite(seq uint64, e Entry)
 	// clear 清除满足条件的日志（零值条件清除全部），返回删除条数。
 	clear(f Filter) int
+	// stats 返回满足条件的轻量统计行（不含完整 payload），供 Token 统计聚合。
+	stats(f Filter) []StatRow
 	// recent 返回最近 limit 条日志（新在前）；limit<=0 时返回全部。
 	recent(limit int) []Entry
 	// query 按条件过滤日志（新在前），beforeSeq>0 时仅返回序号更小的记录，
@@ -140,7 +156,13 @@ func New(store storage.PersistentStorage, logger *slog.Logger) *Logger {
 		l.backend = disabledBackend{}
 		return l
 	}
-	l.backend = newSQLBackend(db, l.logger)
+	// Token 统计依赖冗余统计列，旧库按需补列并回填一次
+	hasStats, statsAdded := ensureStatsColumns(context.Background(), db, dialect, l.logger)
+	be := newSQLBackend(db, l.logger, hasStats, dialect)
+	if statsAdded {
+		be.backfillStats()
+	}
+	l.backend = be
 	l.seq = l.backend.maxSeq()
 	return l
 }
@@ -153,6 +175,7 @@ func (disabledBackend) insert(uint64, Entry)                 {}
 func (disabledBackend) load(uint64) (Entry, bool)            { return Entry{}, false }
 func (disabledBackend) overwrite(uint64, Entry)              {}
 func (disabledBackend) clear(Filter) int                     { return 0 }
+func (disabledBackend) stats(Filter) []StatRow               { return nil }
 func (disabledBackend) recent(int) []Entry                   { return nil }
 func (disabledBackend) query(Filter, uint64, int) []Entry    { return nil }
 func (disabledBackend) markRunningInterrupted(time.Time) int { return 0 }
@@ -289,6 +312,15 @@ func (l *Logger) Clear(f Filter) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.backend.clear(f)
+}
+
+// Stats 返回满足条件的轻量统计行（按时间升序，不含完整 payload），
+// 供 Token 统计按全部留存日志聚合。f.Before/Limit 不参与统计。
+func (l *Logger) Stats(f Filter) []StatRow {
+	f.Before, f.Limit = "", 0
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.backend.stats(f)
 }
 
 // parseBeforeSeq 把分页游标（日志 ID，序号的 base36）解析为序号；非法时为 0（不生效）。

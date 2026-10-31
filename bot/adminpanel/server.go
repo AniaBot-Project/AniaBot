@@ -72,6 +72,8 @@ type ContactSource struct {
 // 执行日志，并支持导出与清除（当前由 AI 对话插件的 clock 功能实现）。
 type TaskLogSource interface {
 	TaskLogQuery(f tasklog.Filter) []tasklog.Entry
+	// TaskLogStats 返回轻量统计行（全量留存记录），供 Token 统计聚合
+	TaskLogStats(f tasklog.Filter) []tasklog.StatRow
 	// TaskLogClear 清除满足条件的执行日志（零值条件清除全部），返回删除条数
 	TaskLogClear(f tasklog.Filter) int
 }
@@ -155,6 +157,8 @@ type TeamSource interface {
 // （当前由 AI 对话插件实现）。
 type QueryLogSource interface {
 	QueryLogRecent(f querylog.Filter) []querylog.Entry
+	// QueryLogStats 返回轻量统计行（全量留存记录），供 Token 统计聚合
+	QueryLogStats(f querylog.Filter) []querylog.StatRow
 	// QueryLogClear 清除满足条件的 Query 日志（零值条件清除全部），返回删除条数
 	QueryLogClear(f querylog.Filter) int
 }
@@ -187,6 +191,7 @@ type Options struct {
 	AdapterDetail   func() string                                      // 适配器状态详情（最近错误/重试次数，可为 nil）
 	AdapterStatuses func() []AdapterStatus                             // 各平台适配器状态列表（可为 nil）
 	TaskLogs        func(f tasklog.Filter) []tasklog.Entry             // AI 定时任务执行日志（可为 nil）
+	TaskLogsStats   func(f tasklog.Filter) []tasklog.StatRow           // 定时任务日志的轻量统计行（可为 nil）
 	TaskLogsClear   func(f tasklog.Filter) int                         // 清除定时任务执行日志（可为 nil）
 	Clocks          ClockTaskSource                                    // AI 定时任务列表与启停（可为 nil）
 	MsgLogs         func(limit int, beforeID uint64) []msglog.Entry    // 消息日志（群/好友/通知，可为 nil）
@@ -197,6 +202,7 @@ type Options struct {
 	Quota           QuotaSource                                        // 每日 Token 配额管理（可为 nil）
 	Marketplace     *marketplace.Service                               // 插件市场服务（可为 nil）
 	QueryLogs       func(f querylog.Filter) []querylog.Entry           // AI Query 日志（可为 nil）
+	QueryLogsStats  func(f querylog.Filter) []querylog.StatRow         // Query 日志的轻量统计行（可为 nil）
 	QueryLogsClear  func(f querylog.Filter) int                        // 清除 AI Query 日志（可为 nil）
 	ConsoleLogs     func(limit int, beforeID uint64) []consollog.Entry // 控制台日志（slog + log 输出，可为 nil）
 	QRLogins        []QRLoginChannel                                   // 支持扫码登录的平台适配器（如微信；可为 nil）

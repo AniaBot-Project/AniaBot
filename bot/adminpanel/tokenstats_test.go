@@ -214,3 +214,61 @@ func TestTokenStatsDetailProactiveSource(t *testing.T) {
 		t.Fatalf("daily 末尾 = %+v", last)
 	}
 }
+
+// TestTokenStatsNoCap 全部留存统计不再截取最近 500+500 条：
+// 600 条 Query + 600 条任务日志应全部计入（1200 runs）。
+func TestTokenStatsNoCap(t *testing.T) {
+	now := time.Now()
+	queryRows := make([]querylog.StatRow, 600)
+	for i := range queryRows {
+		queryRows[i] = querylog.StatRow{
+			Time: now, ChatType: "group", TargetID: "1", Status: querylog.StatusSuccess,
+			Iterations: 1, PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15,
+		}
+	}
+	taskRows := make([]tasklog.StatRow, 600)
+	for i := range taskRows {
+		taskRows[i] = tasklog.StatRow{
+			Time: now, TargetType: "group", TargetID: "1", Status: tasklog.StatusSuccess,
+			Iterations: 1, PromptTokens: 4, CompletionTokens: 2, TotalTokens: 6,
+		}
+	}
+	s := &Server{opt: Options{
+		QueryLogsStats: func(querylog.Filter) []querylog.StatRow { return queryRows },
+		TaskLogsStats:  func(tasklog.Filter) []tasklog.StatRow { return taskRows },
+	}}
+
+	// 详细统计 range=all
+	rec := httptest.NewRecorder()
+	s.handleTokenStatsDetail(rec, httptest.NewRequest("GET", "/api/tokenstats/detail?range=all", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Summary struct {
+			Requests    int `json:"requests"`
+			TotalTokens int `json:"total_tokens"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if got.Summary.Requests != 1200 || got.Summary.TotalTokens != 12600 {
+		t.Fatalf("全部留存统计不应被截断: %+v", got.Summary)
+	}
+
+	// 概览统计（handleTokenStats）同样覆盖全部记录
+	rec = httptest.NewRecorder()
+	s.handleTokenStats(rec, httptest.NewRequest("GET", "/api/tokenstats", nil))
+	var overview struct {
+		Summary struct {
+			Requests int `json:"requests"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &overview); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if overview.Summary.Requests != 1200 {
+		t.Fatalf("概览统计不应被截断: %+v", overview.Summary)
+	}
+}

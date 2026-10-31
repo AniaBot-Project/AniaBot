@@ -282,3 +282,76 @@ func TestSQLBackendClear(t *testing.T) {
 		t.Fatal("清空后应可继续写入")
 	}
 }
+
+// TestSQLBackendStats 统计行从冗余统计列读取，覆盖全部记录并支持筛选。
+func TestSQLBackendStats(t *testing.T) {
+	l, _ := newSQLLogger(t)
+	base := time.Now()
+	e1 := l.Record(Entry{Time: base.Add(-time.Hour), ChatType: "group", TargetID: "1"})
+	l.Update(e1.ID, func(e *Entry) {
+		e.Status = StatusSuccess
+		e.Iterations = 3
+		e.PromptTokens, e.CompletionTokens, e.TotalTokens, e.CachedTokens = 100, 20, 120, 40
+	})
+	l.Record(Entry{Time: base, Kind: KindProactive, ChatType: "friend", TargetID: "2",
+		Status: StatusSkipped, Iterations: 1, TotalTokens: 50})
+
+	rows := l.Stats(Filter{})
+	if len(rows) != 2 {
+		t.Fatalf("应返回全部 2 条统计行, got %d", len(rows))
+	}
+	if rows[0].TargetID != "1" || rows[0].TotalTokens != 120 || rows[0].Iterations != 3 || rows[0].Status != StatusSuccess {
+		t.Fatalf("统计字段异常: %+v", rows[0])
+	}
+	if rows[1].Kind != KindProactive || rows[1].TotalTokens != 50 {
+		t.Fatalf("统计字段异常: %+v", rows[1])
+	}
+
+	// 时间窗口与来源筛选
+	if got := l.Stats(Filter{Kind: KindProactive}); len(got) != 1 || got[0].TargetID != "2" {
+		t.Fatalf("按 kind 筛选异常: %+v", got)
+	}
+	if got := l.Stats(Filter{Start: base.Add(-30 * time.Minute)}); len(got) != 1 || got[0].TargetID != "2" {
+		t.Fatalf("按时间筛选异常: %+v", got)
+	}
+	// 清除后统计同步为空
+	l.Clear(Filter{})
+	if got := l.Stats(Filter{}); len(got) != 0 {
+		t.Fatalf("清除后统计应为空: %+v", got)
+	}
+}
+
+// TestSQLBackendStatsColumnsBackfill 旧库缺少统计列时自动补列，并从 payload 回填。
+func TestSQLBackendStatsColumnsBackfill(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { db.Close() })
+
+	// 升级前的表结构（没有统计列）
+	if _, err := db.Exec(`CREATE TABLE ania_query_log (seq INTEGER NOT NULL PRIMARY KEY, kind TEXT NOT NULL DEFAULT '', chat_type TEXT NOT NULL, target_id TEXT NOT NULL, senders TEXT NOT NULL, status TEXT NOT NULL, query_text TEXT NOT NULL, created_at INTEGER NOT NULL, payload TEXT NOT NULL)`); err != nil {
+		t.Fatalf("建旧表失败: %v", err)
+	}
+	old := Entry{ID: "1", Time: time.Now(), ChatType: "group", TargetID: "1", Query: "旧记录",
+		Status: StatusSuccess, Iterations: 2, PromptTokens: 300, CompletionTokens: 30, TotalTokens: 330, CachedTokens: 100}
+	payload, _ := json.Marshal(old)
+	if _, err := db.Exec(`INSERT INTO ania_query_log (seq, kind, chat_type, target_id, senders, status, query_text, created_at, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		1, old.Kind, old.ChatType, old.TargetID, ",", string(old.Status), old.Query, old.Time.Unix(), string(payload)); err != nil {
+		t.Fatalf("写入旧记录失败: %v", err)
+	}
+
+	l := New(&sqlFakeStore{fakeStore: newFakeStore(), db: db}, nil)
+	rows := l.Stats(Filter{})
+	if len(rows) != 1 || rows[0].TotalTokens != 330 || rows[0].Iterations != 2 || rows[0].CachedTokens != 100 {
+		t.Fatalf("旧日志统计列回填异常: %+v", rows)
+	}
+
+	// 补列后新记录正常写入统计列
+	l.Record(Entry{ChatType: "friend", TargetID: "2", Status: StatusSuccess, TotalTokens: 20})
+	rows = l.Stats(Filter{})
+	if len(rows) != 2 || rows[1].TotalTokens != 20 {
+		t.Fatalf("补列后新记录统计异常: %+v", rows)
+	}
+}

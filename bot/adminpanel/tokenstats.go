@@ -44,9 +44,50 @@ type tokenDayStat struct {
 // tokenStatsDailyDays daily 序列覆盖的天数（含今天）
 const tokenStatsDailyDays = 14
 
+// queryStatRows 返回 Query 日志的轻量统计行：优先使用插件的统计列查询
+// （不解析完整 payload），插件未提供统计能力时回退为读取完整记录。
+func (s *Server) queryStatRows(f querylog.Filter) []querylog.StatRow {
+	if s.opt.QueryLogsStats != nil {
+		return s.opt.QueryLogsStats(f)
+	}
+	if s.opt.QueryLogs == nil {
+		return nil
+	}
+	entries := s.opt.QueryLogs(f)
+	rows := make([]querylog.StatRow, 0, len(entries))
+	for _, e := range entries {
+		rows = append(rows, querylog.StatRow{
+			Time: e.Time, Kind: e.Kind, ChatType: e.ChatType, TargetID: e.TargetID,
+			Status: e.Status, Iterations: e.Iterations, PromptTokens: e.PromptTokens,
+			CompletionTokens: e.CompletionTokens, TotalTokens: e.TotalTokens, CachedTokens: e.CachedTokens,
+		})
+	}
+	return rows
+}
+
+// taskStatRows 返回定时任务执行日志的轻量统计行（优先统计列，回退完整记录）。
+func (s *Server) taskStatRows(f tasklog.Filter) []tasklog.StatRow {
+	if s.opt.TaskLogsStats != nil {
+		return s.opt.TaskLogsStats(f)
+	}
+	if s.opt.TaskLogs == nil {
+		return nil
+	}
+	entries := s.opt.TaskLogs(f)
+	rows := make([]tasklog.StatRow, 0, len(entries))
+	for _, e := range entries {
+		rows = append(rows, tasklog.StatRow{
+			Time: e.TriggerTime, TargetType: e.TargetType, TargetID: e.TargetID,
+			Status: e.Status, Iterations: e.Iterations, PromptTokens: e.PromptTokens,
+			CompletionTokens: e.CompletionTokens, TotalTokens: e.TotalTokens, CachedTokens: e.CachedTokens,
+		})
+	}
+	return rows
+}
+
 // handleTokenStats 返回 token 消耗监控指标：历史总量、今日用量与最近 14 天
-// 每日用量（含缓存命中率）。数据源为 Query 日志与定时任务执行日志的留存记录
-// （各受容量上限约束，非全量历史），缓存字段依赖上游 API 返回，不支持时为 0。
+// 每日用量（含缓存命中率）。数据源为 Query 日志与定时任务执行日志的**全部留存
+// 记录**（不再截取最近 N 条），缓存字段依赖上游 API 返回，不支持时为 0。
 func (s *Server) handleTokenStats(w http.ResponseWriter, _ *http.Request) {
 	now := time.Now()
 	todayStr := now.Format("2006-01-02")
@@ -73,14 +114,14 @@ func (s *Server) handleTokenStats(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
-	if s.opt.QueryLogs != nil {
-		for _, e := range s.opt.QueryLogs(querylog.Filter{Limit: 500}) {
+	if s.opt.QueryLogs != nil || s.opt.QueryLogsStats != nil {
+		for _, e := range s.queryStatRows(querylog.Filter{}) {
 			addEntry(e.Time, e.PromptTokens, e.CompletionTokens, e.TotalTokens, e.CachedTokens)
 		}
 	}
-	if s.opt.TaskLogs != nil {
-		for _, e := range s.opt.TaskLogs(tasklog.Filter{Limit: 500}) {
-			addEntry(e.TriggerTime, e.PromptTokens, e.CompletionTokens, e.TotalTokens, e.CachedTokens)
+	if s.opt.TaskLogs != nil || s.opt.TaskLogsStats != nil {
+		for _, e := range s.taskStatRows(tasklog.Filter{}) {
+			addEntry(e.Time, e.PromptTokens, e.CompletionTokens, e.TotalTokens, e.CachedTokens)
 		}
 	}
 
@@ -198,7 +239,8 @@ func summarize(a *tokenStatAcc) tokenStatSummary {
 
 // handleTokenStatsDetail 返回更细粒度的 token 统计维度：按来源（对话 / 主动互动 /
 // 定时任务）、会话类型（群聊 / 私聊）、执行状态、消耗目标排行（Top 10）、24 小时分布与
-// 分来源的每日序列。数据源与 handleTokenStats 相同（留存日志，非全量历史）。
+// 分来源的每日序列。数据源与 handleTokenStats 相同，覆盖**全部留存日志**
+// （range=all 时即全部留存记录，不再截取最近 N 条）。
 // 支持查询参数 range 限定统计窗口：today / yesterday / 7d / 30d / month / all
 // （默认 all，即全部留存记录）/ custom（自定义，需配合 start / end=2006-01-02，
 // 跨度 1~62 天）；daily 序列覆盖窗口内天数（all 时仍为最近 30 天）。
@@ -290,20 +332,20 @@ func (s *Server) handleTokenStatsDetail(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	if s.opt.QueryLogs != nil {
-		for _, e := range s.opt.QueryLogs(querylog.Filter{Start: rng.start, End: rng.end, Limit: 500}) {
+	if s.opt.QueryLogs != nil || s.opt.QueryLogsStats != nil {
+		for _, e := range s.queryStatRows(querylog.Filter{Start: rng.start, End: rng.end}) {
 			// 主动互动是 AI 自行发起的执行，与用户触发的对话分开计量
 			source := "query"
-			if e.KindValue() == querylog.KindProactive {
+			if e.Kind == querylog.KindProactive {
 				source = "proactive"
 			}
 			addEntry(e.Time, source, e.ChatType, e.TargetID, string(e.Status),
 				e.Iterations, e.PromptTokens, e.CompletionTokens, e.TotalTokens, e.CachedTokens)
 		}
 	}
-	if s.opt.TaskLogs != nil {
-		for _, e := range s.opt.TaskLogs(tasklog.Filter{Start: rng.start, End: rng.end, Limit: 500}) {
-			addEntry(e.TriggerTime, "task", e.TargetType, e.TargetID, string(e.Status),
+	if s.opt.TaskLogs != nil || s.opt.TaskLogsStats != nil {
+		for _, e := range s.taskStatRows(tasklog.Filter{Start: rng.start, End: rng.end}) {
+			addEntry(e.Time, "task", e.TargetType, e.TargetID, string(e.Status),
 				e.Iterations, e.PromptTokens, e.CompletionTokens, e.TotalTokens, e.CachedTokens)
 		}
 	}

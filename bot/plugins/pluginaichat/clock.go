@@ -133,6 +133,15 @@ func (p *AIChatPlugin) TaskLogQuery(f tasklog.Filter) []tasklog.Entry {
 	return p.clockManager.log.Query(f)
 }
 
+// TaskLogStats 返回执行日志的轻量统计行（全量留存记录），
+// 实现 adminpanel.TaskLogSource，供 Token 统计聚合。
+func (p *AIChatPlugin) TaskLogStats(f tasklog.Filter) []tasklog.StatRow {
+	if p.clockManager == nil {
+		return nil
+	}
+	return p.clockManager.log.Stats(f)
+}
+
 // TaskLogClear 清除满足条件的执行日志（零值条件清除全部），实现 adminpanel.TaskLogSource。
 func (p *AIChatPlugin) TaskLogClear(f tasklog.Filter) int {
 	if p.clockManager == nil {

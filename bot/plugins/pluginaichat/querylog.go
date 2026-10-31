@@ -32,6 +32,15 @@ func (p *AIChatPlugin) QueryLogRecent(f querylog.Filter) []querylog.Entry {
 	return p.queryLogger.Query(f)
 }
 
+// QueryLogStats 返回 Query 日志的轻量统计行（全量留存记录），
+// 实现 adminpanel.QueryLogSource，供 Token 统计聚合。
+func (p *AIChatPlugin) QueryLogStats(f querylog.Filter) []querylog.StatRow {
+	if p.queryLogger == nil {
+		return nil
+	}
+	return p.queryLogger.Stats(f)
+}
+
 // QueryLogClear 清除满足条件的 Query 日志（零值条件清除全部），实现 adminpanel.QueryLogSource。
 func (p *AIChatPlugin) QueryLogClear(f querylog.Filter) int {
 	if p.queryLogger == nil {

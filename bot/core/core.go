@@ -508,6 +508,7 @@ func (ania *AniaBot) Run() {
 func (ania *AniaBot) startAdminPanel() {
 	// 查找提供定时任务执行日志的插件（如 AI 对话插件的 clock 功能）
 	var taskLogFn func(f tasklog.Filter) []tasklog.Entry
+	var taskLogStatsFn func(f tasklog.Filter) []tasklog.StatRow
 	var taskLogClearFn func(f tasklog.Filter) int
 	var clockSrc adminpanel.ClockTaskSource
 	var msgLogFn func(limit int, beforeID uint64) []msglog.Entry
@@ -517,10 +518,12 @@ func (ania *AniaBot) startAdminPanel() {
 	var teamSrc adminpanel.TeamSource
 	var quotaSrc adminpanel.QuotaSource
 	var queryLogFn func(f querylog.Filter) []querylog.Entry
+	var queryLogStatsFn func(f querylog.Filter) []querylog.StatRow
 	var queryLogClearFn func(f querylog.Filter) int
 	for _, p := range ania.plugins {
 		if src, ok := p.(adminpanel.TaskLogSource); ok {
 			taskLogFn = src.TaskLogQuery
+			taskLogStatsFn = src.TaskLogStats
 			taskLogClearFn = src.TaskLogClear
 		}
 		if src, ok := p.(adminpanel.ClockTaskSource); ok {
@@ -546,6 +549,7 @@ func (ania *AniaBot) startAdminPanel() {
 		}
 		if src, ok := p.(adminpanel.QueryLogSource); ok {
 			queryLogFn = src.QueryLogRecent
+			queryLogStatsFn = src.QueryLogStats
 			queryLogClearFn = src.QueryLogClear
 		}
 		if taskLogFn != nil && clockSrc != nil && msgLogFn != nil && skillSrc != nil && memorySrc != nil && kbSrc != nil && teamSrc != nil && quotaSrc != nil && queryLogFn != nil {
@@ -613,6 +617,7 @@ func (ania *AniaBot) startAdminPanel() {
 		},
 		AdapterStatuses: ania.AdapterStatuses,
 		TaskLogs:        taskLogFn,
+		TaskLogsStats:   taskLogStatsFn,
 		TaskLogsClear:   taskLogClearFn,
 		Clocks:          clockSrc,
 		MsgLogs:         msgLogFn,
@@ -622,6 +627,7 @@ func (ania *AniaBot) startAdminPanel() {
 		Teams:           teamSrc,
 		Quota:           quotaSrc,
 		QueryLogs:       queryLogFn,
+		QueryLogsStats:  queryLogStatsFn,
 		QueryLogsClear:  queryLogClearFn,
 		ConsoleLogs:     consollog.Page,
 		QRLogins:        qrLogins,
