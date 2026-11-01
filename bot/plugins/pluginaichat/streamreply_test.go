@@ -102,22 +102,22 @@ func (b *streamBot) SendFriendStream(id message.QID, chain msgchain.FriendChain)
 	return b.sender.SendFriendStream(id, chain)
 }
 
-// TestStreamReplyGate 两个开关共存：开启「按空行拆分回复」不再关闭流式（拆分只作用于
-// 非流式发送）；流式开关关闭、或平台未实现 bot.StreamSender 时才不启用流式。
+// TestStreamReplyGate 流式启用只看开关与平台能力：回复拆分（|||）只作用于
+// 非流式发送，不影响流式是否启用；流式开关关闭、或平台未实现 bot.StreamSender
+// 时才不启用流式。
 func TestStreamReplyGate(t *testing.T) {
 	p := &AIChatPlugin{}
 	p.Logger = slog.Default()
 	p.cfg.Stream.Enable = true
-	p.cfg.Reply.SplitBlankLine = true
 
-	// 平台不支持流式（QQ/OneBot v11）：走一次性发送，拆分在那里生效
+	// 平台不支持流式（QQ/OneBot v11）：走一次性发送，||| 拆分在那里生效
 	if s := p.newStreamReplyFor(&recordBot{}, message.FromUint64(1), true, nil); s != nil {
 		t.Fatal("平台不支持流式能力时不应启用流式")
 	}
-	// 支持流式的平台：拆分开关开启也不影响流式启用
+	// 支持流式的平台：拆分只作用于非流式发送，不影响流式启用
 	sb := &streamBot{recordBot: &recordBot{}, sender: &fakeStreamSender{ok: true}}
 	if s := p.newStreamReplyFor(sb, message.FromUint64(1), true, nil); s == nil {
-		t.Fatal("拆分开关开启不应关闭流式（两者共存）")
+		t.Fatal("流式应启用（||| 拆分与之无关）")
 	}
 	// 流式开关关闭：不启用流式
 	p.cfg.Stream.Enable = false
@@ -212,6 +212,39 @@ func TestStreamReplyPatchFailsFallback(t *testing.T) {
 	}
 	if got := sender.handle.patched(); len(got) != 0 {
 		t.Fatalf("失败的 Patch 不应计入成功内容, got %q", got)
+	}
+}
+
+// TestStreamReplySeparatorDisplay 流式只有一条消息：||| 展示为换行，不把标记
+// 原样露给用户，也不因为标记而新建消息。
+func TestStreamReplySeparatorDisplay(t *testing.T) {
+	sender := &fakeStreamSender{ok: true}
+	s := newStreamReply(sender, slog.Default(), message.FromUint64(1), false, nil)
+	s.OnDelta("第一段|||第二段")
+	s.OnDelta("|||第三段")
+	s.End()
+
+	if sender.created != 1 {
+		t.Fatalf("||| 不应让流式拆成多条消息, got %d", sender.created)
+	}
+	if got := chainText(sender.initial); got != "第一段\n\n第二段" {
+		t.Fatalf("首条流式消息不应露出 |||: %q", got)
+	}
+	patched := sender.handle.patched()
+	if len(patched) != 1 || patched[0] != "第一段\n\n第二段\n\n第三段" {
+		t.Fatalf("后续增量应把 ||| 显示为换行, got %q", patched)
+	}
+}
+
+// TestStreamReplySeparatorInFenceKept 代码围栏内的 ||| 是正文，流式展示保持原样。
+func TestStreamReplySeparatorInFenceKept(t *testing.T) {
+	sender := &fakeStreamSender{ok: true}
+	s := newStreamReply(sender, slog.Default(), message.FromUint64(1), false, nil)
+	code := "```\na|||b\n```"
+	s.OnDelta(code)
+
+	if got := chainText(sender.initial); got != code {
+		t.Fatalf("代码围栏内的 ||| 应保持原样, got %q", got)
 	}
 }
 

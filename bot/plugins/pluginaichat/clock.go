@@ -960,15 +960,14 @@ func (m *clockManager) sendText(task *ClockTask, text string) bool {
 	return true
 }
 
-// sendTextRaw 实际发送逻辑。按空行拆分开关开启时拆成多条逐条发送
+// sendTextRaw 实际发送逻辑。文本中的 ||| 分隔符拆成多条逐条发送
 // （群聊仅首条携带 @ 提醒），与主对话回复的拆分语义保持一致；群聊片段过多
 // 且平台支持合并转发（QQ）时改为一条合并转发消息，避免刷屏。
 func (m *clockManager) sendTextRaw(task *ClockTask, text string) bool {
 	if m.bot == nil {
 		return false
 	}
-	split := m.plugin != nil && m.plugin.cfg.Reply.SplitBlankLine
-	segments := replySegments(text, split)
+	segments := replySegments(text)
 	targetQID := parseQID(task.TargetID)
 	if task.TargetType == clockTargetGroup {
 		var mentions []message.QID

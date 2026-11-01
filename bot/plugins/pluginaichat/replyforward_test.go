@@ -62,8 +62,8 @@ func nodeMentions(fwd message.ForwardMessageSegment) int {
 // 合并转发消息发出（每段一个节点），不再逐条发送；节点发送者为机器人自身。
 func TestGroupReplyForward(t *testing.T) {
 	fb := &recordForwardBot{}
-	cbs := MakeGroupCallback(fb, message.FromUint64(1), message.FromUint64(2), message.FromUint64(3), slog.Default(), true)
-	if _, err := cbs.SendText("一\n\n二\n\n三\n\n四"); err != nil {
+	cbs := MakeGroupCallback(fb, message.FromUint64(1), message.FromUint64(2), message.FromUint64(3), slog.Default())
+	if _, err := cbs.SendText("一|||二|||三|||四"); err != nil {
 		t.Fatalf("发送失败: %v", err)
 	}
 	if got := fb.sent(); len(got) != 0 {
@@ -87,8 +87,8 @@ func TestGroupReplyForward(t *testing.T) {
 // TestGroupReplyForwardThreshold 阈值边界：片段数不超过阈值（3 条）时仍逐条发送。
 func TestGroupReplyForwardThreshold(t *testing.T) {
 	fb := &recordForwardBot{}
-	cbs := MakeGroupCallback(fb, message.FromUint64(1), message.FromUint64(2), message.FromUint64(3), slog.Default(), true)
-	if _, err := cbs.SendText("一\n\n二\n\n三"); err != nil {
+	cbs := MakeGroupCallback(fb, message.FromUint64(1), message.FromUint64(2), message.FromUint64(3), slog.Default())
+	if _, err := cbs.SendText("一|||二|||三"); err != nil {
 		t.Fatalf("发送失败: %v", err)
 	}
 	if got := fb.sent(); len(got) != 3 {
@@ -102,8 +102,8 @@ func TestGroupReplyForwardThreshold(t *testing.T) {
 // TestGroupReplyForwardUnsupported 平台不支持合并转发（非 QQ）时保持逐条发送。
 func TestGroupReplyForwardUnsupported(t *testing.T) {
 	fb := &recordBot{}
-	cbs := MakeGroupCallback(fb, message.FromUint64(1), message.FromUint64(2), message.FromUint64(3), slog.Default(), true)
-	if _, err := cbs.SendText("一\n\n二\n\n三\n\n四"); err != nil {
+	cbs := MakeGroupCallback(fb, message.FromUint64(1), message.FromUint64(2), message.FromUint64(3), slog.Default())
+	if _, err := cbs.SendText("一|||二|||三|||四"); err != nil {
 		t.Fatalf("发送失败: %v", err)
 	}
 	if got := fb.sent(); len(got) != 4 {
@@ -114,8 +114,8 @@ func TestGroupReplyForwardUnsupported(t *testing.T) {
 // TestGroupReplyForwardFallbackOnFailure 合并转发发送失败时回退逐条发送，内容不丢。
 func TestGroupReplyForwardFallbackOnFailure(t *testing.T) {
 	fb := &recordForwardBot{failForward: true}
-	cbs := MakeGroupCallback(fb, message.FromUint64(1), message.FromUint64(2), message.FromUint64(3), slog.Default(), true)
-	if _, err := cbs.SendText("一\n\n二\n\n三\n\n四"); err != nil {
+	cbs := MakeGroupCallback(fb, message.FromUint64(1), message.FromUint64(2), message.FromUint64(3), slog.Default())
+	if _, err := cbs.SendText("一|||二|||三|||四"); err != nil {
 		t.Fatalf("发送失败: %v", err)
 	}
 	if got := fb.sent(); len(got) != 4 {
@@ -126,8 +126,8 @@ func TestGroupReplyForwardFallbackOnFailure(t *testing.T) {
 // TestFriendReplyNoForward 私聊回复不做合并转发（拆分后仍逐条发送）。
 func TestFriendReplyNoForward(t *testing.T) {
 	fb := &recordForwardBot{}
-	cbs := MakeFriendCallback(fb, message.FromUint64(1), slog.Default(), true)
-	if _, err := cbs.SendText("一\n\n二\n\n三\n\n四"); err != nil {
+	cbs := MakeFriendCallback(fb, message.FromUint64(1), slog.Default())
+	if _, err := cbs.SendText("一|||二|||三|||四"); err != nil {
 		t.Fatalf("发送失败: %v", err)
 	}
 	if got := fb.sent(); len(got) != 4 {
@@ -148,9 +148,8 @@ func TestClockSendTextForward(t *testing.T) {
 	fb := &recordForwardBot{}
 	m.bot = fb
 
-	p.cfg.Reply.SplitBlankLine = true
 	groupTask := &ClockTask{ID: "1", TargetType: clockTargetGroup, TargetID: "9", CreatedBy: message.FromUint64(7)}
-	if !m.sendText(groupTask, "一\n\n二\n\n三\n\n四") {
+	if !m.sendText(groupTask, "一|||二|||三|||四") {
 		t.Fatal("发送应成功")
 	}
 	if got := fb.sent(); len(got) != 0 {
@@ -173,7 +172,7 @@ func TestClockSendTextForward(t *testing.T) {
 	}
 
 	friendTask := &ClockTask{ID: "2", TargetType: clockTargetFriend, TargetID: "5"}
-	if !m.sendText(friendTask, "一\n\n二\n\n三\n\n四") {
+	if !m.sendText(friendTask, "一|||二|||三|||四") {
 		t.Fatal("发送应成功")
 	}
 	if got := fb.sent(); len(got) != 4 {

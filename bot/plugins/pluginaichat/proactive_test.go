@@ -1039,10 +1039,9 @@ func (b *partialFailBot) SendGroupMsg(id message.QID, chain msgchain.GroupChain)
 func TestSendReportsPartialSuccess(t *testing.T) {
 	m := newTestProactiveManager(t)
 	m.plugin = &AIChatPlugin{}
-	m.plugin.cfg.Reply.SplitBlankLine = true
 
 	fb := &partialFailBot{failAfter: 1}
-	ok, sentAny := m.send(fb, "1", true, "一\n\n二\n\n三")
+	ok, sentAny := m.send(fb, "1", true, "一|||二|||三")
 	if ok {
 		t.Fatal("第二段发送失败时不应报告全部成功")
 	}

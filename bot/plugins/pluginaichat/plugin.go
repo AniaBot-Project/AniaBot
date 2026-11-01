@@ -558,9 +558,9 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	ctx = context.WithValue(ctx, imageRegistryKey{}, imageReg)
 	var msgFuncs llmtool.CallBackFuncs
 	if isGroup {
-		msgFuncs = MakeGroupCallback(b, id, lastMsg.Sender.UserId, batchSelfID(batch), p.Logger, p.cfg.Reply.SplitBlankLine)
+		msgFuncs = MakeGroupCallback(b, id, lastMsg.Sender.UserId, batchSelfID(batch), p.Logger)
 	} else {
-		msgFuncs = MakeFriendCallback(b, id, p.Logger, p.cfg.Reply.SplitBlankLine)
+		msgFuncs = MakeFriendCallback(b, id, p.Logger)
 	}
 	p.configureImageCallbacks(ctx, b, &msgFuncs, imageReg, func(u aichat.TokenUsage) {
 		// 备用图片识别（OCR）消耗：并入会话统计（finishQuery 取走）与配额
@@ -601,8 +601,9 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	// 全程只维持一条消息：工具轮的中间文本先展示，随后被下一轮文本整体覆盖
 	//（见 streamreply.go），最终留下的就是最后一轮的最终回复；群聊首条消息
 	// 携带本批全部发言者的 @ 提及（与一次性路径的提及集一致）。
-	// 「按空行拆分回复」只作用于非流式发送：流式是单条消息逐字更新，本身无法
-	// 拆成多条，故流式生效时拆分不参与（两个开关可同时开启，互不冲突）。
+	// 回复拆分只作用于非流式发送：||| 分隔符在流式展示中转为换行（见
+	// streamDisplayText）——流式是单条消息逐字更新，本身无法拆成多条，
+	// 故流式生效时不做拆分。
 	stream := p.newStreamReplyFor(b, id, isGroup, batch)
 	if stream != nil {
 		chatOpts.OnStreamDelta = stream.OnDelta
@@ -738,9 +739,9 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	}
 
 	// 最终回复片段（流式未生效时才会走到这里，如平台不支持流式或流式已退化）：
-	// 默认整段一条消息；开启按空行拆分时拆成多条逐条发送，片段过多
+	// AI 用 ||| 指定了消息边界时拆成多条逐条发送，否则整段一条；片段过多
 	//（> forwardSegThreshold）时平台支持合并转发（QQ）则改为一条合并转发，避免刷屏。
-	segments := replySegments(resp, p.cfg.Reply.SplitBlankLine)
+	segments := replySegments(resp)
 	if isGroup {
 		// 群聊中 @ 本批所有发言者（去重），让排队消息的每个人都收到回应；
 		// 拆分发送时仅首条携带 @ 提及（合并转发为首节点），避免每条回复都提醒

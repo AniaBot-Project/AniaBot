@@ -8,7 +8,7 @@ import (
 	"github.com/jeanhua/AniaBot/common/msgchain"
 )
 
-// 「按空行拆分回复」的群聊合并转发：拆分片段过多时逐条发送会在群里刷屏，
+// 回复拆分（||| 分隔符）的群聊合并转发：拆分片段过多时逐条发送会在群里刷屏，
 // 改为整段作为一条合并转发消息发出（每段一个节点，首节点携带 @ 提及）。
 // 仅群聊生效——私聊逐条发送不会打扰他人，合并转发反而多一步展开；
 // 平台不支持合并转发（仅 QQ 的 NapCat/Luckylilia，见 bot.GroupForwardSender）
@@ -23,7 +23,7 @@ const (
 )
 
 // shouldMergeGroupReply 群聊回复是否改用合并转发：拆分出的片段数超过阈值。
-// 开关关闭或没有空行时只有一条片段，逐条发送即可。
+// 没有拆分（无 ||| 且未开启空行拆分、或内容只有一段）时只有一条片段，逐条发送即可。
 func shouldMergeGroupReply(segments []string) bool {
 	return len(segments) > forwardSegThreshold
 }

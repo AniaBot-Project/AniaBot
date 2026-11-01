@@ -534,15 +534,14 @@ func (m *proactiveManager) callbacks(ctx context.Context, b bot.Bot, id message.
 	return cbs
 }
 
-// send 发送主动发言内容。开启「按空行拆分回复」时拆成多条，与普通回复一致。
+// send 发送主动发言内容。文本中的 ||| 分隔符拆成多条，与普通回复一致。
 // 返回是否全部发送成功，以及是否已经发出至少一段——后者用于区分「完全没
 // 发出去（可以重试）」与「部分已发出（重试会导致重复）」。
 func (m *proactiveManager) send(b bot.Bot, id message.QID, isGroup bool, text string) (ok, sentAny bool) {
 	if b == nil {
 		return false, false
 	}
-	split := m.plugin != nil && m.plugin.cfg.Reply.SplitBlankLine
-	for _, seg := range replySegments(text, split) {
+	for _, seg := range replySegments(text) {
 		seg = strings.TrimSpace(seg)
 		if seg == "" {
 			continue

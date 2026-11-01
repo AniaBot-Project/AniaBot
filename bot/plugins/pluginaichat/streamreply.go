@@ -60,8 +60,9 @@ func newStreamReply(sender bot.StreamSender, logger *slog.Logger, target message
 // newStreamReplyFor 构造本次请求的流式状态机：流式开关关闭、或平台未实现
 // bot.StreamSender（QQ/OneBot v11 无消息编辑 API）时返回 nil，调用方走一次性发送。
 //
-// 与「按空行拆分回复」无关：拆分只作用于非流式发送（流式是单条消息逐字更新，
-// 本身无法拆成多条），两个开关可同时开启、互不影响。
+// 与回复拆分（||| 分隔符）无关：拆分只作用于非流式发送（流式是单条消息逐字
+// 更新，本身无法拆成多条）；流式展示时 ||| 由 streamDisplayText 显示为换行，
+// 不会把标记原样露给用户。
 func (p *AIChatPlugin) newStreamReplyFor(b bot.Bot, id message.QID, isGroup bool, batch []message.Message) *streamReply {
 	if !p.cfg.Stream.Enable {
 		return nil
@@ -100,7 +101,8 @@ func (s *streamReply) OnDelta(delta string) {
 		return
 	}
 	s.buf.WriteString(delta)
-	text := aichat.RemoveThinkContent(s.buf.String())
+	// ||| 分隔符在展示层转为换行：流式只有一条消息，无法真拆成多条
+	text := streamDisplayText(aichat.RemoveThinkContent(s.buf.String()))
 	if s.handle != nil {
 		if err := s.handle.Patch(text); err != nil {
 			s.patchFails++
