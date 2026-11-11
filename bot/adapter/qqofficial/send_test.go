@@ -110,7 +110,7 @@ func mockQQServer(t *testing.T, handler func(method, path string, body []byte) (
 	return a, srv
 }
 
-// TestSendGroupMsg 群文本消息：携带被动回复 msg_id+msg_seq、隐式 message_reference。
+// TestSendGroupMsg 群文本消息：携带被动回复 msg_id+msg_seq；默认不自动引用。
 func TestSendGroupMsg(t *testing.T) {
 	var gotBody []byte
 	var gotPath string
@@ -144,9 +144,67 @@ func TestSendGroupMsg(t *testing.T) {
 	if req.MsgID != "ROBOT1.0_evt" || req.MsgSeq != 1 {
 		t.Errorf("被动回复凭证 = %q/%d", req.MsgID, req.MsgSeq)
 	}
-	// 无显式 reply 段时隐式引用触发消息（引用气泡）
+	// 自动引用默认关闭：直接发送，不带引用气泡
+	if req.MessageReference != nil {
+		t.Errorf("默认不应携带引用: %+v", req.MessageReference)
+	}
+}
+
+// TestSendGroupMsgAutoQuote 开启自动引用后，首条消息携带触发消息的 message_reference。
+func TestSendGroupMsgAutoQuote(t *testing.T) {
+	var gotBody []byte
+	a, srv := mockQQServer(t, func(method, path string, body []byte) (int, []byte) {
+		gotBody = body
+		return 200, []byte(`{"id":"ROBOT1.0_sent"}`)
+	})
+	defer srv.Close()
+
+	a.cfg.autoQuote = true
+	a.storeReplyToken("GROUP1", "ROBOT1.0_evt")
+	builder := msgchain.Builder().Group()
+	builder.Text("你好")
+	if _, ok := a.SendGroupMsg("qo:GROUP1", builder.Build()); !ok {
+		t.Fatal("发送应成功")
+	}
+	var req sendMessageRequest
+	if err := json.Unmarshal(gotBody, &req); err != nil {
+		t.Fatalf("请求体解析失败: %v", err)
+	}
 	if req.MessageReference == nil || req.MessageReference.MessageID != "ROBOT1.0_evt" {
-		t.Errorf("隐式 message_reference 丢失: %+v", req)
+		t.Errorf("自动引用丢失: %+v", req)
+	}
+	if req.MsgID != "ROBOT1.0_evt" || req.MsgSeq != 1 {
+		t.Errorf("被动回复凭证 = %q/%d", req.MsgID, req.MsgSeq)
+	}
+}
+
+// TestSendTextReferenceFirstPartOnly 长文本分包时仅首包携带引用，msg_seq 依次递增。
+func TestSendTextReferenceFirstPartOnly(t *testing.T) {
+	var calls []sendMessageRequest
+	a, srv := mockQQServer(t, func(method, path string, body []byte) (int, []byte) {
+		var req sendMessageRequest
+		_ = json.Unmarshal(body, &req)
+		calls = append(calls, req)
+		return 200, []byte(`{"id":"ROBOT1.0_part"}`)
+	})
+	defer srv.Close()
+
+	a.storeReplyToken("G", "ROBOT1.0_evt")
+	long := strings.Repeat("字", textRunesLimit+5)
+	if _, ok := a.sendText(t.Context(), "G", true, long, "ROBOT1.0_ref"); !ok {
+		t.Fatal("发送应成功")
+	}
+	if len(calls) != 2 {
+		t.Fatalf("分包数 = %d, want 2", len(calls))
+	}
+	if calls[0].MessageReference == nil || calls[0].MessageReference.MessageID != "ROBOT1.0_ref" {
+		t.Errorf("首包应携带引用: %+v", calls[0])
+	}
+	if calls[1].MessageReference != nil {
+		t.Errorf("后续包不应携带引用: %+v", calls[1])
+	}
+	if calls[0].MsgSeq != 1 || calls[1].MsgSeq != 2 {
+		t.Errorf("msg_seq = %d/%d, want 1/2", calls[0].MsgSeq, calls[1].MsgSeq)
 	}
 }
 

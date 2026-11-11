@@ -415,6 +415,14 @@
     "default": "https://api.sgroup.qq.com"
   },
   {
+    "key": "bot.qqofficial.auto_quote",
+    "label": "自动引用触发消息",
+    "type": "bool",
+    "group": "QQ 官方适配器",
+    "help": "开启后回复自动以引用气泡关联触发的提问消息（官方群消息无法 @ 成员，引用用于表达回复关系）；关闭则直接发送，不带引用",
+    "default": false
+  },
+  {
     "key": "bot.qqofficial.markdown",
     "label": "Markdown 渲染",
     "type": "bool",

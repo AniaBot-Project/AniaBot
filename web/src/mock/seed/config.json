@@ -35,6 +35,7 @@
   "bot.platform.telegram.enable": false,
   "bot.platform.weixin.enable": false,
   "bot.qqofficial.api_base": "https://api.sgroup.qq.com",
+  "bot.qqofficial.auto_quote": false,
   "bot.qqofficial.markdown": false,
   "bot.qqofficial.sandbox": false,
   "bot.store.cache.driver": "memory",

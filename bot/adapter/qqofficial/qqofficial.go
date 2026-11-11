@@ -24,6 +24,7 @@ type qqOfficialConfig struct {
 	sandbox   bool
 	apiBase   string
 	markdown  bool // 文本回复以 msg_type=2 Markdown 消息发送
+	autoQuote bool // 回复时自动引用触发消息（message_reference 引用气泡）
 }
 
 // qqOfficialAdapter QQ 官方机器人平台适配器：WebSocket 网关收事件 + REST OpenAPI 发消息。
@@ -168,6 +169,7 @@ func (a *qqOfficialAdapter) loadConfig(v *viper.Viper) qqOfficialConfig {
 		sandbox:   v.GetBool("bot.qqofficial.sandbox"),
 		apiBase:   apiBase,
 		markdown:  v.GetBool("bot.qqofficial.markdown"),
+		autoQuote: v.GetBool("bot.qqofficial.auto_quote"),
 	}
 }
 

@@ -10,7 +10,8 @@
 // 平台限制（与 NapCat 的差异，见 docs）：
 //   - 无消息历史/单条消息查询/群资料 API：GetMsgDetail/历史由内存缓存兜底，
 //     GetGroupDetail 不可用
-//   - 出站不能 @ 群成员（at 段退化为不可见，回复语义靠 message_reference 引用消息）
+//   - 出站不能 @ 群成员（at 段退化为不可见），可开启 bot.qqofficial.auto_quote
+//     让回复自动引用触发消息（默认关闭）
 //   - 无消息编辑 API：不支持流式回复（StreamSenderExt 未实现，自动退化一次性发送）
 //   - 媒体（图片/视频/语音/文件）需先经 /files 上传换取 file_info 再发 msg_type=7
 package qqofficial
@@ -37,6 +38,7 @@ var qqOfficialConfigFields = []pluginconfig.Field{
 	{Key: "bot.qqofficial.app_secret", Label: "AppSecret", Type: "password", Group: "QQ 官方适配器", Sensitive: true, Help: "机器人 AppSecret，用于换取 access_token（Token 鉴权已废弃，请勿填写旧 Token）"},
 	{Key: "bot.qqofficial.sandbox", Label: "沙箱环境", Type: "bool", Group: "QQ 官方适配器", Help: "开启后连接沙箱环境（sandbox.api.sgroup.qq.com），联调时使用；机器人未上架前只能连接沙箱", Default: false},
 	{Key: "bot.qqofficial.api_base", Label: "API 地址", Type: "string", Group: "QQ 官方适配器", Help: "OpenAPI 地址，默认正式环境；沙箱开关优先于此配置", Default: "https://api.sgroup.qq.com"},
+	{Key: "bot.qqofficial.auto_quote", Label: "自动引用触发消息", Type: "bool", Group: "QQ 官方适配器", Help: "开启后回复自动以引用气泡关联触发的提问消息（官方群消息无法 @ 成员，引用用于表达回复关系）；关闭则直接发送，不带引用", Default: false},
 	{Key: "bot.qqofficial.markdown", Label: "Markdown 渲染", Type: "bool", Group: "QQ 官方适配器", Help: "开启后 AI 的文本回复以 msg_type=2 Markdown 消息发送（标题/加粗/列表等富文本渲染）；发送失败自动降级纯文本", Default: false},
 }
 

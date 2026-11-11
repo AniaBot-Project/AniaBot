@@ -115,8 +115,9 @@ func parseOpenID(q message.QID) (string, bool) {
 
 // sendChain 把通用消息段翻译为 QQ 官方消息序列并发送。
 // 文本按段顺序累积，媒体穿插发送；首条消息携带 message_reference（引用气泡）。
-// 引用目标：显式 reply 段优先；否则隐式引用当前被动回复凭证的消息
-// （官方群消息不能 @ 成员，引用了触发消息是群聊回复 UX 的主要表达）。
+// 引用目标：显式 reply 段优先；否则在开启 bot.qqofficial.auto_quote 时引用当前
+// 被动回复凭证的消息（触发消息）。自动引用默认关闭——官方群消息不能 @ 成员，
+// 仅当需要「回复某条」的视觉语义时才建议开启。
 // 返回最后成功消息的框架内 ID（qo:<message_id>）。
 func (a *qqOfficialAdapter) sendChain(ctx context.Context, openid string, isGroup bool, segs []message.OB11Segment) (message.QID, bool) {
 	if a.client == nil {
@@ -139,8 +140,9 @@ func (a *qqOfficialAdapter) sendChain(ctx context.Context, openid string, isGrou
 	if len(body) == 0 {
 		return "", false
 	}
-	// 隐式引用：无显式 reply 段时引用被动回复凭证的消息（触发消息）
-	if reference == "" {
+	// 隐式引用：开启 auto_quote 且无显式 reply 段时引用被动回复凭证的消息
+	// （触发消息）；默认关闭，直接发送不带引用气泡。
+	if reference == "" && a.cfg.autoQuote {
 		reference = a.peekReplyMsgID(openid, isGroup)
 	}
 
