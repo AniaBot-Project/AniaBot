@@ -2,7 +2,7 @@
   <div class="space-y-4">
     <!-- 筛选与操作栏 -->
     <div class="flex items-center justify-between flex-wrap gap-3">
-      <div class="flex items-center gap-1 overflow-x-auto">
+      <div class="filter-group overflow-x-auto">
         <Button
           v-for="t in categoryTabs"
           :key="t.value"

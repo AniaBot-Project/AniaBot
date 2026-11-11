@@ -3,7 +3,7 @@
     <!-- 筛选与操作栏 -->
     <div class="flex items-center justify-between flex-wrap gap-3">
       <div class="flex items-center gap-2 flex-wrap">
-        <div class="flex items-center gap-1">
+        <div class="filter-group">
           <Button
             v-for="t in typeTabs"
             :key="t.value"
@@ -15,7 +15,7 @@
           </Button>
         </div>
         <!-- 来源：普通对话 / 主动互动（AI 自行发起的发言） -->
-        <div class="flex items-center gap-1">
+        <div class="filter-group">
           <Button
             v-for="t in kindTabs"
             :key="t.value"

@@ -88,7 +88,7 @@
     <div class="flex items-center justify-between flex-wrap gap-3">
       <div class="flex items-center gap-3">
         <h2 class="text-[10px] tracking-[0.15em] uppercase text-zinc-500 font-medium">执行日志</h2>
-        <div class="flex items-center gap-1">
+        <div class="filter-group">
           <Button
             v-for="t in typeTabs"
             :key="t.value"

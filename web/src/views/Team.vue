@@ -18,7 +18,7 @@
       <!-- 左栏：会话列表 -->
       <Card style="padding: 0" class="w-full lg:w-72 shrink-0 overflow-hidden">
         <div class="p-2">
-          <div class="flex items-center gap-1">
+          <div class="filter-group">
             <Button
               v-for="t in kindTabs"
               :key="t.value"

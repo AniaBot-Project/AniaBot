@@ -79,7 +79,7 @@
       <div class="flex items-center justify-between flex-wrap gap-2">
         <span class="tlabel text-zinc-800">Detail · 细节统计</span>
         <!-- 时间维度筛选 -->
-        <div class="flex items-center gap-1.5 flex-wrap">
+        <div class="filter-group flex-wrap">
           <Button
             v-for="r in RANGE_OPTIONS" :key="r.key"
             :type="range === r.key ? 'primary' : 'default'"

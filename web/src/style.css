@@ -836,9 +836,21 @@
   font-weight: 400;
 }
 
-/* Tabs 面板里的多个块之间留出间距（组件默认只有内边距，卡片会贴在一起） */
-.app-shell .animal-tabs__content > * + * {
+/* Tabs 面板里的多个块之间留出间距（组件默认只有内边距，卡片会贴在一起）。
+   注意 Tabs 的结构是 .animal-tabs__content > .animal-tabs__inner > 内容，间距要加在 inner 上 */
+.app-shell .animal-tabs__inner > * + * {
   margin-top: 16px;
+}
+
+/* 分段筛选按钮组：每组一个奶油小框，多组并排时能看出分组边界 */
+.app-shell .filter-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 2px solid var(--line);
 }
 
 /* ---- 焦点环：统一鹅黄（主题库的 focus 色） ---- */
