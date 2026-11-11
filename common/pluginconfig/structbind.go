@@ -11,8 +11,10 @@
 //
 //	cfg       点分配置键（必填；嵌套结构体字段作为前缀段递归；`cfg:"-"` 跳过）
 //	label     面板显示名（缺省用字段名）
-//	type      覆盖类型推断（password / text / select / multiselect 等必须显式声明）
+//	type      覆盖类型推断（password / text / select / multiselect / slider 等必须显式声明）
 //	options   select / multiselect 类型的可选项，逗号分隔
+//	min/max/step  slider 类型的范围与步长（缺省 0 / 100 / 1）
+//	ticks     slider 类型的刻度标签，逗号分隔，从 min 到 max 均匀分布
 //	group     面板分组；支持「父分组.子分组」两级写法（如 "骰子.规则"），
 //	          "." 或 " · " 均可作分隔符，面板按「一个父分组一张卡片、
 //	          子分组在卡片内以分节框归类」展示
@@ -157,6 +159,7 @@ func buildBinding(sf reflect.StructField, key string, idx []int) (fieldBinding, 
 		Group:   sf.Tag.Get("group"),
 		Help:    sf.Tag.Get("help"),
 		Options: splitList(sf.Tag.Get("options")),
+		Ticks:   splitList(sf.Tag.Get("ticks")),
 	}
 	if f.Label == "" {
 		f.Label = sf.Name
@@ -166,6 +169,11 @@ func buildBinding(sf reflect.StructField, key string, idx []int) (fieldBinding, 
 	}
 	if (fieldType == "select" || fieldType == "multiselect") && len(f.Options) == 0 {
 		return fieldBinding{}, fmt.Errorf("pluginconfig: 字段 %s (%s): %s 类型必须声明 options", sf.Name, key, fieldType)
+	}
+	if fieldType == "slider" {
+		if err := applySliderRange(sf, &f); err != nil {
+			return fieldBinding{}, err
+		}
 	}
 
 	if raw, ok := sf.Tag.Lookup("default"); ok && raw != "" {
@@ -180,6 +188,30 @@ func buildBinding(sf reflect.StructField, key string, idx []int) (fieldBinding, 
 	f.Optional = typ.Kind() == reflect.Pointer && f.Default == nil
 
 	return fieldBinding{field: f, index: idx, typ: typ}, nil
+}
+
+// applySliderRange 解析 slider 类型的 min/max/step 标签并校验取值范围。
+// 三个标签都可省略：min=0、max=100、step=1。
+func applySliderRange(sf reflect.StructField, f *Field) error {
+	f.Min, f.Max, f.Step = 0, 100, 1
+	for tag, dst := range map[string]*float64{"min": &f.Min, "max": &f.Max, "step": &f.Step} {
+		raw := strings.TrimSpace(sf.Tag.Get(tag))
+		if raw == "" {
+			continue
+		}
+		v, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			return fmt.Errorf("pluginconfig: 字段 %s: 解析 %s=%q 失败", sf.Name, tag, raw)
+		}
+		*dst = v
+	}
+	if f.Max <= f.Min {
+		return fmt.Errorf("pluginconfig: 字段 %s: slider 的 max(%v) 必须大于 min(%v)", sf.Name, f.Max, f.Min)
+	}
+	if f.Step <= 0 || f.Step > f.Max-f.Min {
+		return fmt.Errorf("pluginconfig: 字段 %s: slider 的 step(%v) 必须在 (0, max-min] 内", sf.Name, f.Step)
+	}
+	return nil
 }
 
 // inferFieldType 由 Go 类型推断 Field.Type，type 标签可覆盖。
@@ -218,6 +250,13 @@ func inferFieldType(sf reflect.StructField, base reflect.Type) (string, error) {
 			return "", fmt.Errorf("pluginconfig: 字段 %s: type=%s 要求字段为 string 类型", sf.Name, override)
 		}
 		return override, nil
+	case "slider":
+		switch base.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+			reflect.Float32, reflect.Float64:
+			return override, nil
+		}
+		return "", fmt.Errorf("pluginconfig: 字段 %s: type=slider 要求字段为 int 或 float 类型", sf.Name)
 	case "multiselect":
 		if base.Kind() != reflect.Slice || base.Elem().Kind() != reflect.String {
 			return "", fmt.Errorf("pluginconfig: 字段 %s: type=multiselect 要求字段为 []string 类型", sf.Name)

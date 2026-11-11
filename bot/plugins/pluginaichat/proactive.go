@@ -186,22 +186,24 @@ type proactiveManager struct {
 	logger *slog.Logger
 	store  *intentionStore
 
-	idle        time.Duration // 冷场阈值，<=0 表示不按冷场触发
-	minGap      time.Duration // 两次主动发言的最小间隔
-	quietOn     bool
-	quietStart  int // 免打扰起始（当日分钟数）
-	quietEnd    int // 免打扰结束（当日分钟数），小于起始表示跨午夜
-	quietSpec   string
-	dailyLimit  int // 单会话每日上限，<=0 不限
-	globalDaily int // 全局每日上限，<=0 不限
-	expire      time.Duration
-	outcomeWin  time.Duration
-	cooldown    time.Duration
-	strikes     int
-	timeout     time.Duration
-	tick        time.Duration
-	maxContext  int
-	baseScopes  map[string]struct{}
+	activity     int           // 活跃度滑条取值（0~100），仅用于展示
+	activityName string        // 活跃度档位名（冷淡/克制/均衡/活跃/话痨）
+	idle         time.Duration // 冷场阈值
+	minGap       time.Duration // 两次主动发言的最小间隔
+	quietOn      bool
+	quietStart   int // 免打扰起始（当日分钟数）
+	quietEnd     int // 免打扰结束（当日分钟数），小于起始表示跨午夜
+	quietSpec    string
+	dailyLimit   int // 单会话每日上限，<=0 不限
+	globalDaily  int // 全局每日上限，<=0 不限
+	expire       time.Duration
+	outcomeWin   time.Duration
+	cooldown     time.Duration
+	strikes      int
+	timeout      time.Duration
+	tick         time.Duration
+	maxContext   int
+	baseScopes   map[string]struct{}
 
 	// opMu 串行化会话开关的读-改-写（不持 m.mu，避免配置中心 I/O 阻塞消息处理）
 	opMu     sync.Mutex
@@ -222,6 +224,9 @@ type proactiveManager struct {
 }
 
 // newProactiveManager 按配置构造调度器；关闭或 SQL 不可用时返回 nil。
+//
+// 节奏类参数由「活跃度」滑条换算（见 proactivelevel.go），面板只暴露一个滑条；
+// 免打扰时段、执行超时与现场消息条数仍按配置项读取。
 func newProactiveManager(p *AIChatPlugin) *proactiveManager {
 	cfg := p.cfg.Proactive
 	if !cfg.Enable {
@@ -239,46 +244,31 @@ func newProactiveManager(p *AIChatPlugin) *proactiveManager {
 		return nil
 	}
 
+	pace := proactiveActivityPresetFor(cfg.Activity)
 	m := &proactiveManager{
-		plugin:      p,
-		logger:      logger,
-		store:       store,
-		scopes:      map[string]*scopeActivity{},
-		lastIdle:    map[string]time.Time{},
-		running:     map[string]struct{}{},
-		awaiting:    map[string]struct{}{},
-		unpersisted: map[string]unpersistedSend{},
-		baseScopes:  map[string]struct{}{},
-		stop:        make(chan struct{}),
-		tick:        proactiveDefaultTick,
-		idle:        time.Duration(cfg.IdleMinutes) * time.Minute,
-		minGap:      time.Duration(cfg.MinGapMinutes) * time.Minute,
-		dailyLimit:  cfg.DailyLimit,
-		globalDaily: cfg.GlobalDailyLimit,
-		expire:      time.Duration(cfg.ExpireMinutes) * time.Minute,
-		outcomeWin:  time.Duration(cfg.OutcomeMinutes) * time.Minute,
-		cooldown:    time.Duration(cfg.CooldownMinutes) * time.Minute,
-		strikes:     cfg.StrikeLimit,
-		timeout:     time.Duration(cfg.TimeoutSec) * time.Second,
-		maxContext:  cfg.MaxContextMessages,
-	}
-	if m.idle < 0 {
-		m.idle = 0
-	}
-	if m.minGap < 0 {
-		m.minGap = 0
-	}
-	if m.expire <= 0 {
-		m.expire = 30 * time.Minute
-	}
-	if m.outcomeWin <= 0 {
-		m.outcomeWin = 10 * time.Minute
-	}
-	if m.cooldown <= 0 {
-		m.cooldown = 6 * time.Hour
-	}
-	if m.strikes < 0 {
-		m.strikes = 0
+		plugin:       p,
+		logger:       logger,
+		store:        store,
+		scopes:       map[string]*scopeActivity{},
+		lastIdle:     map[string]time.Time{},
+		running:      map[string]struct{}{},
+		awaiting:     map[string]struct{}{},
+		unpersisted:  map[string]unpersistedSend{},
+		baseScopes:   map[string]struct{}{},
+		stop:         make(chan struct{}),
+		tick:         proactiveDefaultTick,
+		activity:     pace.Activity,
+		activityName: pace.Name,
+		idle:         time.Duration(pace.IdleMinutes) * time.Minute,
+		minGap:       time.Duration(pace.MinGapMinutes) * time.Minute,
+		dailyLimit:   pace.DailyLimit,
+		globalDaily:  pace.GlobalDailyLimit,
+		expire:       time.Duration(pace.ExpireMinutes) * time.Minute,
+		outcomeWin:   time.Duration(pace.OutcomeMinutes) * time.Minute,
+		cooldown:     time.Duration(pace.CooldownMinutes) * time.Minute,
+		strikes:      pace.StrikeLimit,
+		timeout:      time.Duration(cfg.TimeoutSec) * time.Second,
+		maxContext:   cfg.MaxContextMessages,
 	}
 	if m.timeout <= 0 {
 		m.timeout = 120 * time.Second
@@ -302,6 +292,8 @@ func newProactiveManager(p *AIChatPlugin) *proactiveManager {
 
 	m.logger.Info("已启用主动互动",
 		"scopes", len(m.baseScopes),
+		"activity", m.activity,
+		"activity_name", m.activityName,
 		"idle_minutes", int(m.idle.Minutes()),
 		"min_gap_minutes", int(m.minGap.Minutes()),
 		"daily_limit", m.dailyLimit,

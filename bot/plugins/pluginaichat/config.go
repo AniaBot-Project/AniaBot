@@ -162,24 +162,22 @@ type clockConfig struct {
 // 「意图」，到点后还要过闸门（免打扰、每日上限、最小间隔、现场是否已经
 // 恢复活跃），AI 也可以在执行时调用 skip_output 保持安静。
 //
+// 节奏参数（冷场阈值、最小间隔、每日上限、有效期、观察窗口、冷却、
+// 连续无人理次数）不在面板逐项暴露，统一由「活跃度」滑条换算
+// （见 proactivelevel.go）；免打扰时段、执行超时与现场消息条数单独配置。
+//
 // 总开关默认关闭；开启后还需按会话启用——面板白名单（g:群ID / f:用户ID）
 // 或管理员在会话中发送 /proactive on。
 type proactiveConfig struct {
-	Enable bool `cfg:"enable" label:"启用主动互动" group:"AI 对话 · 主动互动" default:"false" help:"让 AI 在冷场或有未说完的事时主动发言（默认关闭）。开启后还需按会话启用：在下方白名单添加 g:群ID / f:用户ID，或由管理员在会话里发送 /proactive on；发言受免打扰时段、每日上限、最小间隔与回应反馈（连续无人理自动冷却）约束；每次执行会写入「Query 日志」页（来源筛选「主动互动」），可查看触发说明、token 消耗与发出内容"`
+	Enable bool `cfg:"enable" label:"启用主动互动" group:"AI 对话 · 主动互动" default:"false" help:"让 AI 在冷场或跟进未说完的事时主动发言（默认关闭）。开启后还需按会话启用：白名单添加 g:群ID / f:用户ID，或管理员在会话里发送 /proactive on。执行记录写入「Query 日志」的「主动互动」来源"`
 
-	Scopes []string `cfg:"scopes" label:"启用主动互动的会话" group:"AI 对话 · 主动互动" help:"每行一个，格式 g:群ID 或 f:用户ID（与长期记忆/知识库的会话 scope 一致，如 g:qq:123456）；管理员在会话内发送 /proactive on|off 会直接改写这里（群聊需先 @ 机器人；面板即时可见，无需重启）"`
+	Activity int `cfg:"activity" type:"slider" min:"0" max:"100" step:"5" ticks:"冷淡,克制,均衡,活跃,话痨" label:"活跃度" group:"AI 对话 · 主动互动" default:"50" help:"控制冷场阈值、发言最小间隔、每日上限与冷却；会话里发送 /proactive 可查看换算后的数值"`
 
-	IdleMinutes        int    `cfg:"idle_minutes" label:"冷场触发（分钟）" group:"AI 对话 · 主动互动" default:"90" help:"会话连续无消息超过该时长后，AI 会判断要不要主动开口；0 表示不按冷场触发（只执行 AI 自己预约的意图）"`
-	MinGapMinutes      int    `cfg:"min_gap_minutes" label:"两次主动发言最小间隔（分钟）" group:"AI 对话 · 主动互动" default:"60"`
-	DailyLimit         int    `cfg:"daily_limit" label:"单会话每日上限" group:"AI 对话 · 主动互动" default:"3" help:"单个会话每天最多主动发言次数，0 表示不限制"`
-	GlobalDailyLimit   int    `cfg:"global_daily_limit" label:"全局每日上限" group:"AI 对话 · 主动互动" default:"20" help:"所有会话合计每天最多主动发言次数，0 表示不限制"`
+	Scopes []string `cfg:"scopes" label:"启用主动互动的会话" group:"AI 对话 · 主动互动" help:"每行一个，格式 g:群ID 或 f:用户ID（与长期记忆/知识库的 scope 一致，如 g:qq:123456）；管理员在会话内发送 /proactive on|off 会直接改写这里（群聊需先 @ 机器人），面板即时可见"`
+
 	QuietHours         string `cfg:"quiet_hours" label:"免打扰时段" group:"AI 对话 · 主动互动" default:"23:00-08:00" help:"该时段内不主动发言（支持跨午夜，如 23:00-08:00），留空表示不限制；落在时段内的意图顺延到时段结束，若已超过有效期则作废"`
-	ExpireMinutes      int    `cfg:"expire_minutes" label:"意图有效期（分钟）" group:"AI 对话 · 主动互动" default:"30" help:"意图超过该时长仍未发出则作废，避免提起已冷掉的话题；AI 预约的意图按「到点时间 + 该时长」计算有效期"`
-	OutcomeMinutes     int    `cfg:"outcome_minutes" label:"回应观察窗口（分钟）" group:"AI 对话 · 主动互动" default:"10" help:"主动发言后在该时长内有人说话记为「有回应」，否则记为「无人理」；连续无人理会触发冷却"`
-	CooldownMinutes    int    `cfg:"cooldown_minutes" label:"连续无人理后的冷却（分钟）" group:"AI 对话 · 主动互动" default:"360"`
-	StrikeLimit        int    `cfg:"strike_limit" label:"连续无人理次数" group:"AI 对话 · 主动互动" default:"3" help:"最近 N 次主动发言都无人回应后进入冷却；0 表示不做这项限制"`
-	TimeoutSec         int    `cfg:"timeout_sec" label:"单次执行超时(秒)" group:"AI 对话 · 主动互动" default:"120"`
-	MaxContextMessages int    `cfg:"max_context_messages" label:"现场消息条数" group:"AI 对话 · 主动互动" default:"30" help:"为每个启用的会话保留最近多少条消息作为「现场」，主动开口时参考；只记录已启用会话，不占未启用会话的内存"`
+	TimeoutSec         int    `cfg:"timeout_sec" label:"单次执行超时(秒)" group:"AI 对话 · 主动互动 · 高级" default:"120" help:"单次主动发言的生成超时"`
+	MaxContextMessages int    `cfg:"max_context_messages" label:"现场消息条数" group:"AI 对话 · 主动互动 · 高级" default:"30" help:"每个启用会话保留的最近消息条数，作为主动开口时的现场参考"`
 }
 
 // promptCacheConfig 上游 prompt 缓存配置：仅 anthropic 格式需要显式声明

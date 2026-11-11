@@ -164,6 +164,76 @@
   cursor: not-allowed;
 }
 
+/* ============ 滑条：奶油轨道 + 薄荷滑块（配置页的「活跃度」等滑条） ============
+   替换浏览器默认的深色 range 轨道；已填充比例由 --slider-pct（0%~100%，
+   Vue 内联设置）驱动，未设置时按 0 处理。 */
+.app-shell input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 20px;
+  background: transparent;
+  cursor: pointer;
+}
+.app-shell input[type="range"]::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--slider-pct, 0%),
+    var(--surface-3) var(--slider-pct, 0%) 100%
+  );
+  box-shadow: inset 0 1px 2px rgb(114 93 66 / 0.12);
+}
+.app-shell input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -6px; /* (轨道 8px + 上下边框 - 滑块 18px) / 2 */
+  border-radius: 999px;
+  border: 2px solid #fff;
+  background: var(--accent);
+  box-shadow: 0 1px 3px rgb(61 52 40 / 0.35), 0 0 0 1px var(--accent-strong);
+  transition: transform 0.15s ease;
+}
+.app-shell input[type="range"]:hover::-webkit-slider-thumb {
+  background: var(--accent-hover);
+}
+.app-shell input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.1);
+}
+.app-shell input[type="range"]:focus-visible {
+  outline: none;
+}
+.app-shell input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px var(--focus-ring);
+}
+/* Firefox：轨道与已填充进度分开画 */
+.app-shell input[type="range"]::-moz-range-track {
+  height: 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-3);
+}
+.app-shell input[type="range"]::-moz-range-progress {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.app-shell input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid #fff;
+  background: var(--accent);
+  box-shadow: 0 1px 3px rgb(61 52 40 / 0.35), 0 0 0 1px var(--accent-strong);
+}
+.app-shell input[type="range"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ============ 滚动条：暖棕细条 ============ */
 ::-webkit-scrollbar {
   width: 10px;

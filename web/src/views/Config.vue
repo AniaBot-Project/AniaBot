@@ -252,7 +252,7 @@
                   <span class="text-[10px] font-normal text-slate-400">{{ s.fields.length }} 项</span>
                 </p>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-5">
-                  <div v-for="field in s.fields" :key="field.key" :class="{ 'lg:col-span-2': ['text', 'strings', 'ints', 'multiselect'].includes(field.type) }">
+                  <div v-for="field in s.fields" :key="field.key" :class="{ 'lg:col-span-2': ['text', 'strings', 'ints', 'multiselect', 'slider'].includes(field.type) }">
                     <label class="block text-xs font-medium text-slate-700 mb-1.5">
                       {{ field.label }}
                       <span class="text-slate-400 font-normal ml-1">{{ field.key }}</span>
@@ -286,6 +286,35 @@
                     <div v-else-if="field.type === 'bool'" class="flex items-center gap-2.5 py-1">
                       <Switch v-model="form[field.key]" />
                       <span class="text-sm">{{ form[field.key] ? '已启用' : '已关闭' }}</span>
+                    </div>
+
+                    <!-- 滑条：数值型配置的简化输入，刻度标签可直接点击落到对应档位 -->
+                    <div v-else-if="field.type === 'slider'" class="pt-0.5">
+                      <div class="flex items-center gap-3">
+                        <div class="flex-1 min-w-0">
+                          <input
+                            type="range"
+                            class="block w-full cursor-pointer"
+                            :min="field.min ?? 0"
+                            :max="field.max ?? 100"
+                            :step="field.step || 1"
+                            :value="form[field.key]"
+                            :style="{ '--slider-pct': sliderPercent(field) + '%' }"
+                            @input="form[field.key] = Number($event.target.value)"
+                          />
+                          <div v-if="(field.ticks || []).length" class="flex justify-between gap-2 mt-0.5">
+                            <button
+                              v-for="(tick, i) in field.ticks"
+                              :key="tick"
+                              type="button"
+                              class="text-[11px] leading-none transition-colors"
+                              :class="Number(form[field.key]) >= tickValue(field, i) ? 'text-[#11a89b] font-semibold' : 'text-slate-400 hover:text-slate-600'"
+                              @click="form[field.key] = tickValue(field, i)"
+                            >{{ tick }}</button>
+                          </div>
+                        </div>
+                        <span class="w-12 shrink-0 text-right text-sm font-semibold tabular-nums text-slate-700">{{ form[field.key] }}</span>
+                      </div>
                     </div>
 
                     <!-- 多行文本没有对应的组件库控件，保留原生 textarea -->
@@ -612,6 +641,12 @@ function toFormValue(field) {
   const v = valueOf(field.key)
   if (field.type === 'multiselect') return Array.isArray(v) ? [...v] : []
   if (field.type === 'bool') return v === true
+  if (field.type === 'slider') {
+    // 滑条用数值（未配置时回落到默认值），避免范围控件拿到空串
+    if (v === undefined || v === null || v === '') return Number(field.default ?? field.min ?? 0)
+    const n = Number(v)
+    return Number.isFinite(n) ? n : Number(field.default ?? field.min ?? 0)
+  }
   if (v === undefined || v === null) return ''
   if (field.type === 'strings' || field.type === 'ints') return Array.isArray(v) ? v.join('\n') : ''
   if (field.sensitive) return '' // 敏感字段不回显，留空表示不修改
@@ -621,6 +656,10 @@ function toFormValue(field) {
 function fromFormValue(field) {
   const raw = form[field.key]
   if (field.type === 'bool') return raw === true
+  if (field.type === 'slider') {
+    const n = Number(raw)
+    return Number.isFinite(n) ? n : Number(field.default ?? field.min ?? 0)
+  }
   if (field.type === 'int') {
     if (field.optional && raw.trim() === '') return null // 可选参数：清空=删除该键，不向下游传
     const n = parseInt(raw, 10); return Number.isNaN(n) ? 0 : n
@@ -678,6 +717,24 @@ function clearOptions(field) {
 
 function hasDefault(field) {
   return field.default !== undefined && field.default !== null && field.default !== ''
+}
+
+// 滑条刻度在 [min, max] 上均匀分布：第 i 个刻度对应的取值（与后端 min/max/step 约定一致）
+function tickValue(field, i) {
+  const min = field.min ?? 0
+  const max = field.max ?? 100
+  const ticks = field.ticks || []
+  if (ticks.length <= 1) return min
+  return Math.round(min + ((max - min) * i) / (ticks.length - 1))
+}
+
+// 滑条已填充比例（%），驱动轨道渐变；值缺失或范围非法时按最小值处理
+function sliderPercent(field) {
+  const min = field.min ?? 0
+  const max = field.max ?? 100
+  const v = Number(form[field.key])
+  if (!Number.isFinite(v) || max <= min) return 0
+  return Math.min(100, Math.max(0, ((v - min) / (max - min)) * 100))
 }
 
 // 敏感字段显式清空：与「留空=不修改」分离，保存时发送 null 删除该键

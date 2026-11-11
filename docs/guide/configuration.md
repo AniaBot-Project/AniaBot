@@ -417,18 +417,13 @@ python3 "<webctl.py 绝对路径>" fetch  --deepseek "https://example.com/articl
 | 配置键 | 默认值 | 说明 |
 | --- | --- | --- |
 | `plugin.ai_chat_bot.proactive.enable` | `false` | 总开关；开启后还需按会话启用（下方白名单，或管理员在会话内发送 `/proactive on`） |
+| `plugin.ai_chat_bot.proactive.activity` | `50` | 活跃度滑条（`0`~`100`，从「冷淡」到「活跃」）：控制冷场阈值、发言最小间隔、单会话/全局每日上限与冷却。`50` 为「均衡」，与旧版默认值一致；会话里发 `/proactive` 可查看换算后的数值 |
 | `plugin.ai_chat_bot.proactive.scopes` | 空 | 启用会话白名单，每行一个 `g:会话ID` / `f:用户ID`；`/proactive on|off` 直接改写这里（群聊需先 @ 机器人） |
-| `plugin.ai_chat_bot.proactive.idle_minutes` | `90` | 会话安静超过该时长后生成冷场意图；`0` 表示不按冷场触发 |
-| `plugin.ai_chat_bot.proactive.min_gap_minutes` | `60` | 同一会话两次主动发言的最小间隔 |
-| `plugin.ai_chat_bot.proactive.daily_limit` | `3` | 单会话每日上限；`0` 不限制 |
-| `plugin.ai_chat_bot.proactive.global_daily_limit` | `20` | 全局每日上限；`0` 不限制 |
 | `plugin.ai_chat_bot.proactive.quiet_hours` | `23:00-08:00` | 免打扰时段（支持跨午夜），时段内的意图顺延到结束，撑不过有效期则作废；留空不限制 |
-| `plugin.ai_chat_bot.proactive.expire_minutes` | `30` | 意图有效期，超过仍未发出则作废 |
-| `plugin.ai_chat_bot.proactive.outcome_minutes` | `10` | 回应观察窗口：窗口内有人说话记「有回应」，否则记「无人理」 |
-| `plugin.ai_chat_bot.proactive.cooldown_minutes` | `360` | 连续无人理后的冷却时长 |
-| `plugin.ai_chat_bot.proactive.strike_limit` | `3` | 连续多少次无人理后进入冷却；`0` 关闭该限制 |
 | `plugin.ai_chat_bot.proactive.timeout_sec` | `120` | 单次生成超时（秒） |
 | `plugin.ai_chat_bot.proactive.max_context_messages` | `30` | 每会话保留的现场消息条数（作为主动开口时的参考） |
+
+活跃度的 5 个档位（`0` / `25` / `50` / `75` / `100`）分别为冷淡、克制、均衡、活跃、话痨，中间取值在相邻档位之间线性插值。旧的逐项节奏配置（`idle_minutes`、`min_gap_minutes`、`daily_limit`、`global_daily_limit`、`expire_minutes`、`outcome_minutes`、`cooldown_minutes`、`strike_limit`）已并入活跃度，留在数据库里不再生效。
 
 AI 也可以用 `proactive_create` / `proactive_list` / `proactive_cancel` 自行预约与取消意图（只能作用于当前会话）。`/proactive log` 可查看每次「说了什么、为什么没说」。详见 [AI 对话插件](/guide/builtin-plugins#主动互动proactive)。
 

@@ -240,6 +240,102 @@ func TestMultiselect(t *testing.T) {
 	}
 }
 
+func TestSlider(t *testing.T) {
+	type sliderConfig struct {
+		Activity int     `cfg:"plugin.demo.activity" label:"活跃度" type:"slider" min:"0" max:"100" step:"5" ticks:"冷淡,克制,均衡,活跃,话痨" group:"演示" default:"50"`
+		Plain    float64 `cfg:"plugin.demo.plain_slider" type:"slider" group:"演示"`
+	}
+	var cfg sliderConfig
+	if err := RegisterStruct(&cfg); err != nil {
+		t.Fatalf("RegisterStruct: %v", err)
+	}
+	byKey := map[string]Field{}
+	for _, f := range Fields() {
+		byKey[f.Key] = f
+	}
+
+	f, ok := byKey["plugin.demo.activity"]
+	if !ok {
+		t.Fatal("slider 字段未注册")
+	}
+	if f.Type != "slider" {
+		t.Errorf("Type = %q, 期望 slider", f.Type)
+	}
+	if f.Min != 0 || f.Max != 100 || f.Step != 5 {
+		t.Errorf("范围 = (%v,%v,%v), 期望 (0,100,5)", f.Min, f.Max, f.Step)
+	}
+	if want := []string{"冷淡", "克制", "均衡", "活跃", "话痨"}; !reflect.DeepEqual(f.Ticks, want) {
+		t.Errorf("Ticks = %v, 期望 %v", f.Ticks, want)
+	}
+	if f.Default != int64(50) {
+		t.Errorf("Default = %#v, 期望 50", f.Default)
+	}
+
+	// 省略 min/max/step 时应回落到 0/100/1，面板据此渲染范围控件
+	plain := byKey["plugin.demo.plain_slider"]
+	if plain.Min != 0 || plain.Max != 100 || plain.Step != 1 {
+		t.Errorf("缺省范围 = (%v,%v,%v), 期望 (0,100,1)", plain.Min, plain.Max, plain.Step)
+	}
+
+	data, err := json.Marshal(f)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(data, []byte(`"max":100`)) || !bytes.Contains(data, []byte(`"step":5`)) {
+		t.Errorf("slider 应暴露 max/step, got %s", data)
+	}
+
+	v := viper.New()
+	for k, val := range Defaults() {
+		v.Set(k, val)
+	}
+	var loaded sliderConfig
+	if err := Load(v, &loaded); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Activity != 50 {
+		t.Errorf("Activity = %d, 期望 50", loaded.Activity)
+	}
+	// 滑条值按普通数值读取（Load 不关心 slider 这一展示类型）
+	v.Set("plugin.demo.activity", 85)
+	v.Set("plugin.demo.plain_slider", 0.25)
+	var updated sliderConfig
+	if err := Load(v, &updated); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if updated.Activity != 85 || updated.Plain != 0.25 {
+		t.Errorf("滑条值未读回: %d / %v", updated.Activity, updated.Plain)
+	}
+}
+
+func TestSliderErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		ptr  any
+	}{
+		{"max 不大于 min", &struct {
+			N int `cfg:"a.b" type:"slider" min:"10" max:"10"`
+		}{}},
+		{"step 非正", &struct {
+			N int `cfg:"a.b" type:"slider" min:"0" max:"10" step:"0"`
+		}{}},
+		{"step 超过区间", &struct {
+			N int `cfg:"a.b" type:"slider" min:"0" max:"10" step:"20"`
+		}{}},
+		{"非法 min", &struct {
+			N int `cfg:"a.b" type:"slider" min:"abc"`
+		}{}},
+		{"slider 非数值", &struct {
+			S string `cfg:"a.b" type:"slider"`
+		}{}},
+	}
+	for _, c := range cases {
+		if err := RegisterStruct(c.ptr); err == nil {
+			t.Errorf("%s: 期望报错", c.name)
+		}
+	}
+}
+
 func TestParseSchemaErrors(t *testing.T) {
 	cases := []struct {
 		name string

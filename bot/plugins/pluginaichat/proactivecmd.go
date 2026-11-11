@@ -145,6 +145,8 @@ func (m *proactiveManager) statusText(scope string, isGroup bool) string {
 	sb.WriteString(" 次；待执行意图：")
 	sb.WriteString(strconv.Itoa(len(pending)))
 	sb.WriteString(" 条")
+	sb.WriteString(fmt.Sprintf("\n活跃度：%d（%s）· 冷场 %d 分钟 · 间隔 %d 分钟 · 每日 %d 次",
+		m.activity, m.activityName, int(m.idle.Minutes()), int(m.minGap.Minutes()), m.dailyLimit))
 	if m.quietSpec != "" {
 		sb.WriteString("\n免打扰时段：")
 		sb.WriteString(m.quietSpec)

@@ -25,8 +25,12 @@ import (
 type Field struct {
 	Key       string   `json:"key"`                 // 点分配置键，如 plugin.xxx.enable（统一小写）
 	Label     string   `json:"label"`               // 面板表单中的显示名
-	Type      string   `json:"type"`                // string | password | int | float | bool | text | strings | ints | select | multiselect
+	Type      string   `json:"type"`                // string | password | int | float | bool | text | strings | ints | select | multiselect | slider
 	Options   []string `json:"options,omitempty"`   // select / multiselect 类型：可选项列表
+	Min       float64  `json:"min,omitempty"`       // slider 类型：最小值（缺省 0）
+	Max       float64  `json:"max,omitempty"`       // slider 类型：最大值（缺省 100）
+	Step      float64  `json:"step,omitempty"`      // slider 类型：步长（缺省 1）
+	Ticks     []string `json:"ticks,omitempty"`     // slider 类型：刻度标签，从最小值到最大值均匀分布
 	Group     string   `json:"group"`               // 面板中的分组名；支持「父分组.子分组」两级写法（"." 或 " · " 分隔），同一父分组在面板中合为一张卡片、子分组在卡片内分节展示
 	Help      string   `json:"help,omitempty"`      // 字段说明（可选）
 	Sensitive bool     `json:"sensitive,omitempty"` // 敏感字段：面板不回显，API 掩码处理
