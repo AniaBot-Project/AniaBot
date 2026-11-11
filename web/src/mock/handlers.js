@@ -162,6 +162,56 @@ setInterval(() => {
   if (state.consoleLogs.length > 300) state.consoleLogs.length = 300
 }, 18_000)
 
+// 消息日志会话键（与后端 msglog.Entry.SessionKey 一致）
+function msgLogSessionKey(log) {
+  if (log.type === 'group' || (log.type === 'notice' && log.group_id)) return 'g:' + log.group_id
+  if (log.type === 'friend' || (log.type === 'notice' && log.user_id)) return 'f:' + log.user_id
+  return 'n:system'
+}
+
+// 会话摘要（与后端 msglog.Session 字段对齐）
+function buildMsgLogSessions() {
+  const map = new Map()
+  for (const log of state.msgLogs) {
+    const key = msgLogSessionKey(log)
+    let s = map.get(key)
+    if (!s) {
+      const kind = key.startsWith('g:') ? 'group' : key.startsWith('f:') ? 'friend' : 'system'
+      s = {
+        key, kind, count: 0, name: '', title: '',
+        group_id: kind === 'group' ? key.slice(2) : '',
+        user_id: kind === 'friend' ? key.slice(2) : '',
+      }
+      map.set(key, s)
+    }
+    s.count++
+    if (!s.last_id) {
+      s.last_id = log.id
+      s.last_time = log.time
+      s.last_text = String(log.text || '').slice(0, 160)
+      s.last_type = log.type
+      s.last_media = log.media && log.media[0] ? log.media[0].kind : ''
+      s.title = log.title || ''
+    }
+    if (!s.name && log.nickname) s.name = log.nickname
+    if (!s.title && log.title) s.title = log.title
+  }
+  return [...map.values()].sort((a, b) => b.last_id - a.last_id)
+}
+
+function paginateMsgLogs(c) {
+  const limit = Math.min(200, Math.max(1, parseInt(c.query.get('limit') || '50', 10) || 50))
+  const session = c.query.get('session')
+  const before = parseInt(c.query.get('before') || '0', 10) || 0
+  const after = parseInt(c.query.get('after') || '0', 10) || 0
+  let list = state.msgLogs
+  if (session) list = list.filter((x) => msgLogSessionKey(x) === session)
+  if (before) list = list.filter((x) => x.id < before)
+  if (after) list = list.filter((x) => x.id > after)
+  const page = list.slice(0, limit)
+  return { items: page, has_more: list.length > limit }
+}
+
 // 通用工具
 
 function paginate(items, query, idOf, compare) {
@@ -397,7 +447,16 @@ const routes = [
   { m: 'GET', re: /^\/api\/contacts$/, h: (c) => buildContacts(c.query.get('kind') || 'groups') },
 
   // 日志（分页 + 过滤）
-  { m: 'GET', re: /^\/api\/msglogs$/, h: (c) => paginate(state.msgLogs, c.query, (x) => x.id) },
+  { m: 'GET', re: /^\/api\/msglogs$/, h: (c) => paginateMsgLogs(c) },
+  { m: 'GET', re: /^\/api\/msglogs\/sessions$/, h: () => ({ items: buildMsgLogSessions() }) },
+  {
+    m: 'GET', re: /^\/api\/msglogs\/media$/, h: (c) => {
+      const url = c.query.get('url')
+      if (!url) return { status: 400, body: { error: '缺少 url 参数' } }
+      // 演示模式没有后端代理，直接跳转到原始地址（data: URL 由浏览器直接加载）
+      return { redirect: url }
+    },
+  },
   {
     m: 'GET', re: /^\/api\/consolelogs$/, h: (c) => paginate(state.consoleLogs, c.query, (x) => x.id),
   },

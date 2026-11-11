@@ -11,12 +11,17 @@
 //   - msglog:entries 列表，每个元素是一条独立日志（LPush 新条目在前，
 //     LTrim 按容量上限滚动淘汰最旧条目）
 //
+// 会话索引（面板聊天式视图的侧栏与按会话分页）不额外占存储：Recorder 在首次
+// 查询会话时扫描一遍 entries 建立「会话 → 日志 ID」内存索引，之后由 Add 增量
+// 维护；索引只保存 uint64，20 万条日志的内存开销也在 MB 级。
+//
 // 命名空间由调用方在注入存储时隔离，本组件不再 Clone。
 package msglog
 
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -33,11 +38,42 @@ const (
 	TypeNotice Type = "notice" // 通知事件（群成员变动、撤回、戳一戳等）
 )
 
+// 会话类型（面板侧栏分组用）
+const (
+	SessionGroup  = "group"  // 群聊会话
+	SessionFriend = "friend" // 私聊会话
+	SessionSystem = "system" // 系统通知（既不属群也不属好友的事件）
+)
+
+// 媒体类型（面板内联展示 / 下载用）
+const (
+	MediaImage  = "image"
+	MediaFile   = "file"
+	MediaRecord = "record"
+	MediaVideo  = "video"
+)
+
 const (
 	seqKey     = "msglog:seq"     // 自增 ID 计数器
 	entriesKey = "msglog:entries" // 日志列表（新在前，每条日志一个元素）
 	defaultMax = 20000
+
+	systemSessionKey = "n:system" // 系统通知会话键
+	// lastTextMaxRunes 会话预览文本的截断长度：侧栏只展示一行，无需传输全文。
+	lastTextMaxRunes = 100
 )
+
+// Media 消息中的媒体 / 文件，供面板在聊天气泡内联展示图片、提供文件下载。
+// 只保留可被浏览器直接访问的 http(s) 地址：data:/base64: 内联负载体积可达
+// MB 级，复制进每条日志会让缓存存储（尤其 Redis）迅速膨胀，因此落盘时丢弃，
+// 由 Text 里的占位符提示「此处有媒体」。
+type Media struct {
+	Kind   string `json:"kind"`              // image / file / record / video
+	URL    string `json:"url,omitempty"`     // 远程地址（可能为空，表示暂无下载地址）
+	Name   string `json:"name,omitempty"`    // 文件名 / 语音视频标题
+	Size   int64  `json:"size,omitempty"`    // 文件大小（字节）
+	FileId string `json:"file_id,omitempty"` // 平台文件 ID（面板不直接使用，便于排查）
+}
 
 // Entry 一条消息日志
 type Entry struct {
@@ -49,17 +85,78 @@ type Entry struct {
 	Nickname string    `json:"nickname,omitempty"` // 发送者昵称 / 群名片
 	Title    string    `json:"title,omitempty"`    // 通知标题（仅 notice 类型），如「群成员增加」
 	Text     string    `json:"text"`               // 消息内容 / 通知描述
+	Media    []Media   `json:"media,omitempty"`    // 消息内的图片 / 文件（按出现顺序）
+}
+
+// SessionKey 返回日志所属的会话键，面板用它把消息归类到群聊 / 私聊 / 系统通知：
+//   - 群消息与群通知：g:<群 ID>（通知与聊天记录合并展示，更像聊天软件）
+//   - 好友消息，以及带用户 ID 但不带群 ID 的通知：f:<用户 ID>
+//   - 其余通知：n:system
+func (e Entry) SessionKey() string {
+	switch e.Type {
+	case TypeGroup:
+		if e.GroupId != "" {
+			return "g:" + e.GroupId
+		}
+	case TypeFriend:
+		if e.UserId != "" {
+			return "f:" + e.UserId
+		}
+	case TypeNotice:
+		if e.GroupId != "" {
+			return "g:" + e.GroupId
+		}
+		if e.UserId != "" {
+			return "f:" + e.UserId
+		}
+	}
+	return systemSessionKey
+}
+
+// Session 面板侧栏的一个会话摘要。
+type Session struct {
+	Key       string    `json:"key"`                  // 会话键（g:/f:/n:system）
+	Kind      string    `json:"kind"`                 // group / friend / system
+	GroupId   string    `json:"group_id,omitempty"`   // 群 ID（群聊）
+	UserId    string    `json:"user_id,omitempty"`    // 用户 ID（私聊 / 通知）
+	Name      string    `json:"name,omitempty"`       // 最近发言人昵称（群名由面板按通讯录补全）
+	Title     string    `json:"title,omitempty"`      // 最近一条通知标题
+	LastText  string    `json:"last_text"`            // 最近一条消息预览（已截断）
+	LastTime  time.Time `json:"last_time"`            // 最近一条消息时间
+	LastID    uint64    `json:"last_id"`              // 最近一条消息 ID（排序 / 未读标记）
+	LastKind  Type      `json:"last_type"`            // 最近一条日志类型
+	LastMedia string    `json:"last_media,omitempty"` // 最近一条消息含有的媒体类型
+	Count     int       `json:"count"`                // 当前保留的日志条数
+}
+
+// sessionState 单个会话的内存索引。
+type sessionState struct {
+	kind      string
+	groupId   string
+	userId    string
+	name      string
+	title     string
+	lastText  string
+	lastKind  Type
+	lastID    uint64
+	lastTime  time.Time
+	lastMedia string
+	ids       []uint64 // 日志 ID，升序（旧 → 新）
 }
 
 // Recorder 消息日志记录器。
 //
-// 内部用互斥串行化 Add，保证 ID 单调递增；读取（Recent）每次直接从存储
-// 加载最新数据，不持有内存副本，保证与存储状态一致（redis 驱动下重启不丢）。
+// 内部用互斥串行化 Add，保证 ID 单调递增；读取（Recent / Page）每次直接从存储
+// 加载最新数据，不持有消息副本，保证与存储状态一致（redis 驱动下重启不丢）。
+// 会话索引是唯一的例外：它只缓存 ID 与预览字段，不缓存消息正文。
 type Recorder struct {
 	store storage.Storage
 	max   int64
 	mu    sync.Mutex
 	seq   uint64
+
+	sessions     map[string]*sessionState // 会话索引（首次查询时重建）
+	sessionsRead bool
 }
 
 // New 创建记录器。store 应为已隔离好命名空间的缓存存储；maxEntries<=0 时取默认值。
@@ -67,7 +164,11 @@ func New(store storage.Storage, maxEntries int) *Recorder {
 	if maxEntries <= 0 {
 		maxEntries = defaultMax
 	}
-	r := &Recorder{store: store, max: int64(maxEntries)}
+	r := &Recorder{
+		store:    store,
+		max:      int64(maxEntries),
+		sessions: make(map[string]*sessionState),
+	}
 	r.seq = r.loadSeq()
 	return r
 }
@@ -100,6 +201,120 @@ func (r *Recorder) Add(e Entry) {
 	r.store.LPush(ctx, entriesKey, e)
 	r.store.LTrim(ctx, entriesKey, 0, r.max-1)
 	r.store.SetString(ctx, seqKey, strconv.FormatUint(r.seq, 10))
+
+	// 索引在 Add 期间可能尚未重建（首次查询还没发生）：此时先增量写入，
+	// 真正重建时会整体按存储重扫，因此不会重复计数。
+	r.indexLocked(e)
+}
+
+// indexLocked 把一条日志并入会话索引；调用方需持有 r.mu。
+func (r *Recorder) indexLocked(e Entry) {
+	key := e.SessionKey()
+	st := r.sessions[key]
+	if st == nil {
+		st = &sessionState{kind: sessionKind(key)}
+		// 会话 ID 由键决定：群会话只记群 ID，私聊会话只记用户 ID
+		if st.kind == SessionGroup {
+			st.groupId = e.GroupId
+		} else if st.kind == SessionFriend {
+			st.userId = e.UserId
+		}
+		r.sessions[key] = st
+	}
+	st.lastID = e.ID
+	st.lastTime = e.Time
+	st.lastKind = e.Type
+	st.lastText = truncateRunes(e.Text, lastTextMaxRunes)
+	st.lastMedia = ""
+	if len(e.Media) > 0 {
+		st.lastMedia = e.Media[0].Kind
+	}
+	// 通知没有昵称：保留最近一次真人发言的昵称，供群名未知时兜底展示
+	if e.Nickname != "" {
+		st.name = e.Nickname
+	}
+	if e.Type == TypeNotice {
+		st.title = e.Title
+	}
+	st.ids = append(st.ids, e.ID)
+	r.trimSessionLocked(st)
+}
+
+// trimSessionLocked 丢弃已被全局容量淘汰的会话 ID（保持 id 升序）。
+// 仅当待丢弃条目超过一定量时才收缩切片，避免每条消息都搬移内存。
+func (r *Recorder) trimSessionLocked(st *sessionState) {
+	if len(st.ids) == 0 {
+		return
+	}
+	minID := uint64(1)
+	if r.seq > uint64(r.max) {
+		minID = r.seq - uint64(r.max) + 1
+	}
+	if st.ids[0] >= minID {
+		return
+	}
+	cut := sort.Search(len(st.ids), func(i int) bool { return st.ids[i] >= minID })
+	if cut > 1024 {
+		st.ids = append([]uint64(nil), st.ids[cut:]...)
+		return
+	}
+	st.ids = st.ids[cut:]
+}
+
+// ensureSessionsLocked 在首次查询会话时从存储重建索引；调用方需持有 r.mu。
+// 重建会整体重置索引，因此 Add 期间先写入的增量也会被存储中的同一条日志覆盖，
+// 不会重复。
+func (r *Recorder) ensureSessionsLocked() {
+	if r.sessionsRead {
+		return
+	}
+	r.sessionsRead = true
+	r.sessions = make(map[string]*sessionState)
+
+	items, ok := r.store.LRange(context.Background(), entriesKey, 0, r.max-1)
+	if !ok {
+		return
+	}
+	entries := decodeEntries(items)
+	// 存储列表为新在前：倒序处理即可得到 ID 升序的索引。
+	for i := len(entries) - 1; i >= 0; i-- {
+		r.indexLocked(entries[i])
+	}
+}
+
+// Sessions 返回全部会话摘要（按最近一条日志的 ID 倒序）。
+func (r *Recorder) Sessions() []Session {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ensureSessionsLocked()
+
+	out := make([]Session, 0, len(r.sessions))
+	for key, st := range r.sessions {
+		if len(st.ids) == 0 {
+			continue
+		}
+		out = append(out, Session{
+			Key:       key,
+			Kind:      st.kind,
+			GroupId:   st.groupId,
+			UserId:    st.userId,
+			Name:      st.name,
+			Title:     st.title,
+			LastText:  st.lastText,
+			LastTime:  st.lastTime,
+			LastID:    st.lastID,
+			LastKind:  st.lastKind,
+			LastMedia: st.lastMedia,
+			Count:     len(st.ids),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].LastID == out[j].LastID {
+			return out[i].Key < out[j].Key
+		}
+		return out[i].LastID > out[j].LastID
+	})
+	return out
 }
 
 // Recent 返回最近 limit 条日志（新在前）。limit<=0 时返回全部。
@@ -120,22 +335,111 @@ func (r *Recorder) Recent(limit int) []Entry {
 // 列表按新在前排列且 ID 连续自增，索引 i 处的条目 ID 为 seq-i，
 // 因此可直接把游标换算为列表偏移，无需全量扫描。
 func (r *Recorder) Page(limit int, beforeID uint64) []Entry {
+	// 读取期间持锁：Add 会改变列表偏移，否则并发写入会让游标错位。
 	r.mu.Lock()
-	seq := r.seq
-	r.mu.Unlock()
+	defer r.mu.Unlock()
 
 	if limit <= 0 || limit > int(r.max) {
 		limit = int(r.max)
 	}
 	var start int64
-	if beforeID > 0 && beforeID <= seq {
-		start = int64(seq - beforeID + 1)
+	if beforeID > 0 && beforeID <= r.seq {
+		start = int64(r.seq - beforeID + 1)
 	}
 	items, ok := r.store.LRange(context.Background(), entriesKey, start, start+int64(limit)-1)
 	if !ok {
 		return nil
 	}
 	return decodeEntries(items)
+}
+
+// PageSession 返回指定会话的一页日志（新在前）：
+//   - beforeID>0：仅返回 ID 小于它的更旧日志（向上滚动加载）；
+//   - afterID>0：仅返回 ID 大于它的新日志（轮询增量，通常只有几条）。
+//
+// limit<=0 时取容量上限；会话不存在时返回 nil。
+func (r *Recorder) PageSession(session string, limit int, beforeID, afterID uint64) []Entry {
+	if limit <= 0 || limit > int(r.max) {
+		limit = int(r.max)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ensureSessionsLocked()
+	seq := r.seq
+	st := r.sessions[session]
+	var ids []uint64
+	if st != nil && len(st.ids) > 0 {
+		for i := len(st.ids) - 1; i >= 0 && len(ids) < limit; i-- {
+			id := st.ids[i]
+			if afterID > 0 {
+				if id <= afterID {
+					break
+				}
+				ids = append(ids, id)
+				continue
+			}
+			if beforeID > 0 && id >= beforeID {
+				continue
+			}
+			ids = append(ids, id)
+		}
+	}
+
+	// 取日志时保持持锁：偏移量由 seq 换算，Add 并发写入会让偏移整体错位。
+	return r.fetchByIDs(seq, ids)
+}
+
+// fetchByIDs 按 ID 倒序（新在前）取回日志：把连续的 ID 合并成一次 LRange，
+// 避免每条日志一次存储往返。调用方已持有索引快照与 seq。
+func (r *Recorder) fetchByIDs(seq uint64, ids []uint64) []Entry {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]Entry, 0, len(ids))
+	ctx := context.Background()
+	for i := 0; i < len(ids); {
+		id := ids[i]
+		if id > seq {
+			i++
+			continue
+		}
+		start := seq - id
+		j := i + 1
+		for j < len(ids) && ids[j] <= seq && ids[j-1]-ids[j] == 1 {
+			j++
+		}
+		end := seq - ids[j-1]
+		items, ok := r.store.LRange(ctx, entriesKey, int64(start), int64(end))
+		if ok {
+			out = append(out, decodeEntries(items)...)
+		}
+		i = j
+	}
+	return out
+}
+
+// sessionKind 由会话键前缀推断会话类型。
+func sessionKind(key string) string {
+	switch {
+	case len(key) > 2 && key[:2] == "g:":
+		return SessionGroup
+	case len(key) > 2 && key[:2] == "f:":
+		return SessionFriend
+	default:
+		return SessionSystem
+	}
+}
+
+// truncateRunes 按字符截断文本（不破坏多字节字符），超长时补省略号。
+func truncateRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "…"
 }
 
 // decodeEntries 把存储层按 any 解码的列表元素（map）经 JSON 往返还原为 Entry。

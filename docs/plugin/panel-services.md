@@ -43,7 +43,7 @@ for _, p := range ania.plugins {
 
 | 面板页面 | 接口 | 内置提供者 |
 | --- | --- | --- |
-| 消息日志 | `adminpanel.MsgLogSource` | 日志打印插件（`pluginlog`） |
+| 消息日志 | `adminpanel.MsgLogSource` + `adminpanel.MsgLogSessionSource`（可选） | 日志打印插件（`pluginlog`） |
 | 任务日志 | `adminpanel.TaskLogSource` | AI 对话插件（clock） |
 | 定时任务 | `adminpanel.ClockTaskSource` | AI 对话插件（clock） |
 | 技能管理 | `adminpanel.SkillSource` + `adminpanel.SkillToggleSource`（可选） | AI 对话插件 |
@@ -62,9 +62,19 @@ type MsgLogSource interface {
     // 分页返回消息日志（新在前）；beforeID>0 时仅返回 ID 小于它的更旧日志（滚动分页游标）
     MsgLogPage(limit int, beforeID uint64) []msglog.Entry
 }
+
+// 可选：聊天式消息面板的会话分类与按会话分页。未实现时面板退化为「全部消息」单视图。
+type MsgLogSessionSource interface {
+    // 会话摘要（按最近活动倒序），面板左侧按群聊 / 私聊 / 系统通知分组展示
+    MsgLogSessions() []msglog.Session
+    // 指定会话的一页日志（新在前）：beforeID>0 取更旧分页；afterID>0 取轮询增量
+    MsgLogSessionPage(session string, limit int, beforeID, afterID uint64) []msglog.Entry
+}
 ```
 
-`msglog.Entry` 字段：`ID uint64`、`Time`、`Type`、`GroupId`、`UserId`、`Nickname`、`Title`、`Text`。可用 `bot/component/msglog` 的 `Recorder` 记录与分页。
+`msglog.Entry` 字段：`ID uint64`、`Time`、`Type`、`GroupId`、`UserId`、`Nickname`、`Title`、`Text`、`Media`。`Media` 描述消息内的图片 / 文件（`Kind`、`URL`、`Name`、`Size`、`FileId`），`URL` 只应填浏览器可访问的 http(s) 地址——`data:` / `base64:` 内联负载体积可达 MB 级，写进日志会让缓存存储迅速膨胀，面板会把它们当作不可展示的占位。
+
+会话键由 `Entry.SessionKey()` 统一生成：群消息 / 群通知为 `g:<群ID>`，好友消息 / 好友通知为 `f:<用户ID>`，其余通知为 `n:system`。推荐直接用 `bot/component/msglog` 的 `Recorder`：它按上述规则维护会话索引（首次查询时从存储重建，之后随 `Add` 增量更新），并自动对预览文本做截断。图片 / 文件下载由面板的媒体代理 `/api/msglogs/media?url=…` 完成（管理员登录态访问、拒绝本机 / 私网地址），插件只需填好 `Media.URL`。
 
 ### TaskLogSource —— 任务日志页
 

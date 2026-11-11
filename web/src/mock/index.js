@@ -26,6 +26,10 @@ export function installMock() {
     if (!res) return realFetch(input, init)
 
     await sleep(latency())
+    // 媒体代理在演示模式下用 302 跳转到原始地址（如 data: 图片、外链图片）
+    if (res.redirect) {
+      return new Response(null, { status: 302, headers: { Location: res.redirect } })
+    }
     const bodyIsString = typeof res.body === 'string'
     return new Response(bodyIsString ? res.body : JSON.stringify(res.body), {
       status: res.status || 200,

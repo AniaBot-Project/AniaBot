@@ -41,22 +41,6 @@ const MEMBERS = [
   { id: 10006, nick: '咕咕鸟' },
 ]
 
-// 群聊语料（用户发言 → 偶尔触发 AI 回复）
-const GROUP_CHATTER = [
-  '今天 NapCat 更新了没，有人遇到风控吗',
-  '问下大佬，插件的热更新是怎么实现的呀',
-  '刚在群里 @机器人 查了天气，回复还挺快',
-  '这个面板的 Token 统计图表好酷',
-  '有人玩过 computer_use 工具吗，AI 自己操作屏幕有点离谱',
-  'docker 部署记得挂载 data 目录，血的教训',
-  '定时任务每天早上八点给我发新闻早报，舒服了',
-  '飞书适配器有人接吗？webhook 要公网有点麻烦',
-  '@mcp 大佬 问下 MCP 的 sse 端点怎么配',
-  '刚让 AI 帮我写了段油猴脚本，直接能跑',
-  '群主什么时候出一期插件开发教程',
-  '昨晚机器人抽风，一直重复回复，后来发现是复读机插件开了',
-]
-
 const AI_REPLIES = [
   '这是我的回答：NapCat 建议跟随官方最新版，风控问题多与账号环境有关，可以先在面板里把消息处理超时调大试试。',
   '插件热更新是插件市场通过重新编译 + 重启实现的，安装即生效，具体可以看文档的插件市场章节。',
@@ -65,46 +49,131 @@ const AI_REPLIES = [
   'MCP 的 streamable 端点在「扩展配置 → MCP」里加一条 JSON 即可，transport 填 streamable。',
 ]
 
-const NOTICE_TITLES = ['戳一戳', '群文件上传', '成员入群', '精华消息设置', '全群禁言']
-
 //  消息日志（msglog.Entry 形状）
+//
+// 演示数据覆盖 3 个群聊 + 2 个私聊 + 群通知：包含图片、文件、引用、合并转发、
+// @、表情与分享卡片，用来展示聊天式面板的各类消息形态。图片使用自绘 SVG
+// data URI，离线也能显示，不依赖外部图床。
+
+function svgPhoto(from, to, label, sub = 'AniaBot demo') {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480" viewBox="0 0 720 480">'
+    + '<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">'
+    + `<stop offset="0" stop-color="${from}"/><stop offset="1" stop-color="${to}"/>`
+    + '</linearGradient></defs>'
+    + '<rect width="720" height="480" fill="url(#bg)"/>'
+    + '<circle cx="576" cy="108" r="56" fill="#ffffff" opacity=".5"/>'
+    + '<path d="M0 356 Q180 280 360 344 T720 326 V480 H0Z" fill="#ffffff" opacity=".2"/>'
+    + '<path d="M0 400 Q220 338 440 396 T720 374 V480 H0Z" fill="#ffffff" opacity=".14"/>'
+    + `<text x="360" y="238" text-anchor="middle" font-family="Nunito, 'PingFang SC', sans-serif" font-size="34" font-weight="800" fill="#ffffff" opacity=".95">${label}</text>`
+    + `<text x="360" y="276" text-anchor="middle" font-family="Nunito, 'PingFang SC', sans-serif" font-size="16" fill="#ffffff" opacity=".72">${sub}</text>`
+    + '</svg>'
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)
+}
+
+const PHOTO_SEA = svgPhoto('#5fc8d8', '#2a7fbe', '海边的周末')
+const PHOTO_SUNSET = svgPhoto('#f2a65a', '#c8556d', '傍晚的云')
+const PHOTO_CAT = svgPhoto('#9fd49b', '#4f8f6b', '猫猫巡逻中')
+const PHOTO_MENU = svgPhoto('#f4d29a', '#d99a55', '楼下新开的面馆')
+
+const DEMO_MD = 'data:text/markdown;charset=utf-8,' + encodeURIComponent(
+  '# NapCat 部署踩坑记录\n\n1. Docker 部署记得挂载 data 目录\n2. WS 模式注意 worker 数量\n3. 出现风控先检查账号环境\n',
+)
 
 export function buildMsgLogs(now) {
-  const items = []
-  let id = 8000
-  // 过去 ~3 小时，平均每 2~4 分钟一条
-  let t = now - ri(150, 200) * 60 * 1000
-  while (t < now - 30 * 1000) {
-    const r = rand()
-    if (r < 0.72) {
-      const m = pick(MEMBERS)
-      items.push({
-        id, time: toLocalIso(new Date(t)), type: 'group',
-        group_id: 123456, user_id: m.id, nickname: m.nick, text: pick(GROUP_CHATTER),
-      })
-    } else if (r < 0.88) {
-      items.push({
-        id, time: toLocalIso(new Date(t)), type: 'group',
-        group_id: 123456, user_id: 2841701201, nickname: 'Ania', text: pick(AI_REPLIES),
-      })
-    } else if (r < 0.95) {
-      items.push({
-        id, time: toLocalIso(new Date(t)), type: 'friend',
-        user_id: 10004, nickname: '同事K', text: pick([
-          '下班一起去吃饭？', '那个服务器日志我发你邮箱了', '周末组队不',
-        ]),
-      })
-    } else {
-      const m = pick(MEMBERS)
-      items.push({
-        id, time: toLocalIso(new Date(t)), type: 'notice',
-        group_id: 123456, user_id: m.id, nickname: m.nick, title: pick(NOTICE_TITLES),
-      })
-    }
-    id++
-    t += ri(2, 4) * 60 * 1000
+  const raw = []
+  const add = (minutesAgo, entry) => {
+    raw.push({ minutesAgo, ...entry })
   }
-  return items.reverse() // 新的在前，id 随时间递增，翻页游标用 id
+  const group = (minutesAgo, groupId, userId, nickname, text, media) =>
+    add(minutesAgo, { type: 'group', group_id: groupId, user_id: userId, nickname, text, ...(media ? { media } : {}) })
+  const friend = (minutesAgo, userId, nickname, text, media) =>
+    add(minutesAgo, { type: 'friend', user_id: userId, nickname, text, ...(media ? { media } : {}) })
+
+  const G1 = 'qq:123456' // AniaBot 交流群
+  const G2 = 'qq:7891011' // 摸鱼打字机
+  const G3 = 'qq:3456789' // Go 夜读 · 中文社区
+
+  /* ------- 群 1：AniaBot 交流群（最新的会话，默认打开） ------- */
+  group(152, G1, 'qq:10001', '星野', '早，今天好热')
+  group(150, G1, 'qq:10002', '阿白', '上海已经 35 度了，出门像进烤箱')
+  group(147, G1, 'qq:10003', '林然', '我这边还下雨，凉快得想穿外套')
+  group(140, G1, 'qq:10001', '星野', '问下大佬，插件热更新是怎么实现的呀')
+  group(138, G1, 'qq:10000', '管理员',
+    '<reply>\n  [nickname:星野 id:qq:10001]: 问下大佬，插件热更新是怎么实现的呀\n</reply>\n插件市场那边是重新编译 + 重启，安装完就生效')
+  group(136, G1, 'qq:10001', '星野', '懂了，谢谢～')
+  group(128, G1, 'qq:10005', '深夜程序员', '[at:id:qq:10000] 帮我看下这个报错：MCP 的 SSE 端点一直 401')
+  group(125, G1, 'qq:10000', '管理员',
+    '<reply>\n  [nickname:深夜程序员 id:qq:10005]: [at:id:qq:10000] 帮我看下这个报错：MCP 的 SSE 端点一直 401\n</reply>\n先检查 mcp_json 里的 headers 有没有过期，401 一般是 token 失效')
+  group(123, G1, 'qq:10005', '深夜程序员', '确实是 token 过期了，改了 [QQ表情:捂脸]')
+  group(110, G1, 'qq:10006', '咕咕鸟', '我也踩过，还以为是被墙了')
+  group(96, G1, 'qq:10001', '星野', '[图片]', [{
+    kind: 'image', name: '海边的周末.png', url: PHOTO_SEA,
+  }])
+  group(94, G1, 'qq:10002', '阿白', '好出片，求机位')
+  group(88, G1, 'qq:10001', '星野', '就普通手机拍的，傍晚光线好')
+  group(72, G1, 'qq:10005', '深夜程序员',
+    '[文件:NapCat 部署踩坑记录.md fileId:fid-demo url:https://cdn.example.com/demo.md]',
+    [{ kind: 'file', name: 'NapCat 部署踩坑记录.md', size: 18234, url: DEMO_MD, file_id: 'fid-demo' }])
+  group(70, G1, 'qq:10002', '阿白', '收到，正好下周要重装')
+  add(64, {
+    type: 'notice', group_id: G1, user_id: 'qq:10003', title: '戳一戳',
+    text: 'qq:10003 戳了戳 qq:10000',
+  })
+  group(58, G1, 'qq:10001', '星野',
+    '<reply>\n  [nickname:阿白 id:qq:10002]: 收到，正好下周要重装\n</reply>\n同求 +1')
+  group(44, G1, 'qq:10000', '管理员',
+    '\n<合并转发消息>\n  [nickname:管理员 id:qq:10000]: 周末活动安排：周六晚 8 点组队开黑，语音频道见\n  [nickname:星野 id:qq:10001]: 收到，带我一个\n  [nickname:咕咕鸟 id:qq:10006]: +1\n</合并转发消息>\n')
+  group(36, G1, 'qq:10003', '林然', '周六晚上我可能十点后才能上')
+  group(30, G1, 'qq:10002', '阿白', '没事，语音频道一直开着')
+  group(22, G1, 'qq:10001', '星野', '[图片][图片]', [
+    { kind: 'image', name: '傍晚的云-1.png', url: PHOTO_SUNSET },
+    { kind: 'image', name: '傍晚的云-2.png', url: PHOTO_MENU },
+  ])
+  group(20, G1, 'qq:10006', '咕咕鸟', '第二张绝了')
+  group(8, G1, 'qq:10002', '阿白', '这周天气好像都不错')
+  group(3, G1, 'qq:10001', '星野', '那就周六见')
+  group(1, G1, 'qq:10000', '管理员',
+    '[文件:周末活动安排.xlsx fileId:fid-demo-2 url:]',
+    [{ kind: 'file', name: '周末活动安排.xlsx', size: 20312, file_id: 'fid-demo-2' }])
+
+  /* ------- 群 2：摸鱼打字机 ------- */
+  group(118, G2, 'qq:10007', 'Neko', '这周有人打羽毛球吗')
+  group(112, G2, 'qq:10009', 'Momo', '周三晚上可以，老地方？')
+  group(104, G2, 'qq:10007', 'Neko', '就周三，七点')
+  add(48, {
+    type: 'notice', group_id: G2, user_id: 'qq:10009', title: '群管理员变动',
+    text: 'qq:10009 被设置为管理员',
+  })
+  group(40, G2, 'qq:10007', 'Neko', '[图片]', [{ kind: 'image', name: '猫.png', url: PHOTO_CAT }])
+  group(12, G2, 'qq:10009', 'Momo', '这猫也太胖了')
+
+  /* ------- 群 3：Go 夜读 ------- */
+  group(100, G3, 'qq:10008', '夜航西飞',
+    '[分享卡片,标题: Go 1.25 发布,描述: 新版本在类型推断与工具链上带来一批改进,链接: (https://go.dev/blog/go1.25)]')
+  group(92, G3, 'qq:10003', '林然', '这个新特性我还没用过')
+  group(68, G3, 'qq:10008', '夜航西飞',
+    '<reply>\n  [nickname:林然 id:qq:10003]: 这个新特性我还没用过\n</reply>\n类型推断那块值得试试，写起来省不少样板代码')
+
+  /* ------- 私聊：同事-K / 夜航西飞 ------- */
+  friend(135, 'qq:10004', '同事-K', '下班一起去吃饭？')
+  friend(133, 'qq:10004', '同事-K', '楼下新开了家面馆')
+  friend(60, 'qq:10004', '同事-K', '[图片]', [{ kind: 'image', name: '菜单.png', url: PHOTO_MENU }])
+  friend(35, 'qq:10004', '同事-K', '那个服务器日志我发你邮箱了')
+  add(18, {
+    type: 'notice', user_id: 'qq:10004', title: '好友消息撤回',
+    text: 'qq:10004 撤回了一条消息',
+  })
+  friend(90, 'qq:10008', '夜航西飞', '周末去爬山吗')
+  friend(84, 'qq:10008', '夜航西飞', '路线我发你，全程大概四小时')
+
+  // 先按时间排序再分配 ID：真实日志的 ID 就是到达顺序，会话摘要按 ID 排序
+  raw.sort((a, b) => b.minutesAgo - a.minutesAgo)
+  raw.forEach((entry, i) => {
+    entry.id = 8000 + i
+    entry.time = toLocalIso(new Date(now - entry.minutesAgo * 60 * 1000))
+    delete entry.minutesAgo
+  })
+  return raw.reverse() // 新的在前，id 随时间递增，翻页游标用 id
 }
 
 //  Query 日志（querylog.Entry 形状）

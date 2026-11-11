@@ -512,6 +512,8 @@ func (ania *AniaBot) startAdminPanel() {
 	var taskLogClearFn func(f tasklog.Filter) int
 	var clockSrc adminpanel.ClockTaskSource
 	var msgLogFn func(limit int, beforeID uint64) []msglog.Entry
+	var msgLogSessionsFn func() []msglog.Session
+	var msgLogSessionFn func(session string, limit int, beforeID, afterID uint64) []msglog.Entry
 	var skillSrc adminpanel.SkillSource
 	var memorySrc adminpanel.MemorySource
 	var kbSrc adminpanel.KnowledgeBaseSource
@@ -531,6 +533,10 @@ func (ania *AniaBot) startAdminPanel() {
 		}
 		if src, ok := p.(adminpanel.MsgLogSource); ok {
 			msgLogFn = src.MsgLogPage
+		}
+		if src, ok := p.(adminpanel.MsgLogSessionSource); ok {
+			msgLogSessionsFn = src.MsgLogSessions
+			msgLogSessionFn = src.MsgLogSessionPage
 		}
 		if src, ok := p.(adminpanel.SkillSource); ok {
 			skillSrc = src
@@ -615,24 +621,26 @@ func (ania *AniaBot) startAdminPanel() {
 			}
 			return strings.Join(parts, " ")
 		},
-		AdapterStatuses: ania.AdapterStatuses,
-		TaskLogs:        taskLogFn,
-		TaskLogsStats:   taskLogStatsFn,
-		TaskLogsClear:   taskLogClearFn,
-		Clocks:          clockSrc,
-		MsgLogs:         msgLogFn,
-		Skills:          skillSrc,
-		Memories:        memorySrc,
-		Knowledge:       kbSrc,
-		Teams:           teamSrc,
-		Quota:           quotaSrc,
-		QueryLogs:       queryLogFn,
-		QueryLogsStats:  queryLogStatsFn,
-		QueryLogsClear:  queryLogClearFn,
-		ConsoleLogs:     consollog.Page,
-		QRLogins:        qrLogins,
-		Marketplace:     marketplace.New(ania.configStore, Logger().WithGroup("Marketplace"), marketplace.WithUnloader(ania)),
-		Logger:          Logger().WithGroup("AdminPanel"),
+		AdapterStatuses:   ania.AdapterStatuses,
+		TaskLogs:          taskLogFn,
+		TaskLogsStats:     taskLogStatsFn,
+		TaskLogsClear:     taskLogClearFn,
+		Clocks:            clockSrc,
+		MsgLogs:           msgLogFn,
+		MsgLogSessions:    msgLogSessionsFn,
+		MsgLogSessionPage: msgLogSessionFn,
+		Skills:            skillSrc,
+		Memories:          memorySrc,
+		Knowledge:         kbSrc,
+		Teams:             teamSrc,
+		Quota:             quotaSrc,
+		QueryLogs:         queryLogFn,
+		QueryLogsStats:    queryLogStatsFn,
+		QueryLogsClear:    queryLogClearFn,
+		ConsoleLogs:       consollog.Page,
+		QRLogins:          qrLogins,
+		Marketplace:       marketplace.New(ania.configStore, Logger().WithGroup("Marketplace"), marketplace.WithUnloader(ania)),
+		Logger:            Logger().WithGroup("AdminPanel"),
 	})
 	go srv.Run()
 }

@@ -99,6 +99,143 @@ func TestPageWithEviction(t *testing.T) {
 	}
 }
 
+func TestSessionKey(t *testing.T) {
+	cases := []struct {
+		name string
+		e    msglog.Entry
+		want string
+	}{
+		{"群消息", msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:123", UserId: "qq:1"}, "g:qq:123"},
+		{"群通知并入群会话", msglog.Entry{Type: msglog.TypeNotice, GroupId: "qq:123", UserId: "qq:1"}, "g:qq:123"},
+		{"好友消息", msglog.Entry{Type: msglog.TypeFriend, UserId: "qq:2"}, "f:qq:2"},
+		{"好友通知并入私聊", msglog.Entry{Type: msglog.TypeNotice, UserId: "qq:2"}, "f:qq:2"},
+		{"系统通知", msglog.Entry{Type: msglog.TypeNotice}, "n:system"},
+	}
+	for _, c := range cases {
+		if got := c.e.SessionKey(); got != c.want {
+			t.Errorf("%s: SessionKey() = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestSessions(t *testing.T) {
+	r := msglog.New(newStore(), 0)
+	r.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", UserId: "qq:10", Nickname: "小明", Text: "早上好"})
+	r.Add(msglog.Entry{Type: msglog.TypeFriend, UserId: "qq:20", Nickname: "小红", Text: "在吗"})
+	r.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", UserId: "qq:11", Nickname: "阿白", Text: "图片来了",
+		Media: []msglog.Media{{Kind: msglog.MediaImage, URL: "https://example.com/a.png"}}})
+	r.Add(msglog.Entry{Type: msglog.TypeNotice, GroupId: "qq:1", UserId: "qq:11", Title: "群成员增加", Text: "阿白 加入了群聊"})
+	r.Add(msglog.Entry{Type: msglog.TypeNotice, Title: "新好友", Text: "有人添加了好友"})
+
+	sessions := r.Sessions()
+	if len(sessions) != 3 {
+		t.Fatalf("期望 3 个会话（群/私聊/系统），实际 %d: %+v", len(sessions), sessions)
+	}
+	// 按最近一条日志倒序：系统通知 → 群 → 私聊
+	if sessions[0].Key != "n:system" || sessions[1].Key != "g:qq:1" || sessions[2].Key != "f:qq:20" {
+		t.Fatalf("会话顺序错误: %+v", sessions)
+	}
+	group := sessions[1]
+	if group.Kind != msglog.SessionGroup || group.GroupId != "qq:1" || group.UserId != "" {
+		t.Fatalf("群会话字段错误: %+v", group)
+	}
+	// 群通知与群消息合并：两条消息 + 一条通知
+	if group.Count != 3 {
+		t.Fatalf("群会话条数 = %d, want 3", group.Count)
+	}
+	if group.LastKind != msglog.TypeNotice || group.Title != "群成员增加" || group.Name != "阿白" {
+		t.Fatalf("群会话最近一条摘要错误: %+v", group)
+	}
+	if sessions[2].Name != "小红" || sessions[2].Kind != msglog.SessionFriend {
+		t.Fatalf("私聊会话摘要错误: %+v", sessions[2])
+	}
+
+	// 新增一条图片消息后，最后一条媒体类型应更新
+	r.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", UserId: "qq:12", Nickname: "星野", Text: "看这张",
+		Media: []msglog.Media{{Kind: msglog.MediaImage, URL: "https://example.com/b.png"}}})
+	sessions = r.Sessions()
+	if sessions[0].Key != "g:qq:1" || sessions[0].LastMedia != msglog.MediaImage || sessions[0].Name != "星野" {
+		t.Fatalf("增加消息后摘要未更新: %+v", sessions[0])
+	}
+}
+
+func TestPageSession(t *testing.T) {
+	r := msglog.New(newStore(), 20)
+	// 两个群交错发言
+	for i := 0; i < 6; i++ {
+		group := "qq:1"
+		if i%2 == 1 {
+			group = "qq:2"
+		}
+		r.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: group, UserId: "qq:9", Text: "m" + string(rune('a'+i))})
+	}
+	r.Add(msglog.Entry{Type: msglog.TypeNotice, GroupId: "qq:1", Title: "戳一戳", Text: "通知"})
+
+	// 群 1 共有 4 条（3 条消息 + 1 条通知）
+	first := r.PageSession("g:qq:1", 2, 0, 0)
+	if len(first) != 2 || first[0].Text != "通知" || first[1].Text != "me" {
+		t.Fatalf("第一页错误: %+v", first)
+	}
+	second := r.PageSession("g:qq:1", 2, first[1].ID, 0)
+	if len(second) != 2 || second[0].Text != "mc" || second[1].Text != "ma" {
+		t.Fatalf("第二页错误: %+v", second)
+	}
+	if page := r.PageSession("g:qq:1", 2, second[1].ID, 0); len(page) != 0 {
+		t.Fatalf("更早的日志应为空, got %+v", page)
+	}
+	// 增量：只返回比游标更新的日志
+	after := r.PageSession("g:qq:1", 10, 0, first[1].ID)
+	if len(after) != 1 || after[0].Text != "通知" {
+		t.Fatalf("after 增量错误: %+v", after)
+	}
+	// 未知会话
+	if page := r.PageSession("g:qq:404", 10, 0, 0); len(page) != 0 {
+		t.Fatalf("未知会话应为空, got %+v", page)
+	}
+}
+
+// TestSessionRebuild 模拟 redis 驱动下的重启：新 Recorder 首次查询会话时
+// 从存储重建索引，历史日志仍能按会话分页。
+func TestSessionRebuild(t *testing.T) {
+	store := newStore()
+	r1 := msglog.New(store, 0)
+	r1.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", UserId: "qq:9", Nickname: "小明", Text: "重启前1"})
+	r1.Add(msglog.Entry{Type: msglog.TypeFriend, UserId: "qq:2", Nickname: "小红", Text: "重启前2"})
+	r1.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", UserId: "qq:9", Nickname: "小明", Text: "重启前3"})
+
+	r2 := msglog.New(store, 0)
+	sessions := r2.Sessions()
+	if len(sessions) != 2 {
+		t.Fatalf("重建后会话数 = %d, want 2: %+v", len(sessions), sessions)
+	}
+	page := r2.PageSession("g:qq:1", 10, 0, 0)
+	if len(page) != 2 || page[0].Text != "重启前3" || page[1].Text != "重启前1" {
+		t.Fatalf("重建后按会话分页错误: %+v", page)
+	}
+	// 重建后再追加，新消息仍进入同一会话
+	r2.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", UserId: "qq:9", Nickname: "小明", Text: "重启后"})
+	page = r2.PageSession("g:qq:1", 10, 0, 0)
+	if len(page) != 3 || page[0].Text != "重启后" {
+		t.Fatalf("重建后增量错误: %+v", page)
+	}
+}
+
+// TestSessionIndexWithEviction 容量淘汰后，会话索引的条数与分页不应包含已删除日志。
+func TestSessionIndexWithEviction(t *testing.T) {
+	r := msglog.New(newStore(), 3)
+	for _, text := range []string{"a", "b", "c", "d", "e"} {
+		r.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", UserId: "qq:9", Text: text})
+	}
+	sessions := r.Sessions()
+	if len(sessions) != 1 || sessions[0].Count != 3 {
+		t.Fatalf("淘汰后会话条数错误: %+v", sessions)
+	}
+	page := r.PageSession("g:qq:1", 10, 0, 0)
+	if len(page) != 3 || page[0].Text != "e" || page[2].Text != "c" {
+		t.Fatalf("淘汰后分页错误: %+v", page)
+	}
+}
+
 // TestRestartWithSameStore 模拟 redis 驱动下的重启：同一存储新建 Recorder，
 // 日志与 ID 计数器都应续接。
 func TestRestartWithSameStore(t *testing.T) {

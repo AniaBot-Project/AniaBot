@@ -54,6 +54,24 @@ func (p *LogPlugin) MsgLogPage(limit int, beforeID uint64) []msglog.Entry {
 	return p.recorder.Page(limit, beforeID)
 }
 
+// MsgLogSessions 返回消息日志的会话摘要（实现 adminpanel.MsgLogSessionSource），
+// 供面板左侧会话列表按群聊 / 私聊 / 系统通知分类展示。
+func (p *LogPlugin) MsgLogSessions() []msglog.Session {
+	if p.recorder == nil {
+		return nil
+	}
+	return p.recorder.Sessions()
+}
+
+// MsgLogSessionPage 按会话读取一页日志（新在前）：beforeID>0 取更旧的分页，
+// afterID>0 取更新的增量（面板轮询用）。
+func (p *LogPlugin) MsgLogSessionPage(session string, limit int, beforeID, afterID uint64) []msglog.Entry {
+	if p.recorder == nil {
+		return nil
+	}
+	return p.recorder.PageSession(session, limit, beforeID, afterID)
+}
+
 // add 记录一条消息日志；recorder 未初始化（Start 之前）时忽略。
 func (p *LogPlugin) add(e msglog.Entry) {
 	if p.recorder == nil {
@@ -87,6 +105,7 @@ func (p *LogPlugin) OnGroupMsg(ctx context.Context, b bot.Bot, cmd command.Comma
 		UserId:   msg.Sender.UserId.String(),
 		Nickname: senderName(msg),
 		Text:     text,
+		Media:    extractMedia(msg.Message),
 	})
 	return true, nil
 }
@@ -101,13 +120,35 @@ func (p *LogPlugin) OnFriendMsg(ctx context.Context, b bot.Bot, cmd command.Comm
 	}
 	text := msg.FriendlyText(false, opts...)
 	p.Logger.Info("[收<-好友]: "+text, "userId", msg.Sender.UserId)
+	media := extractMedia(msg.Message)
+	resolvePrivateFileURLs(b, msg.Sender.UserId, media)
 	p.add(msglog.Entry{
 		Type:     msglog.TypeFriend,
 		UserId:   msg.Sender.UserId.String(),
 		Nickname: msg.Sender.Nickname,
 		Text:     text,
+		Media:    media,
 	})
 	return true, nil
+}
+
+// resolvePrivateFileURLs 私聊文件消息通常只带 file_id：向平台换一个临时下载
+// 地址（NapCat 的 get_private_file_url），面板的文件卡片才能直接下载。地址会
+// 过期，但消息日志只保留最近的记录，用户一般能及时下载；失败时保持无链接，
+// 面板展示为「暂无下载地址」。
+func resolvePrivateFileURLs(b bot.Bot, userId message.QID, media []msglog.Media) {
+	qb, ok := b.(bot.QQ)
+	if !ok {
+		return
+	}
+	for i := range media {
+		if media[i].Kind != msglog.MediaFile || media[i].URL != "" || media[i].FileId == "" {
+			continue
+		}
+		if u, ok := qb.GetPrivateFileURL(userId, media[i].FileId); ok && isHTTPURL(u) {
+			media[i].URL = u
+		}
+	}
 }
 
 // notice 记录一条通知事件日志。

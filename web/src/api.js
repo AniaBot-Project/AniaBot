@@ -36,8 +36,7 @@ function qs(params = {}) {
 }
 
 // 下载接口返回的文件（登录态失效时抛错；文件名优先取 Content-Disposition）
-async function download(path, fallbackName) {
-  const resp = await fetch(path, { credentials: 'same-origin' })
+async function download(path, fallbackName) {  const resp = await fetch(path, { credentials: 'same-origin' })
   if (resp.status === 401) {
     auth.loggedIn = false
     throw new Error('未登录或会话已过期')
@@ -59,6 +58,19 @@ async function download(path, fallbackName) {
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
+}
+
+// 消息日志媒体的访问地址：
+// - http(s) 走面板代理（/api/msglogs/media），避免 CDN 防盗链 / CORS / 混合内容
+//   问题，并支持附件下载；
+// - data: / blob: 直接交给浏览器。
+export function msgMediaUrl(url, name = '', download = false) {
+  if (!url) return ''
+  if (/^(?:data|blob):/i.test(url)) return url
+  const q = new URLSearchParams({ url })
+  if (name) q.set('name', name)
+  if (download) q.set('download', '1')
+  return `/api/msglogs/media?${q.toString()}`
 }
 
 export const api = {
@@ -154,8 +166,10 @@ export const api = {
     }
     return map
   },
-  // 消息日志分页查询：{ limit, before }（均可选），返回 { items, has_more }
+  // 消息日志分页查询：{ limit, before, session, after }（均可选），返回 { items, has_more }
   getMsgLogs: (params = {}) => request(`/api/msglogs${qs(params)}`),
+  // 消息日志会话摘要：{ items: [{ key, kind, group_id, user_id, last_text, ... }] }
+  getMsgLogSessions: () => request('/api/msglogs/sessions'),
   // 定时任务执行日志分页查询：{ target_type, target_id, task_id, status, start, end, keyword, limit, before }（均可选）
   getTaskLogs: (params = {}) => request(`/api/tasklogs${qs(params)}`),
   // 按当前筛选条件导出定时任务执行日志（JSON 文件下载）
