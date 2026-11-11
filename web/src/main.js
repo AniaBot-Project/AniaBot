@@ -2,6 +2,8 @@ import { createApp } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import App from './App.vue'
 import backdropClose from './directives/backdropClose'
+// 主题库样式（animal-island-vue 的同步副本，见 scripts/sync-theme.mjs）必须先于面板自身样式
+import './styles/animal-island.vendor.css'
 import './style.css'
 
 const routes = [

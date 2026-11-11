@@ -1,28 +1,32 @@
 <template>
   <div class="space-y-4">
     <!-- 适配器未连接提示 -->
-    <div
+    <Card
       v-if="status.adapter_status && status.adapter_status !== 'connected'"
-      class="glass-warn px-5 py-3.5 flex items-center justify-between gap-4"
+      color="app-yellow"
+      style="padding: 12px 20px"
+      class="flex items-center justify-between gap-4"
     >
-      <span class="flex items-center gap-3 text-xs text-amber-800">
-        <span class="[&>svg]:w-4 [&>svg]:h-4 text-amber-500 shrink-0" v-html="icons.warn" />
+      <span class="flex items-center gap-3 text-xs text-[#5f4423]">
+        <span class="[&>svg]:w-4 [&>svg]:h-4 shrink-0" v-html="icons.warn" />
         <span class="tracking-wide">
-          <span class="uppercase tracking-[0.15em] font-semibold">Link Down</span>
-          <span class="mx-2 text-amber-300">//</span>
+          <span class="uppercase tracking-[0.15em] font-bold">Link Down</span>
+          <span class="mx-2 opacity-50">//</span>
           平台适配器未连接<template v-if="status.adapter_detail">：{{ status.adapter_detail }}</template>，Bot 会持续重试
         </span>
       </span>
-      <RouterLink to="/config" class="text-[10px] tracking-[0.15em] uppercase text-zinc-700 hover:underline shrink-0 font-medium">修改配置并重启 →</RouterLink>
-    </div>
+      <RouterLink to="/config" class="shrink-0">
+        <Button type="link" size="small">修改配置并重启 →</Button>
+      </RouterLink>
+    </Card>
 
     <!-- 仪器面板 bento 区 -->
     <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
       <!-- DEVICE CLOCK -->
-      <section class="tcard xl:col-span-5 p-4 sm:p-6 flex flex-col">
+      <Card class="xl:col-span-5 flex flex-col">
         <div class="flex items-center justify-between">
           <span class="tlabel">Device Clock</span>
-          <span class="tpill"><span class="tdot bg-[#34c759]" />Sync OK</span>
+          <Tag color="app-green" variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-white/85" />Sync OK</Tag>
         </div>
 
         <div class="flex-1 flex items-center justify-between gap-4 py-5">
@@ -49,7 +53,7 @@
         </div>
 
         <div class="text-[10px] tracking-[0.18em] uppercase text-zinc-500">{{ dateLine }}</div>
-        <div class="dotline my-3" />
+        <Divider type="dashed-brown" class="my-3" />
         <div class="text-[10px] tracking-[0.14em] uppercase text-zinc-500 truncate">
           Adapter link {{ linked ? 'live' : 'down' }}
           <span class="mx-2 text-zinc-300">//</span>
@@ -57,16 +61,16 @@
           <span class="mx-2 text-zinc-300">//</span>
           Scheduler {{ armedCount }} armed
         </div>
-      </section>
+      </Card>
 
       <!-- ADAPTER LINK -->
-      <section class="tcard xl:col-span-4 p-4 sm:p-6 flex flex-col">
+      <Card class="xl:col-span-4 flex flex-col">
         <div class="flex items-center justify-between">
           <span class="tlabel">Adapter Link</span>
-          <span class="tpill">
-            <span class="tdot" :class="linked ? 'bg-[#34c759]' : 'bg-[#ff9f0a]'" />
+          <Tag :color="linked ? 'app-green' : 'app-orange'" variant="solid" size="small">
+            <span class="w-1.5 h-1.5 rounded-full bg-white/85" />
             {{ linked ? 'Link Live' : 'Link Down' }}
-          </span>
+          </Tag>
         </div>
 
         <div class="flex-1 py-5">
@@ -74,25 +78,18 @@
           <div class="tlabel mt-2">{{ adapterPlatforms }}</div>
         </div>
 
-        <div class="flex gap-0.75">
-          <div
-            v-for="i in 12"
-            :key="i"
-            class="seg"
-            :class="i <= linkSegs ? (linked ? 'on-ok' : 'on') : ''"
-          />
-        </div>
+        <Progress :percent="Math.round((linkSegs / 12) * 100)" :show-info="false" size="small" aria-label="适配器连接状态" />
         <div class="flex items-center justify-between mt-2 text-[10px] tracking-[0.12em] uppercase text-zinc-400">
           <span class="truncate" :title="status.adapter_detail">{{ status.adapter_detail || 'No detail' }}</span>
           <span class="shrink-0 ml-3">Sample 5s</span>
         </div>
-      </section>
+      </Card>
 
       <!-- SCHEDULER -->
-      <section class="tcard xl:col-span-3 p-4 sm:p-6 flex flex-col">
+      <Card class="xl:col-span-3 flex flex-col">
         <div class="flex items-center justify-between">
           <span class="tlabel">Scheduler</span>
-          <span class="tpill"><span class="tdot bg-zinc-800" />{{ clocks.length }} Jobs</span>
+          <Tag variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-[#725d42]" />{{ clocks.length }} Jobs</Tag>
         </div>
 
         <div class="flex-1 py-5">
@@ -120,23 +117,23 @@
             </li>
           </ul>
         </div>
-      </section>
+      </Card>
     </div>
 
     <!-- 主机监控 -->
     <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
       <!-- CPU LOAD -->
-      <section class="tcard xl:col-span-4 p-4 sm:p-6 flex flex-col">
+      <Card class="xl:col-span-4 flex flex-col">
         <div class="flex items-center justify-between">
           <span class="tlabel">CPU Load</span>
-          <span class="tpill"><span class="tdot bg-zinc-800" />{{ host.cpu_cores ?? '—' }} Cores</span>
+          <Tag variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-[#725d42]" />{{ host.cpu_cores ?? '—' }} Cores</Tag>
         </div>
 
         <div class="flex items-end justify-between gap-4 pt-4 pb-3">
           <div class="text-4xl font-semibold tracking-tight text-zinc-900">
             {{ cpuText }}<span class="text-xl text-zinc-400 font-medium">%</span>
           </div>
-          <span class="tlabel text-zinc-400! pb-1">Sample 5s</span>
+          <span class="tlabel text-zinc-400 pb-1">Sample 5s</span>
         </div>
 
         <svg viewBox="0 0 100 32" preserveAspectRatio="none" class="w-full h-12 block">
@@ -157,37 +154,35 @@
         <div class="flex items-center justify-between mt-3 text-[10px] tracking-[0.12em] uppercase text-zinc-400">
           <span class="truncate" :title="host.cpu_model">{{ host.cpu_model || 'Unknown CPU' }}</span>
         </div>
-      </section>
+      </Card>
 
       <!-- MEMORY -->
-      <section class="tcard xl:col-span-4 p-4 sm:p-6 flex flex-col">
+      <Card class="xl:col-span-4 flex flex-col">
         <div class="flex items-center justify-between">
           <span class="tlabel">Memory</span>
-          <span class="tpill"><span class="tdot" :class="host.mem_percent >= 90 ? 'bg-[#ff3b30]' : host.mem_percent >= 75 ? 'bg-[#ff9f0a]' : 'bg-[#34c759]'" />{{ memPctText }}</span>
+          <Tag :color="host.mem_percent >= 90 ? 'app-red' : host.mem_percent >= 75 ? 'app-orange' : 'app-green'" variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-white/85" />{{ memPctText }}</Tag>
         </div>
 
         <div class="flex-1 flex items-end justify-between gap-4 pt-4 pb-3">
           <div class="text-4xl font-semibold tracking-tight text-zinc-900">
             {{ fmtBytes(host.mem_used) }}<span class="text-xl text-zinc-400 font-medium">/{{ fmtBytes(host.mem_total) }}</span>
           </div>
-          <span class="tlabel text-zinc-400! pb-1">Phys RAM</span>
+          <span class="tlabel text-zinc-400 pb-1">Phys RAM</span>
         </div>
 
-        <div class="flex gap-0.75">
-          <div v-for="i in 14" :key="i" class="seg" :class="i <= memSegs ? 'on' : ''" />
-        </div>
+        <Progress :percent="host.mem_total ? Math.round(host.mem_percent || 0) : 0" :show-info="false" size="small" aria-label="内存使用率" />
 
         <div class="flex items-center justify-between mt-3 text-[10px] tracking-[0.12em] uppercase text-zinc-400">
           <span>{{ fmtBytes(host.mem_total - host.mem_used) }} free</span>
           <span>Bot heap {{ fmtBytes(host.go_mem_alloc) }} · {{ host.go_version || '—' }}</span>
         </div>
-      </section>
+      </Card>
 
       <!-- HOST INFO -->
-      <section class="tcard xl:col-span-4 p-4 sm:p-6 flex flex-col">
+      <Card class="xl:col-span-4 flex flex-col">
         <div class="flex items-center justify-between">
           <span class="tlabel">Host Info</span>
-          <span class="tpill"><span class="tdot bg-zinc-800" />{{ host.os || '—' }} · {{ host.arch || '—' }}</span>
+          <Tag variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-[#725d42]" />{{ host.os || '—' }} · {{ host.arch || '—' }}</Tag>
         </div>
 
         <dl class="flex-1 mt-3 text-xs">
@@ -208,19 +203,19 @@
             <dd class="hostval">{{ hostUptimeText }}</dd>
           </div>
         </dl>
-      </section>
+      </Card>
     </div>
 
     <!-- TOKEN USAGE -->
     <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
       <!-- TOTALS -->
-      <section class="tcard xl:col-span-4 p-4 sm:p-6 flex flex-col">
+      <Card class="xl:col-span-4 flex flex-col">
         <div class="flex items-center justify-between">
           <span class="tlabel">Token Usage</span>
-          <span class="tpill">
-            <span class="tdot" :class="tokenSummary.cache_hit_rate > 0 ? 'bg-[#34c759]' : 'bg-zinc-300'" />
+          <Tag :color="tokenSummary.cache_hit_rate > 0 ? 'app-green' : 'default'" variant="solid" size="small">
+            <span class="w-1.5 h-1.5 rounded-full" :class="tokenSummary.cache_hit_rate > 0 ? 'bg-white/85' : 'bg-[#725d42]'" />
             Cache Hit {{ cacheHitText }}
-          </span>
+          </Tag>
         </div>
 
         <div class="flex-1 py-5">
@@ -242,15 +237,17 @@
             <dd class="tokenval">{{ fmtTokens(tokenSummary.cached_tokens) }} <span class="text-zinc-400 font-normal">hit {{ cacheHitText }}</span></dd>
           </div>
         </dl>
-      </section>
+      </Card>
 
       <!-- DAILY -->
-      <section class="tcard p-4 sm:p-6 flex flex-col" :class="balanceEnabled ? 'xl:col-span-5' : 'xl:col-span-8'">
+      <Card class="flex flex-col" :class="balanceEnabled ? 'xl:col-span-5' : 'xl:col-span-8'">
         <div class="flex items-center justify-between">
           <span class="tlabel">Daily Tokens</span>
           <span class="flex items-center gap-3">
-            <RouterLink to="/tokenstats" class="text-[10px] tracking-[0.15em] uppercase text-zinc-500 hover:text-zinc-900 font-medium transition-colors">详细统计 ⤢</RouterLink>
-            <span class="tpill"><span class="tdot bg-zinc-800" />14 Days</span>
+            <RouterLink to="/tokenstats">
+              <Button type="link" size="small">详细统计 ⤢</Button>
+            </RouterLink>
+            <Tag variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-[#725d42]" />14 Days</Tag>
           </span>
         </div>
 
@@ -271,27 +268,19 @@
           </span>
           <span>{{ tokenDaily[tokenDaily.length - 1]?.date?.slice(5) || '—' }}</span>
         </div>
-        <div class="dotline my-3" />
+        <Divider type="dashed-brown" class="my-3" />
         <div class="text-[10px] tracking-[0.14em] uppercase text-zinc-500 truncate">
           Source: query &amp; cron logs (retained)
           <span class="mx-2 text-zinc-300">//</span>
           Cache metrics depend on upstream API
         </div>
-      </section>
+      </Card>
 
       <!-- API BALANCE -->
-      <section v-if="balanceEnabled" class="tcard xl:col-span-3 p-4 sm:p-6 flex flex-col">
+      <Card v-if="balanceEnabled" class="xl:col-span-3 flex flex-col">
         <div class="flex items-center justify-between">
           <span class="tlabel">API Balance</span>
-          <button
-            class="tpill cursor-pointer hover:bg-white/60 transition-colors"
-            :class="{ 'opacity-50 pointer-events-none': balanceLoading }"
-            title="强制刷新（绕过服务端缓存）"
-            @click="loadBalance(true)"
-          >
-            <span class="tdot" :class="balance?.error ? 'bg-[#ff9f0a]' : 'bg-[#34c759]'" />
-            {{ balanceLoading ? '查询中' : '刷新' }}
-          </button>
+          <Button type="default" size="small" :loading="balanceLoading" @click="loadBalance(true)">刷新</Button>
         </div>
 
         <div class="flex-1 py-5">
@@ -306,52 +295,49 @@
             <span class="shrink-0 ml-2">{{ balance?.cached ? 'Cached' : 'Live' }} · {{ balance?.ttl ?? 0 }}s</span>
           </div>
         </div>
-      </section>
+      </Card>
     </div>
 
     <!-- 插件列表 -->
-    <section class="tcard overflow-hidden">
+    <Card style="padding: 0" class="overflow-hidden">
       <div class="px-6 py-4 flex items-center justify-between border-b border-zinc-100">
-        <h2 class="tlabel text-zinc-800!">Plugin Registry</h2>
-        <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">{{ plugins.length }} Modules</span>
+        <h2 class="tlabel text-zinc-800">Plugin Registry</h2>
+        <Tag variant="outlined" size="small">{{ plugins.length }} Modules</Tag>
       </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-xs">
-          <thead>
-            <tr class="text-left text-[10px] tracking-[0.15em] uppercase text-zinc-400 bg-zinc-50/60 border-b border-zinc-100">
-              <th class="px-3 py-3 sm:px-6 font-medium">名称</th>
-              <th class="px-3 py-3 sm:px-6 font-medium">说明</th>
-              <th class="px-3 py-3 sm:px-6 font-medium">作者</th>
-              <th class="px-3 py-3 sm:px-6 font-medium">版本</th>
-              <th class="px-3 py-3 sm:px-6 font-medium">可见性</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="p in plugins" :key="p.name" class="border-b border-dashed border-zinc-100 last:border-0 hover:bg-white/55 transition-colors">
-              <td class="px-3 py-3 sm:px-6 font-semibold text-zinc-800">{{ p.name }}</td>
-              <td class="px-3 py-3 sm:px-6 text-zinc-600">{{ p.help_words }}</td>
-              <td class="px-3 py-3 sm:px-6 text-zinc-600">{{ p.author }}</td>
-              <td class="px-3 py-3 sm:px-6 text-zinc-500">{{ p.version }}</td>
-              <td class="px-3 py-3 sm:px-6">
-                <span v-if="p.admin_only" class="tpill py-0.5!"><span class="tdot bg-[#ff9f0a]" />Admin</span>
-                <span v-else class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">All</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
+      <Table :columns="pluginColumns" :data-source="plugins" row-key="name" :pagination="false">
+        <template #cell-name="{ value }">
+          <span class="font-bold text-[#5f4423]">{{ value }}</span>
+        </template>
+        <template #cell-version="{ value }">
+          <Tag variant="soft" size="small">{{ value }}</Tag>
+        </template>
+        <template #cell-admin_only="{ value }">
+          <Tag v-if="value" color="app-orange" variant="solid" size="small">Admin</Tag>
+          <Tag v-else variant="outlined" size="small">All</Tag>
+        </template>
+      </Table>
+    </Card>
 
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { Button, Card, Divider, Progress, Table, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
 
 const icons = {
   warn: '<svg fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg>',
 }
+
+// 插件注册表列定义（Table 组件）
+const pluginColumns = [
+  { title: '名称', dataIndex: 'name', width: '20%' },
+  { title: '说明', dataIndex: 'help_words' },
+  { title: '作者', dataIndex: 'author', width: '16%' },
+  { title: '版本', dataIndex: 'version', width: '12%' },
+  { title: '可见性', dataIndex: 'admin_only', width: '12%' },
+]
 
 const status = ref({})
 const host = ref({})
@@ -480,11 +466,6 @@ const cpuText = computed(() => {
 const memPctText = computed(() => {
   const p = host.value.mem_percent
   return p != null && host.value.mem_total ? p.toFixed(1) + '%' : '—'
-})
-
-const memSegs = computed(() => {
-  const p = host.value.mem_percent
-  return p != null && host.value.mem_total ? Math.round((p / 100) * 14) : 0
 })
 
 const hostUptimeText = computed(() => {

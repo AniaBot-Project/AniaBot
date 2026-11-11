@@ -4,216 +4,188 @@
       <div v-if="saved" class="bg-[#34c759]/10 border border-[#34c759]/40 text-[#248a3d] text-sm rounded-xl px-4 py-3" v-html="savedHint" />
     </Transition>
 
-    <div class="flex flex-wrap items-center justify-between gap-2">
-      <div class="flex gap-1 glass rounded-xl p-1 overflow-x-auto">
-        <button
-          v-for="tab in tabs"
-          :key="tab.name"
-          class="px-4 py-1.5 text-sm rounded-md transition-colors"
-          :class="current === tab.name ? 'btn-accent font-medium shadow-sm' : 'text-slate-500 hover:text-slate-800'"
-          @click="switchTab(tab.name)"
-        >
-          {{ tab.label }}
-        </button>
-      </div>
+    <div class="flex flex-wrap items-start justify-between gap-2">
+      <Tabs
+        :model-value="current"
+        :items="tabItems"
+        class="flex-1 min-w-0"
+        @update:modelValue="switchTab"
+      >
+        <template v-for="tab in tabs" :key="tab.name" #[tab.name]>
+          <!-- 源码模式：原始 JSON（无表单的 tab 恒为源码模式） -->
+          <Card v-if="rawMode || !hasForm" class="space-y-3">
+            <p class="text-xs text-slate-500">{{ currentTab.desc }}</p>
+            <textarea
+              v-model="rawText"
+              rows="20"
+              spellcheck="false"
+              class="w-full bg-slate-950/85 text-slate-200 rounded-lg px-4 py-3 text-xs font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30"
+            />
+            <div class="flex items-center gap-3">
+              <Button type="default" size="small" @click="formatRaw">格式化</Button>
+              <Button type="primary" size="small" :disabled="saving" @click="onSaveRaw">
+                {{ saving ? '保存中...' : '保存' }}
+              </Button>
+              <span v-if="error" class="text-sm text-[#ff3b30]">{{ error }}</span>
+            </div>
+          </Card>
+
+          <!-- MCP 服务器：图形化表单 -->
+          <template v-else-if="tab.name === 'mcp'">
+            <p class="text-xs text-slate-500">配置 AI 可调用的 MCP 服务器，修改保存后重启生效。</p>
+
+            <Card v-for="(srv, i) in mcpServers" :key="i" style="padding: 0" class="overflow-hidden">
+              <div class="px-6 py-3.5 border-b border-white/50 flex items-center justify-between">
+                <h2 class="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full" :class="srv.name ? 'bg-[#34c759]' : 'bg-slate-300'" />
+                  {{ srv.name || `服务器 ${i + 1}` }}
+                </h2>
+                <Button type="default" size="small" danger @click="mcpServers.splice(i, 1)">删除</Button>
+              </div>
+              <div class="p-6 grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-5">
+                <div>
+                  <label :class="labelClass">名称 <span class="text-[#ff3b30]">*</span></label>
+                  <Input v-model="srv.name" placeholder="如 weather" />
+                </div>
+                <div>
+                  <label :class="labelClass">连接方式</label>
+                  <Select v-model="srv.transport" :options="transportOptions" class="w-full" />
+                </div>
+                <div>
+                  <label :class="labelClass">超时时间（秒）</label>
+                  <Input v-model="srv.timeout" type="number" placeholder="默认" />
+                </div>
+                <div>
+                  <label :class="labelClass">描述</label>
+                  <Input v-model="srv.description" placeholder="这个服务器是做什么的" />
+                </div>
+
+                <!-- stdio 字段 -->
+                <template v-if="srv.transport === 'stdio'">
+                  <div>
+                    <label :class="labelClass">启动命令 <span class="text-[#ff3b30]">*</span></label>
+                    <Input v-model="srv.command" placeholder="如 npx / uvx / node" />
+                  </div>
+                  <div>
+                    <label :class="labelClass">命令参数</label>
+                    <Input v-model="srv.argsText" placeholder="以空格分隔，如 -y @modelcontextprotocol/server-everything" />
+                  </div>
+                  <div class="lg:col-span-2">
+                    <label :class="labelClass">环境变量</label>
+                    <KvEditor v-model="srv.env" key-placeholder="变量名" value-placeholder="值" />
+                  </div>
+                </template>
+
+                <!-- HTTP 字段 -->
+                <template v-else>
+                  <div class="lg:col-span-2">
+                    <label :class="labelClass">服务地址 (Endpoint) <span class="text-[#ff3b30]">*</span></label>
+                    <Input v-model="srv.endpoint" placeholder="如 http://localhost:8080/mcp" />
+                  </div>
+                  <div class="lg:col-span-2">
+                    <label :class="labelClass">请求头</label>
+                    <KvEditor v-model="srv.headers" key-placeholder="Header 名" value-placeholder="值" />
+                  </div>
+                </template>
+              </div>
+            </Card>
+
+            <Button type="dashed" block @click="addServer">+ 添加 MCP 服务器</Button>
+            <p v-if="error" class="text-sm text-[#ff3b30]">{{ error }}</p>
+          </template>
+
+          <!-- Prompt 覆盖：列表 + 弹窗编辑 -->
+          <template v-else-if="tab.name === 'prompt'">
+            <p class="text-xs text-slate-500">按群聊 / 好友覆盖 AI 的系统提示词，点击条目弹出编辑框，保存后立即生效（无需重启）。</p>
+
+            <Card v-for="section in promptSections" :key="section.kind" style="padding: 0" class="overflow-hidden">
+              <div class="px-6 py-3.5 border-b border-white/50 flex items-center justify-between">
+                <h2 class="text-sm font-semibold text-slate-800">
+                  {{ section.title }}
+                  <span class="ml-2 text-xs font-normal text-slate-400">{{ section.items.length }} 条</span>
+                </h2>
+                <Button type="text" size="small" @click="openPromptEditor(section.kind)">+ 添加</Button>
+              </div>
+              <p v-if="section.items.length === 0" class="px-6 py-8 text-xs text-slate-400">{{ section.empty }}</p>
+              <ul v-else class="divide-y divide-slate-100">
+                <li
+                  v-for="(item, i) in section.items"
+                  :key="i"
+                  class="px-5 py-3.5 flex items-start gap-4 cursor-pointer hover:bg-white/55 transition-colors"
+                  @click="openPromptEditor(section.kind, item, i)"
+                >
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <span class="text-sm font-medium text-slate-800 font-mono truncate">{{ item.id || '未填写 ID' }}</span>
+                      <span class="text-[11px] text-slate-400 shrink-0">{{ (item.prompt || '').length }} 字</span>
+                    </div>
+                    <p class="text-xs text-slate-500 leading-relaxed whitespace-pre-wrap break-all mt-1 line-clamp-2">{{ previewPrompt(item.prompt) }}</p>
+                  </div>
+                  <div class="flex items-center gap-1 shrink-0">
+                    <Button type="text" size="small" @click.stop="openPromptEditor(section.kind, item, i)">编辑</Button>
+                    <Button type="default" size="small" danger @click.stop="deletePrompt(section.kind, i)">删除</Button>
+                  </div>
+                </li>
+              </ul>
+            </Card>
+
+            <p v-if="error" class="text-sm text-[#ff3b30]">{{ error }}</p>
+          </template>
+        </template>
+      </Tabs>
+
       <div class="flex gap-2">
-        <button v-if="hasForm" class="px-3 py-1.5 text-sm rounded-lg border border-slate-300/60 text-slate-600 hover:bg-white/55 transition-colors" @click="toggleRaw">
+        <Button v-if="hasForm" type="default" size="small" @click="toggleRaw">
           {{ rawMode ? '表单模式' : '源码模式 (JSON)' }}
-        </button>
-          <button v-if="!rawMode && hasForm && current !== 'prompt'" :disabled="saving" class="px-4 py-1.5 text-sm rounded-lg btn-accent disabled:opacity-40 transition-colors" @click="onSave">
+        </Button>
+        <Button v-if="!rawMode && hasForm && current !== 'prompt'" type="primary" size="small" :disabled="saving" @click="onSave">
           {{ saving ? '保存中...' : '保存' }}
-        </button>
+        </Button>
       </div>
     </div>
 
-    <!-- 源码模式：原始 JSON（无表单的 tab 恒为源码模式） -->
-    <section v-if="rawMode || !hasForm" class="bg-white rounded-xl shadow-sm border border-white/60 p-6 space-y-3">
-      <p class="text-xs text-slate-500">{{ currentTab.desc }}</p>
-      <textarea
-        v-model="rawText"
-        rows="20"
-        spellcheck="false"
-        class="w-full bg-slate-950/85 text-slate-200 rounded-lg px-4 py-3 text-xs font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30"
-      />
-      <div class="flex items-center gap-3">
-        <button class="px-3 py-1.5 text-sm rounded-lg border border-slate-300/60 text-slate-600 hover:bg-white/55 transition-colors" @click="formatRaw">格式化</button>
-          <button :disabled="saving" class="px-4 py-1.5 text-sm rounded-lg btn-accent disabled:opacity-40 transition-colors" @click="onSaveRaw">
-          {{ saving ? '保存中...' : '保存' }}
-        </button>
-        <span v-if="error" class="text-sm text-[#ff3b30]">{{ error }}</span>
-      </div>
-    </section>
-
-    <!-- MCP 服务器：图形化表单 -->
-    <template v-else-if="current === 'mcp'">
-      <p class="text-xs text-slate-500">配置 AI 可调用的 MCP 服务器，修改保存后重启生效。</p>
-
-      <section v-for="(srv, i) in mcpServers" :key="i" class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
-        <div class="px-6 py-3.5 border-b border-white/50 flex items-center justify-between">
-          <h2 class="text-sm font-semibold text-slate-800 flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full" :class="srv.name ? 'bg-[#34c759]' : 'bg-slate-300'" />
-            {{ srv.name || `服务器 ${i + 1}` }}
-          </h2>
-          <button class="text-xs text-[#ff3b30] hover:text-red-700 transition-colors" @click="mcpServers.splice(i, 1)">删除</button>
-        </div>
-        <div class="p-6 grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-5">
-          <div>
-            <label :class="labelClass">名称 <span class="text-[#ff3b30]">*</span></label>
-            <input v-model="srv.name" type="text" placeholder="如 weather" :class="inputClass" />
-          </div>
-          <div>
-            <label :class="labelClass">连接方式</label>
-            <select v-model="srv.transport" :class="inputClass">
-              <option value="stdio">stdio（本地命令）</option>
-              <option value="streamable">streamable（HTTP）</option>
-              <option value="sse">sse（HTTP）</option>
-            </select>
-          </div>
-          <div>
-            <label :class="labelClass">超时时间（秒）</label>
-            <input v-model="srv.timeout" type="number" min="0" step="1" placeholder="默认" :class="inputClass" />
-          </div>
-          <div>
-            <label :class="labelClass">描述</label>
-            <input v-model="srv.description" type="text" placeholder="这个服务器是做什么的" :class="inputClass" />
-          </div>
-
-          <!-- stdio 字段 -->
-          <template v-if="srv.transport === 'stdio'">
-            <div>
-              <label :class="labelClass">启动命令 <span class="text-[#ff3b30]">*</span></label>
-              <input v-model="srv.command" type="text" placeholder="如 npx / uvx / node" :class="inputClass" />
-            </div>
-            <div>
-              <label :class="labelClass">命令参数</label>
-              <input v-model="srv.argsText" type="text" placeholder="以空格分隔，如 -y @modelcontextprotocol/server-everything" :class="inputClass" />
-            </div>
-            <div class="lg:col-span-2">
-              <label :class="labelClass">环境变量</label>
-              <KvEditor v-model="srv.env" key-placeholder="变量名" value-placeholder="值" />
-            </div>
-          </template>
-
-          <!-- HTTP 字段 -->
-          <template v-else>
-            <div class="lg:col-span-2">
-              <label :class="labelClass">服务地址 (Endpoint) <span class="text-[#ff3b30]">*</span></label>
-              <input v-model="srv.endpoint" type="text" placeholder="如 http://localhost:8080/mcp" :class="inputClass" />
-            </div>
-            <div class="lg:col-span-2">
-              <label :class="labelClass">请求头</label>
-              <KvEditor v-model="srv.headers" key-placeholder="Header 名" value-placeholder="值" />
-            </div>
-          </template>
-        </div>
-      </section>
-
-      <button class="w-full py-3 text-sm rounded-xl border-2 border-dashed border-slate-300/60 text-slate-400 hover:border-zinc-500 hover:text-zinc-700 hover:bg-white/60 transition-all" @click="addServer">
-        + 添加 MCP 服务器
-      </button>
-      <p v-if="error" class="text-sm text-[#ff3b30]">{{ error }}</p>
-    </template>
-
-    <!-- Prompt 覆盖：列表 + 弹窗编辑 -->
-    <template v-else-if="current === 'prompt'">
-      <p class="text-xs text-slate-500">按群聊 / 好友覆盖 AI 的系统提示词，点击条目弹出编辑框，保存后立即生效（无需重启）。</p>
-
-      <template v-for="section in promptSections" :key="section.kind">
-        <section class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
-          <div class="px-6 py-3.5 border-b border-white/50 flex items-center justify-between">
-            <h2 class="text-sm font-semibold text-slate-800">
-              {{ section.title }}
-              <span class="ml-2 text-xs font-normal text-slate-400">{{ section.items.length }} 条</span>
-            </h2>
-            <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="openPromptEditor(section.kind)">+ 添加</button>
-          </div>
-          <p v-if="section.items.length === 0" class="px-6 py-8 text-xs text-slate-400">{{ section.empty }}</p>
-          <ul v-else class="divide-y divide-slate-100">
-            <li
-              v-for="(item, i) in section.items"
-              :key="i"
-              class="px-5 py-3.5 flex items-start gap-4 cursor-pointer hover:bg-white/55 transition-colors"
-              @click="openPromptEditor(section.kind, item, i)"
-            >
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-2 min-w-0">
-                  <span class="text-sm font-medium text-slate-800 font-mono truncate">{{ item.id || '未填写 ID' }}</span>
-                  <span class="text-[11px] text-slate-400 shrink-0">{{ (item.prompt || '').length }} 字</span>
-                </div>
-                <p class="text-xs text-slate-500 leading-relaxed whitespace-pre-wrap break-all mt-1 line-clamp-2">{{ previewPrompt(item.prompt) }}</p>
-              </div>
-              <div class="flex items-center gap-1 shrink-0">
-                <button
-                  class="text-xs text-zinc-600 hover:text-zinc-900 hover:bg-white/60 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
-                  @click.stop="openPromptEditor(section.kind, item, i)"
-                >
-                  编辑
-                </button>
-                <button
-                  class="text-xs text-[#ff3b30] hover:text-[#ff3b30] hover:bg-red-50 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
-                  @click.stop="deletePrompt(section.kind, i)"
-                >
-                  删除
-                </button>
-              </div>
-            </li>
-          </ul>
-        </section>
-      </template>
-      <p v-if="error" class="text-sm text-[#ff3b30]">{{ error }}</p>
-    </template>
-
     <!-- Prompt 覆盖：新增 / 编辑弹窗 -->
-    <Teleport to="body">
-      <div
-        v-if="showPromptEditor"
-        class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4"
-        v-backdrop-close="closePromptEditor"
-      >
-        <form
-          class="bg-white rounded-xl shadow-2xl border border-zinc-200 w-full max-w-4xl flex flex-col max-h-[92vh]"
-          @submit.prevent="savePromptEditor"
-        >
-          <div class="px-6 py-4 border-b border-zinc-100 flex items-center justify-between">
-            <h3 class="text-sm font-semibold text-slate-800">{{ promptDraft.id ? '编辑覆盖' : '新增覆盖' }}</h3>
-            <button type="button" class="text-slate-400 hover:text-slate-700 transition-colors" @click="closePromptEditor">✕</button>
-          </div>
-          <div class="px-6 py-5 space-y-4 overflow-y-auto flex-1">
-            <div>
-              <label class="block text-xs font-medium text-slate-600 mb-1.5">
-                {{ promptDraft.kind === 'friends' ? '用户 ID' : '群 ID' }} <span class="text-[#ff3b30]">*</span>
-              </label>
-              <input
-                v-model.trim="promptDraft.id"
-                type="text"
-                :placeholder="promptDraft.kind === 'friends' ? '用户 ID（统一带前缀，如 qq:123456 或 fs:ou_xxx）' : '群 ID（统一带前缀，如 qq:123456 或 fs:oc_xxx）'"
-                :class="inputClass"
-              />
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-slate-600 mb-1.5">系统提示词 <span class="text-[#ff3b30]">*</span></label>
-              <textarea
-                v-model.trim="promptDraft.prompt"
-                rows="16"
-                placeholder="该会话使用的系统提示词"
-                :class="inputClass + ' font-mono leading-relaxed resize-y min-h-[55vh]'"
-              />
-              <p class="text-[11px] text-slate-400 mt-1.5">{{ promptDraft.prompt.length }} 字</p>
-            </div>
-            <p v-if="promptEditorError" class="text-sm text-[#ff3b30]">{{ promptEditorError }}</p>
-            <div class="flex justify-end gap-2 pt-1">
-              <button type="button" class="px-4 py-2 text-sm text-slate-600 hover:bg-white/60 rounded-lg transition-colors" @click="closePromptEditor">取消</button>
-            <button type="submit" :disabled="saving" class="px-4 py-2 text-sm btn-accent rounded-lg disabled:opacity-40 transition-colors">{{ saving ? '保存中...' : '保存并生效' }}</button>
-            </div>
-          </div>
-        </form>
-      </div>
-    </Teleport>
+    <Modal
+      v-model:open="showPromptEditor"
+      :title="promptDraft.id ? '编辑覆盖' : '新增覆盖'"
+      :width="896"
+      :typewriter="false"
+      :show-footer="false"
+    >
+      <form class="w-full space-y-4" @submit.prevent="savePromptEditor">
+        <div class="w-full">
+          <label class="block text-xs font-medium text-slate-600 mb-1.5">
+            {{ promptDraft.kind === 'friends' ? '用户 ID' : '群 ID' }} <span class="text-[#ff3b30]">*</span>
+          </label>
+          <Input
+            :model-value="promptDraft.id"
+            :placeholder="promptDraft.kind === 'friends' ? '用户 ID（统一带前缀，如 qq:123456 或 fs:ou_xxx）' : '群 ID（统一带前缀，如 qq:123456 或 fs:oc_xxx）'"
+            @update:modelValue="(v) => (promptDraft.id = v.trim())"
+          />
+        </div>
+        <div class="w-full">
+          <label class="block text-xs font-medium text-slate-600 mb-1.5">系统提示词 <span class="text-[#ff3b30]">*</span></label>
+          <textarea
+            v-model.trim="promptDraft.prompt"
+            rows="16"
+            placeholder="该会话使用的系统提示词"
+            :class="inputClass + ' font-mono leading-relaxed resize-y min-h-[55vh]'"
+          />
+          <p class="text-[11px] text-slate-400 mt-1.5">{{ promptDraft.prompt.length }} 字</p>
+        </div>
+        <p v-if="promptEditorError" class="text-sm text-[#ff3b30]">{{ promptEditorError }}</p>
+        <div class="flex justify-end gap-2 pt-1">
+          <Button type="default" @click="closePromptEditor">取消</Button>
+          <Button type="primary" html-type="submit" :disabled="saving">{{ saving ? '保存中...' : '保存并生效' }}</Button>
+        </div>
+      </form>
+    </Modal>
   </div>
 </template>
 
 <script setup>
 import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue'
+import { Button, Card, Input, Modal, Select, Tabs } from 'animal-island-vue'
 import { api } from '../api.js'
 
 const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow'
@@ -238,28 +210,22 @@ const KvEditor = defineComponent({
       h('div', { class: 'space-y-2' }, [
         ...props.modelValue.map((row, i) =>
           h('div', { class: 'flex items-center gap-2', key: i }, [
-            h('input', {
-              class: inputClass,
-              type: 'text',
+            h(Input, {
+              modelValue: row.k,
               placeholder: props.keyPlaceholder,
-              value: row.k,
-              onInput: (e) => update(i, 'k', e.target.value),
+              'onUpdate:modelValue': (v) => update(i, 'k', v),
             }),
-            h('input', {
-              class: inputClass,
-              type: 'text',
+            h(Input, {
+              modelValue: row.v,
               placeholder: props.valuePlaceholder,
-              value: row.v,
-              onInput: (e) => update(i, 'v', e.target.value),
+              'onUpdate:modelValue': (v) => update(i, 'v', v),
             }),
-            h('button', { class: 'text-xs text-[#ff3b30] hover:text-red-700 shrink-0 transition-colors', onClick: () => remove(i) }, '删除'),
+            h(Button, { type: 'default', size: 'small', danger: true, onClick: () => remove(i) }, {
+              default: () => '删除',
+            }),
           ])
         ),
-        h(
-          'button',
-          { class: 'text-xs text-zinc-700 hover:text-zinc-900 transition-colors', onClick: add },
-          '+ 添加一行'
-        ),
+        h(Button, { type: 'text', size: 'small', onClick: add }, { default: () => '+ 添加一行' }),
       ])
   },
 })
@@ -269,6 +235,14 @@ const tabs = [
   { name: 'prompt', label: 'Prompt 覆盖', desc: '格式: {"groups": {"群ID": "prompt"}, "friends": {"用户ID": "prompt"}}（统一带平台前缀，如 qq:123456 或 fs:oc_xxx）', hot: true },
   { name: 'hooks', label: 'AI 钩子', desc: '格式: {"hooks": {"事件名": [{matcher(工具名正则,可空), command, timeout_sec(可空)}]}}。事件: SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/Stop/SubagentStop/PreCompact。stdin 接收 JSON 载荷；退出码 0=通过(stdout 注入上下文) / 2=阻断(stderr 为原因) / 其他=仅记日志。保存后数秒内生效', hot: true },
   { name: 'commands', label: '自定义命令', desc: '格式: {"commands": {"命令名": "提示词模板"}}。模板中 $args 为用户参数占位符（无占位符时参数追加到末尾）；命令名字母开头、最长 32 字符，不得与内置命令撞名。保存后数秒内生效', hot: true },
+]
+
+// 页签条目（Tabs 组件）与 MCP 连接方式选项（Select 组件）
+const tabItems = tabs.map((t) => ({ key: t.name, label: t.label }))
+const transportOptions = [
+  { key: 'stdio', label: 'stdio（本地命令）' },
+  { key: 'streamable', label: 'streamable（HTTP）' },
+  { key: 'sse', label: 'sse（HTTP）' },
 ]
 
 const current = ref('mcp')

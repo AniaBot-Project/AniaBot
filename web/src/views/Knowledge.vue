@@ -6,19 +6,9 @@
         知识库按作用域管理（全局 / 群聊 / 私聊），AI 对话时会检索相关文档；在此可查看与维护，修改立即生效，无需重启
       </div>
       <div class="flex items-center gap-3">
-        <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="load">刷新</button>
-        <button
-          class="text-xs bg-white text-zinc-700 px-3.5 py-2 rounded-lg border border-zinc-200 hover:bg-white/55 font-medium transition-colors shadow-sm"
-          @click="openImport"
-        >
-          导入 URL
-        </button>
-        <button
-          class="text-xs btn-accent px-3.5 py-2 rounded-lg font-medium transition-colors shadow-sm"
-          @click="openCreate"
-        >
-          新增文档
-        </button>
+        <Button type="text" size="small" @click="load">刷新</Button>
+        <Button type="default" size="small" @click="openImport">导入 URL</Button>
+        <Button type="primary" size="small" @click="openCreate">新增文档</Button>
       </div>
     </div>
 
@@ -27,18 +17,19 @@
 
     <div class="flex flex-col lg:flex-row lg:items-start gap-4">
       <!-- 左栏：作用域列表 -->
-      <section class="w-full lg:w-72 shrink-0 bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
+      <Card style="padding: 0" class="w-full lg:w-72 shrink-0 overflow-hidden">
         <div class="p-2 border-b border-white/50">
-          <div class="flex items-center gap-1 bg-slate-50 rounded-lg p-1">
-            <button
+          <div class="flex items-center gap-1">
+            <Button
               v-for="t in kindTabs"
               :key="t.value"
-              class="flex-1 px-2 py-1.5 text-xs rounded-md transition-all"
-              :class="kindFilter === t.value ? 'btn-accent font-medium shadow-sm' : 'text-slate-500 hover:text-slate-800'"
+              size="small"
+              class="flex-1"
+              :type="kindFilter === t.value ? 'primary' : 'text'"
               @click="kindFilter = t.value"
             >
               {{ t.label }}
-            </button>
+            </Button>
           </div>
         </div>
         <ul class="divide-y divide-slate-100 max-h-128 overflow-y-auto">
@@ -54,15 +45,15 @@
           >
             <div class="flex items-center justify-between gap-2">
               <span class="text-sm font-medium text-slate-800 truncate">{{ displayName(s) }}</span>
-              <span class="text-[11px] px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-600 shrink-0">{{ s.count }} 篇</span>
+              <Tag variant="soft" size="small" class="shrink-0">{{ s.count }} 篇</Tag>
             </div>
             <div class="text-[11px] font-mono text-slate-400 mt-0.5">{{ s.scope }}</div>
           </li>
         </ul>
-      </section>
+      </Card>
 
       <!-- 右栏：文档列表 -->
-      <section class="flex-1 min-w-0 bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
+      <Card style="padding: 0" class="flex-1 min-w-0 overflow-hidden">
         <div v-if="current" class="px-5 py-3.5 border-b border-white/50 flex items-center justify-between gap-3">
           <div class="min-w-0">
             <span class="text-sm font-semibold text-slate-800">{{ displayName(current) }}</span>
@@ -86,43 +77,35 @@
               <p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap wrap-break-word mt-1.5">{{ preview(d.content) }}</p>
               <div class="flex items-center gap-1.5 mt-2 flex-wrap">
                 <span class="text-[11px] font-mono text-slate-400">{{ d.id }}</span>
-                <span v-for="t in d.tags" :key="t" class="text-[11px] px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-600">{{ t }}</span>
+                <Tag v-for="t in d.tags" :key="t" variant="soft" size="small">{{ t }}</Tag>
                 <span class="text-[11px] text-slate-400">记于 {{ fmtDate(d.created_at) }}</span>
               </div>
             </div>
             <div class="flex items-center gap-1 shrink-0">
-              <button
-                class="text-xs text-zinc-600 hover:text-zinc-900 hover:bg-white/60 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
-                @click="openEdit(d)"
-              >
-                编辑
-              </button>
-              <button
-                class="text-xs text-[#ff3b30] hover:text-[#ff3b30] hover:bg-red-50 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
-                @click="onDelete(d)"
-              >
-                删除
-              </button>
+              <Button type="text" size="small" @click="openEdit(d)">编辑</Button>
+              <Button type="default" size="small" danger @click="onDelete(d)">删除</Button>
             </div>
           </li>
         </ul>
-      </section>
+      </Card>
     </div>
 
     <!-- 新增/编辑弹窗 -->
-    <div v-if="showForm" class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4" v-backdrop-close="() => (showForm = false)">
-      <form class="bg-white rounded-2xl shadow-2xl p-6 w-136 max-w-full space-y-4" @submit.prevent="onSubmit">
-        <h2 class="text-base font-semibold text-slate-800">{{ form.id ? '编辑文档' : '新增文档' }}</h2>
+    <Modal
+      v-model:open="showForm"
+      :title="form.id ? '编辑文档' : '新增文档'"
+      :typewriter="false"
+      :show-footer="false"
+      :width="544"
+    >
+      <form class="w-full space-y-4" @submit.prevent="onSubmit">
         <div v-if="!form.id">
-          <label class="block text-xs text-slate-500 mb-1.5">作用域（下拉可选用已有作用域，或手输 global / g:会话ID / f:用户ID，支持前缀如 g:fs:oc_xxx）</label>
-          <input v-model="form.scope" list="kb-scope-options" placeholder="如 global、g:123456 或 g:fs:oc_xxx" required :class="inputClass" />
-          <datalist id="kb-scope-options">
-            <option v-for="s in scopeSuggestions" :key="s" :value="s" />
-          </datalist>
+          <label class="block text-xs text-slate-500 mb-1.5">作用域（手输 global / g:会话ID / f:用户ID，支持前缀如 g:fs:oc_xxx）</label>
+          <Input v-model="form.scope" placeholder="如 global、g:123456 或 g:fs:oc_xxx" />
         </div>
         <div>
           <label class="block text-xs text-slate-500 mb-1.5">标题</label>
-          <input v-model="form.title" placeholder="简短概括内容，如「Docker 部署指南」" :class="inputClass" />
+          <Input v-model="form.title" placeholder="简短概括内容，如「Docker 部署指南」" />
         </div>
         <div>
           <label class="block text-xs text-slate-500 mb-1.5">正文（完整资料/教程，最长 8000 字符）</label>
@@ -130,48 +113,51 @@
         </div>
         <div>
           <label class="block text-xs text-slate-500 mb-1.5">标签（逗号分隔，可空）</label>
-          <input v-model="form.tagsText" placeholder="如：部署, docker" :class="inputClass" />
+          <Input v-model="form.tagsText" placeholder="如：部署, docker" />
         </div>
         <div>
           <label class="block text-xs text-slate-500 mb-1.5">来源（可空，如网页链接）</label>
-          <input v-model="form.source" placeholder="如 https://example.com" :class="inputClass" />
+          <Input v-model="form.source" placeholder="如 https://example.com" />
         </div>
         <p v-if="form.msg" class="text-sm text-[#ff3b30]">{{ form.msg }}</p>
         <div class="flex justify-end gap-2 pt-1">
-          <button type="button" class="px-4 py-2 text-sm text-slate-600 hover:bg-white/60 rounded-lg transition-colors" @click="showForm = false">取消</button>
-        <button type="submit" class="px-4 py-2 text-sm btn-accent rounded-lg transition-colors">保存</button>
+          <Button type="default" @click="showForm = false">取消</Button>
+          <Button type="primary" html-type="submit">保存</Button>
         </div>
       </form>
-    </div>
+    </Modal>
 
     <!-- 导入 URL 弹窗 -->
-    <div v-if="showImport" class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4" v-backdrop-close="() => (showImport = false)">
-      <form class="bg-white rounded-2xl shadow-2xl p-6 w-136 max-w-full space-y-4" @submit.prevent="onImport">
-        <h2 class="text-base font-semibold text-slate-800">从 URL 导入</h2>
+    <Modal
+      v-model:open="showImport"
+      title="从 URL 导入"
+      :typewriter="false"
+      :show-footer="false"
+      :width="544"
+    >
+      <form class="w-full space-y-4" @submit.prevent="onImport">
         <div>
-          <label class="block text-xs text-slate-500 mb-1.5">作用域（下拉可选用已有作用域，或手输 global / g:会话ID / f:用户ID，支持前缀如 g:fs:oc_xxx）</label>
-          <input v-model="importForm.scope" list="kb-scope-options" placeholder="如 global 或 g:123456" required :class="inputClass" />
-          <datalist id="kb-scope-options">
-            <option v-for="s in scopeSuggestions" :key="s" :value="s" />
-          </datalist>
+          <label class="block text-xs text-slate-500 mb-1.5">作用域（手输 global / g:会话ID / f:用户ID，支持前缀如 g:fs:oc_xxx）</label>
+          <Input v-model="importForm.scope" placeholder="如 global 或 g:123456" />
         </div>
         <div>
           <label class="block text-xs text-slate-500 mb-1.5">网页地址</label>
-          <input v-model="importForm.url" placeholder="https://..." required :class="inputClass" />
+          <Input v-model="importForm.url" placeholder="https://..." />
           <p class="text-[11px] text-slate-400 mt-1.5">通过 Jina Reader 抓取正文入库，需要已配置 Jina AI Token</p>
         </div>
         <p v-if="importForm.msg" class="text-sm text-[#ff3b30]">{{ importForm.msg }}</p>
         <div class="flex justify-end gap-2 pt-1">
-          <button type="button" class="px-4 py-2 text-sm text-slate-600 hover:bg-white/60 rounded-lg transition-colors" @click="showImport = false">取消</button>
-        <button type="submit" class="px-4 py-2 text-sm btn-accent rounded-lg transition-colors">导入</button>
+          <Button type="default" @click="showImport = false">取消</Button>
+          <Button type="primary" html-type="submit">导入</Button>
         </div>
       </form>
-    </div>
+    </Modal>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { Button, Card, Input, Modal, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
 
 const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow'

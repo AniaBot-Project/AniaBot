@@ -48,6 +48,9 @@ docs/.vitepress/cache/
 web/node_modules/
 bot/adminpanel/dist/
 web/dist-demo/
+# 主题库样式同步产物（npm run sync:theme 生成，来源 animal-island-vue）
+web/src/styles/animal-island.vendor.css
+web/src/styles/files/
 
 # playwright test artifacts
 .playwright-mcp/

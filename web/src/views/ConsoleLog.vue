@@ -2,26 +2,24 @@
   <div class="space-y-4">
     <!-- 筛选与操作栏 -->
     <div class="flex items-center justify-between flex-wrap gap-3">
-      <div class="flex items-center gap-1 glass rounded-xl p-1">
-        <button
+      <div class="flex items-center gap-1">
+        <Button
           v-for="t in levelTabs"
           :key="t.value"
-          class="px-3 py-1.5 text-xs rounded-md transition-all"
-          :class="filter === t.value
-            ? 'btn-accent font-medium shadow-sm'
-            : 'text-slate-500 hover:text-slate-800 hover:bg-white/60'"
+          size="small"
+          :type="filter === t.value ? 'primary' : 'text'"
           @click="filter = t.value"
         >
           {{ t.label }}
-        </button>
+        </Button>
       </div>
       <div class="flex items-center gap-3">
         <label class="flex items-center gap-1.5 text-xs text-slate-500 select-none cursor-pointer">
-          <input v-model="autoRefresh" type="checkbox" />
+          <Switch v-model="autoRefresh" size="small" />
           自动刷新
         </label>
-        <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="clearView">清空显示</button>
-        <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="load">刷新</button>
+        <Button type="text" size="small" @click="clearView">清空显示</Button>
+        <Button type="text" size="small" @click="load">刷新</Button>
       </div>
     </div>
 
@@ -51,12 +49,9 @@
 
       <!-- 有新日志提示（用户上翻查看历史时） -->
       <div v-if="hasNew" class="border-t border-white/10 px-4 py-2 flex justify-center">
-        <button
-          class="text-[11px] bg-white text-zinc-950 px-3 py-1.5 rounded-full hover:bg-white/70 font-medium transition-colors shadow-sm"
-          @click="scrollToBottom(true)"
-        >
+        <Button type="default" size="small" @click="scrollToBottom(true)">
           ↓ 有新日志，回到底部
-        </button>
+        </Button>
       </div>
     </section>
   </div>
@@ -64,6 +59,7 @@
 
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { Button, Switch } from 'animal-island-vue'
 import { api } from '../api.js'
 
 const levelTabs = [

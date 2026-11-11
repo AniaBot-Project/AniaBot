@@ -1,155 +1,132 @@
 <template>
   <div class="space-y-4">
     <!-- 定时任务管理 -->
-    <section class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
+    <Card style="padding: 0" class="overflow-hidden">
       <div class="px-6 py-4 border-b border-zinc-100 flex items-center justify-between">
         <h2 class="text-[10px] tracking-[0.15em] uppercase text-zinc-800 font-medium">定时任务</h2>
         <div class="flex items-center gap-3">
-          <button class="text-[10px] tracking-[0.15em] uppercase text-zinc-500 hover:text-zinc-900 font-medium transition-colors" @click="loadClocks">刷新</button>
-        <button class="text-[10px] tracking-[0.15em] uppercase btn-accent px-3 py-1.5 rounded-md font-medium transition-colors" @click="openCreate">新建任务</button>
+          <Button type="text" size="small" @click="loadClocks">刷新</Button>
+          <Button type="primary" size="small" @click="openCreate">新建任务</Button>
         </div>
       </div>
       <p v-if="clocks.length === 0" class="px-6 py-8 text-xs text-zinc-400 text-center tracking-wide">暂无定时任务，点击右上角「新建任务」创建（也可在群聊/私聊中使用 /clock）</p>
-      <div v-else class="overflow-x-auto">
-        <table class="w-full text-xs">
-          <thead>
-            <tr class="text-left text-[10px] tracking-[0.15em] uppercase text-zinc-400 bg-zinc-50/60 border-b border-zinc-100">
-              <th class="px-3 py-3 sm:px-6 font-medium">任务</th>
-              <th class="px-3 py-3 sm:px-6 font-medium">目标</th>
-              <th class="px-3 py-3 sm:px-6 font-medium">Cron</th>
-              <th class="px-3 py-3 sm:px-6 font-medium">下次执行</th>
-              <th class="px-3 py-3 sm:px-6 font-medium">上次执行</th>
-              <th class="px-3 py-3 sm:px-6 font-medium">启用</th>
-            </tr>
-          </thead>
-          <tbody>
-          <template v-for="t in clocks" :key="t.id">
-            <tr
-              class="border-b border-dashed border-zinc-100 last:border-0 hover:bg-white/55 transition-colors cursor-pointer"
-              :class="{ 'bg-zinc-50/70': expanded.has(t.id) }"
-              @click="toggleExpand(t.id)"
-            >
-              <td class="px-3 py-3 sm:px-6 text-zinc-800 max-w-48">
-                <span class="flex items-center gap-1.5">
-                  <span
-                    class="[&>svg]:w-3 [&>svg]:h-3 text-zinc-400 transition-transform shrink-0"
-                    :class="{ 'rotate-90': expanded.has(t.id) }"
-                    v-html="icons.chevron"
-                  />
-                  <span class="truncate font-medium" :title="t.title">{{ t.title || '(无标题)' }}</span>
-                </span>
-                <span v-if="t.run_once" class="text-[9px] tracking-[0.12em] uppercase border border-zinc-300 text-zinc-500 px-1.5 py-0.5 rounded ml-4">单次</span>
-              </td>
-              <td class="px-3 py-3 sm:px-6 text-zinc-600 whitespace-nowrap">{{ t.target_type === 'group' ? '群' : '好友' }} {{ t.target_id }}</td>
-              <td class="px-3 py-3 sm:px-6 text-zinc-500 whitespace-nowrap">{{ t.cron }}</td>
-              <td class="px-3 py-3 sm:px-6 text-zinc-600 whitespace-nowrap">{{ t.enabled ? fmtTimeFull(t.next_run_at) : '—' }}</td>
-              <td class="px-3 py-3 sm:px-6 text-zinc-600 whitespace-nowrap">{{ fmtTimeFull(t.last_run_at) }}</td>
-              <td class="px-3 py-3 sm:px-6" @click.stop>
-                <button
-                  type="button"
-                  role="switch"
-                  :aria-checked="t.enabled"
-                  :disabled="toggling.has(t.id)"
-                  class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50"
-                  :class="t.enabled ? 'bg-[#0071e3]' : 'bg-slate-300/70'"
-                  @click="toggleClock(t)"
-                >
-                  <span
-                    class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
-                    :class="t.enabled ? 'translate-x-4.5' : 'translate-x-0.75'"
-                  />
-                </button>
-              </td>
-            </tr>
-            <!-- 任务详情 -->
-            <tr v-if="expanded.has(t.id)" class="border-b border-dashed border-zinc-100 last:border-0 bg-zinc-50/40">
-              <td colspan="6" class="px-3 py-4 sm:px-6">
-                <dl class="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-xs">
-                  <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">任务内容</dt>
-                  <dd class="text-zinc-700 whitespace-pre-wrap break-all">{{ t.content }}</dd>
-                  <template v-if="t.note">
-                    <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">备注</dt>
-                    <dd class="text-zinc-700 whitespace-pre-wrap break-all">{{ t.note }}</dd>
-                  </template>
-                  <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">超时时间</dt>
-                  <dd class="text-zinc-700">{{ t.timeout_sec > 0 ? t.timeout_sec + ' 秒' : '默认' }}</dd>
-                  <template v-if="t.target_type === 'group' && t.created_by">
-                    <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">提醒 @</dt>
-                    <dd class="text-zinc-700 font-mono">{{ t.created_by }}</dd>
-                  </template>
-                  <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">创建人</dt>
-                  <dd class="text-zinc-700 font-mono">{{ fmtActor(t.creator) }}</dd>
-                  <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">更新人</dt>
-                  <dd class="text-zinc-700 font-mono">{{ fmtActor(t.updater) }}</dd>
-                  <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">创建时间</dt>
-                  <dd class="text-zinc-700">{{ fmtTimeFull(t.created_at) }}</dd>
-                </dl>
-                <div class="mt-4 flex items-center gap-2">
-                  <button
-                    class="text-[10px] tracking-[0.15em] uppercase btn-accent px-3 py-1.5 rounded-md font-medium transition-colors disabled:opacity-50"
-                    :disabled="toggling.has(t.id)"
-                    @click="openEdit(t)"
-                  >编辑</button>
-                  <button
-                    class="text-[10px] tracking-[0.15em] uppercase border border-zinc-300 text-zinc-600 px-3 py-1.5 rounded-md hover:bg-white/60 hover:text-[#ff3b30] hover:border-red-300 font-medium transition-colors disabled:opacity-50"
-                    :disabled="toggling.has(t.id)"
-                    @click="removeClock(t)"
-                  >删除</button>
-                </div>
-              </td>
-            </tr>
+      <template v-else>
+        <Table
+          :columns="clockColumns"
+          :data-source="clocks"
+          row-key="id"
+          :pagination="false"
+          :striped="false"
+          :on-row="clockRowAttrs"
+        >
+          <template #cell-title="{ record }">
+            <span class="flex items-center gap-1.5">
+              <span
+                class="[&>svg]:w-3 [&>svg]:h-3 text-zinc-400 transition-transform shrink-0"
+                :class="{ 'rotate-90': expanded.has(record.id) }"
+                v-html="icons.chevron"
+              />
+              <span class="truncate font-medium" :title="record.title">{{ record.title || '(无标题)' }}</span>
+            </span>
+            <Tag v-if="record.run_once" variant="outlined" size="small" class="ml-4">单次</Tag>
           </template>
-          </tbody>
-        </table>
-      </div>
-    </section>
+          <template #cell-target_id="{ record }">
+            <span class="text-zinc-600 whitespace-nowrap">{{ record.target_type === 'group' ? '群' : '好友' }} {{ record.target_id }}</span>
+          </template>
+          <template #cell-cron="{ record }">
+            <span class="text-zinc-500 whitespace-nowrap">{{ record.cron }}</span>
+          </template>
+          <template #cell-next_run_at="{ record }">
+            <span class="text-zinc-600 whitespace-nowrap">{{ record.enabled ? fmtTimeFull(record.next_run_at) : '—' }}</span>
+          </template>
+          <template #cell-last_run_at="{ record }">
+            <span class="text-zinc-600 whitespace-nowrap">{{ fmtTimeFull(record.last_run_at) }}</span>
+          </template>
+          <template #cell-enabled="{ record }">
+            <Switch
+              :model-value="record.enabled"
+              :disabled="toggling.has(record.id)"
+              size="small"
+              @update:model-value="toggleClock(record)"
+              @click.stop
+            />
+          </template>
+        </Table>
+        <!-- 任务详情（原表格展开行内容；Table 无行展开 API，展开后渲染在表格下方） -->
+        <template v-for="t in clocks" :key="t.id">
+          <div v-if="expanded.has(t.id)" class="border-b border-dashed border-zinc-100 last:border-0 bg-zinc-50/40 px-6 py-4">
+            <dl class="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-xs">
+              <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">任务内容</dt>
+              <dd class="text-zinc-700 whitespace-pre-wrap break-all">{{ t.content }}</dd>
+              <template v-if="t.note">
+                <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">备注</dt>
+                <dd class="text-zinc-700 whitespace-pre-wrap break-all">{{ t.note }}</dd>
+              </template>
+              <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">超时时间</dt>
+              <dd class="text-zinc-700">{{ t.timeout_sec > 0 ? t.timeout_sec + ' 秒' : '默认' }}</dd>
+              <template v-if="t.target_type === 'group' && t.created_by">
+                <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">提醒 @</dt>
+                <dd class="text-zinc-700 font-mono">{{ t.created_by }}</dd>
+              </template>
+              <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">创建人</dt>
+              <dd class="text-zinc-700 font-mono">{{ fmtActor(t.creator) }}</dd>
+              <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">更新人</dt>
+              <dd class="text-zinc-700 font-mono">{{ fmtActor(t.updater) }}</dd>
+              <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">创建时间</dt>
+              <dd class="text-zinc-700">{{ fmtTimeFull(t.created_at) }}</dd>
+            </dl>
+            <div class="mt-4 flex items-center gap-2">
+              <Button type="primary" size="small" :disabled="toggling.has(t.id)" @click="openEdit(t)">编辑</Button>
+              <Button type="default" size="small" danger :disabled="toggling.has(t.id)" @click="removeClock(t)">删除</Button>
+            </div>
+          </div>
+        </template>
+      </template>
+    </Card>
 
     <!-- 筛选与操作栏 -->
     <div class="flex items-center justify-between flex-wrap gap-3">
       <div class="flex items-center gap-3">
         <h2 class="text-[10px] tracking-[0.15em] uppercase text-zinc-500 font-medium">执行日志</h2>
-        <div class="flex items-center gap-1 glass rounded-xl p-1">
-        <button
-          v-for="t in typeTabs"
-          :key="t.value"
-          class="px-3 py-1.5 text-xs rounded-md transition-all"
-          :class="filters.target_type === t.value
-            ? 'btn-accent font-medium shadow-sm'
-            : 'text-slate-500 hover:text-slate-800 hover:bg-white/60'"
-          @click="filters.target_type = t.value; applyFilters()"
-        >
-          {{ t.label }}
-        </button>
+        <div class="flex items-center gap-1">
+          <Button
+            v-for="t in typeTabs"
+            :key="t.value"
+            :type="filters.target_type === t.value ? 'primary' : 'text'"
+            size="small"
+            @click="filters.target_type = t.value; applyFilters()"
+          >
+            {{ t.label }}
+          </Button>
         </div>
       </div>
       <div class="flex items-center gap-3">
         <label class="flex items-center gap-1.5 text-xs text-slate-500 select-none cursor-pointer">
-          <input v-model="autoRefresh" type="checkbox" />
+          <Switch v-model="autoRefresh" size="small" />
           自动刷新
         </label>
-        <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors disabled:opacity-50" :disabled="exporting" @click="exportLogs">导出日志</button>
-        <button class="text-xs text-zinc-500 hover:text-[#ff3b30] font-medium transition-colors disabled:opacity-50" :disabled="clearing" @click="clearLogs">清除日志</button>
-        <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="load">刷新</button>
+        <Button type="text" size="small" :disabled="exporting" @click="exportLogs">导出日志</Button>
+        <Button type="text" size="small" danger :disabled="clearing" @click="clearLogs">清除日志</Button>
+        <Button type="text" size="small" @click="load">刷新</Button>
       </div>
     </div>
 
     <!-- 条件查询栏 -->
-    <section class="bg-white rounded-xl shadow-sm border border-white/60 px-5 py-4">
+    <Card>
       <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         <label class="block">
           <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">状态</span>
-          <select v-model="filters.status" :class="inputClass" @change="applyFilters">
-            <option value="">全部</option>
-            <option value="running">执行中</option>
-            <option value="success">成功</option>
-            <option value="timeout">超时</option>
-            <option value="error">出错</option>
-            <option value="interrupted">中断</option>
-          </select>
+          <Select v-model="filters.status" :options="statusOptions" class="mt-1 w-full" @change="applyFilters" />
         </label>
         <label class="block">
           <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">目标会话 ID</span>
-          <input v-model.trim="filters.target_id" type="text" placeholder="精确匹配" :class="inputClass" @keyup.enter="applyFilters" />
+          <Input
+            :model-value="filters.target_id"
+            placeholder="精确匹配"
+            class="mt-1 w-full"
+            @update:model-value="v => (filters.target_id = v.trim())"
+            @keyup.enter="applyFilters"
+          />
         </label>
         <label class="block">
           <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">开始时间</span>
@@ -161,72 +138,55 @@
         </label>
         <label class="block">
           <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">关键词</span>
-          <input v-model.trim="filters.keyword" type="text" placeholder="匹配任务标题" :class="inputClass" @keyup.enter="applyFilters" />
+          <Input
+            :model-value="filters.keyword"
+            placeholder="匹配任务标题"
+            class="mt-1 w-full"
+            @update:model-value="v => (filters.keyword = v.trim())"
+            @keyup.enter="applyFilters"
+          />
         </label>
         <div class="flex items-end gap-2">
-          <button
-            class="px-4 py-1.5 text-[11px] tracking-widest uppercase btn-accent rounded-md transition-colors"
-            @click="applyFilters"
-          >
-            查询
-          </button>
-          <button
-            v-if="hasFilter"
-            class="px-3 py-1.5 text-[11px] tracking-widest uppercase text-zinc-500 hover:bg-white/60 rounded-md transition-colors"
-            @click="resetFilters"
-          >
-            重置
-          </button>
+          <Button type="primary" size="small" @click="applyFilters">查询</Button>
+          <Button v-if="hasFilter" type="default" size="small" @click="resetFilters">重置</Button>
         </div>
       </div>
-    </section>
+    </Card>
 
     <!-- 日志列表（新在上，滚动到底部自动加载更早的记录） -->
     <section class="space-y-3">
-      <div v-if="logs.length === 0" class="bg-white rounded-xl shadow-sm border border-white/60 py-12 text-sm text-slate-400 text-center">
-        暂无符合条件的执行记录（定时任务触发后在此展示）
-      </div>
+      <Card v-if="logs.length === 0" style="padding: 0">
+        <div class="py-12 text-sm text-slate-400 text-center">暂无符合条件的执行记录（定时任务触发后在此展示）</div>
+      </Card>
 
-      <div
-        v-for="log in logs"
-        :key="log.id"
-        class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden"
-      >
+      <Card v-for="log in logs" :key="log.id" hoverable @click="detail = log">
         <!-- 摘要行（点击弹出详情窗口） -->
-        <button class="w-full text-left px-5 py-3.5 hover:bg-white/55 transition-colors" @click="detail = log">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap" :class="statusClass(log.status)">
-              {{ statusText(log.status) }}
+        <div class="flex items-center gap-2 flex-wrap">
+          <Tag variant="solid" size="small" :color="statusColor(log.status)">{{ statusText(log.status) }}</Tag>
+          <Tag variant="solid" size="small">
+            {{ log.target_type === 'group' ? '群聊' : '私聊' }} · {{ log.target_id }}
+          </Tag>
+          <Tag v-if="log.tool_calls?.length" variant="soft" size="small">{{ log.tool_calls.length }} 次工具调用</Tag>
+          <Tag v-if="log.output_skipped" variant="solid" size="small" color="app-yellow">已跳过输出</Tag>
+          <span class="ml-auto text-xs text-slate-400 font-mono whitespace-nowrap">{{ fmtTime(log.trigger_time) }}</span>
+        </div>
+        <p class="mt-2 text-sm text-slate-700 font-medium truncate">{{ log.task_title || '(无标题)' }}</p>
+        <div class="mt-2 flex items-center gap-x-3 gap-y-1 text-[11px] text-slate-400 font-mono flex-wrap">
+          <span v-if="log.status !== 'running'">用时 {{ fmtDuration(log.duration_ms) }}</span>
+          <span v-if="log.iterations">LLM {{ log.iterations }} 轮</span>
+          <template v-if="log.total_tokens">
+            <span>tokens 总计 <span class="tokval">{{ fmtInt(log.total_tokens) }}</span></span>
+            <span>输入 <span class="tokval">{{ fmtInt(log.prompt_tokens) }}</span></span>
+            <span>输出 <span class="tokval">{{ fmtInt(log.completion_tokens) }}</span></span>
+            <span v-if="log.cached_tokens" :title="cacheTip(log)">
+              缓存命中 <span class="tokval">{{ fmtInt(log.cached_tokens) }}</span>
+              <template v-if="cacheRate(log) > 0"> · 命中率 <span class="ratehit">{{ cachePct(log) }}</span></template>
             </span>
-            <span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap bg-zinc-100 text-zinc-600 border border-zinc-200">
-              {{ log.target_type === 'group' ? '群聊' : '私聊' }} · {{ log.target_id }}
-            </span>
-            <span v-if="log.tool_calls?.length" class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap bg-zinc-100 text-zinc-600 border border-zinc-200">
-              {{ log.tool_calls.length }} 次工具调用
-            </span>
-            <span v-if="log.output_skipped" class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap bg-amber-50 text-amber-700 border border-amber-200">
-              已跳过输出
-            </span>
-            <span class="ml-auto text-xs text-slate-400 font-mono whitespace-nowrap">{{ fmtTime(log.trigger_time) }}</span>
-          </div>
-          <p class="mt-2 text-sm text-slate-700 font-medium truncate">{{ log.task_title || '(无标题)' }}</p>
-          <div class="mt-2 flex items-center gap-x-3 gap-y-1 text-[11px] text-slate-400 font-mono flex-wrap">
-            <span v-if="log.status !== 'running'">用时 {{ fmtDuration(log.duration_ms) }}</span>
-            <span v-if="log.iterations">LLM {{ log.iterations }} 轮</span>
-            <template v-if="log.total_tokens">
-              <span>tokens 总计 <span class="tokval">{{ fmtInt(log.total_tokens) }}</span></span>
-              <span>输入 <span class="tokval">{{ fmtInt(log.prompt_tokens) }}</span></span>
-              <span>输出 <span class="tokval">{{ fmtInt(log.completion_tokens) }}</span></span>
-              <span v-if="log.cached_tokens" :title="cacheTip(log)">
-                缓存命中 <span class="tokval">{{ fmtInt(log.cached_tokens) }}</span>
-                <template v-if="cacheRate(log) > 0"> · 命中率 <span class="ratehit">{{ cachePct(log) }}</span></template>
-              </span>
-            </template>
-            <span v-if="log.error" class="text-[#ff3b30] truncate max-w-80">{{ log.error }}</span>
-            <span class="ml-auto text-zinc-400">详情 ⤢</span>
-          </div>
-        </button>
-      </div>
+          </template>
+          <span v-if="log.error" class="text-[#ff3b30] truncate max-w-80">{{ log.error }}</span>
+          <span class="ml-auto text-zinc-400">详情 ⤢</span>
+        </div>
+      </Card>
     </section>
 
     <!-- 滚动分页哨兵：进入视口即加载下一页 -->
@@ -234,187 +194,217 @@
     <div v-if="loadingMore" class="py-3 text-xs text-slate-400 text-center">加载更早的记录…</div>
     <div v-else-if="!hasMore && logs.length" class="py-3 text-xs text-slate-300 text-center">没有更早的记录了</div>
 
-    <!-- 详情弹窗：点遮罩 / 右上角关闭 / Esc 均可关闭 -->
-    <div
-      v-if="detail"
-      class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4"
-      v-backdrop-close="() => (detail = null)"
-    >
-      <div class="bg-white rounded-xl shadow-2xl border border-zinc-200 w-full max-w-3xl max-h-[85vh] flex flex-col">
-        <!-- 弹窗头部 -->
-        <div class="flex items-center gap-2 flex-wrap px-5 py-3.5 border-b border-zinc-100 shrink-0">
-          <span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap" :class="statusClass(detail.status)">
-            {{ statusText(detail.status) }}
-          </span>
-          <span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap bg-zinc-100 text-zinc-600 border border-zinc-200">
+    <!-- 详情弹窗：点遮罩 / 关闭按钮 / Esc 均可关闭 -->
+    <Modal :open="!!detail" :typewriter="false" variant="default" width="768px" @close="detail = null">
+      <template #title>
+        <span class="flex items-center gap-2 flex-wrap">
+          <Tag variant="solid" size="small" :color="statusColor(detail.status)">{{ statusText(detail.status) }}</Tag>
+          <Tag variant="solid" size="small">
             {{ detail.target_type === 'group' ? '群聊' : '私聊' }} · {{ detail.target_id }}
-          </span>
+          </Tag>
           <span class="text-sm text-zinc-800 font-medium truncate">{{ detail.task_title || '(无标题)' }}</span>
-          <button
-            class="ml-auto w-7 h-7 flex items-center justify-center rounded-md text-zinc-400 hover:text-zinc-800 hover:bg-white/60 transition-colors"
-            title="关闭"
-            @click="detail = null"
-          >
-            ✕
-          </button>
+        </span>
+      </template>
+      <template #footer>
+        <Button type="default" @click="detail = null">关闭</Button>
+      </template>
+
+      <div class="w-full space-y-4">
+        <!-- 概要指标 -->
+        <dl class="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-xs">
+          <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">任务 ID</dt>
+          <dd class="text-zinc-700 font-mono">{{ detail.task_id || '—' }}</dd>
+          <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">触发时间</dt>
+          <dd class="text-zinc-700 font-mono">{{ fmtTimeFull(detail.trigger_time) }}</dd>
+          <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">完成时间</dt>
+          <dd class="text-zinc-700 font-mono">{{ fmtTimeFull(detail.finished_at) }}</dd>
+          <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">耗时</dt>
+          <dd class="text-zinc-700 font-mono">{{ detail.status !== 'running' ? fmtDuration(detail.duration_ms) : '—' }}</dd>
+          <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">LLM 轮数</dt>
+          <dd class="text-zinc-700 font-mono">{{ detail.iterations || '—' }}</dd>
+          <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">Token 用量</dt>
+          <dd class="text-zinc-700 font-mono">
+            {{ detail.total_tokens ? tokenUsageText(detail) : '—' }}
+          </dd>
+        </dl>
+
+        <!-- 任务内容（触发时发送给 AI 的内容） -->
+        <div v-if="detail.trigger_content">
+          <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium mb-2">任务内容</h3>
+          <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-white/60 rounded-lg px-3 py-2">{{ detail.trigger_content }}</p>
         </div>
 
-        <!-- 弹窗内容（可滚动） -->
-        <div class="px-5 py-4 space-y-4 overflow-y-auto">
-          <!-- 概要指标 -->
-          <dl class="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-xs">
-            <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">任务 ID</dt>
-            <dd class="text-zinc-700 font-mono">{{ detail.task_id || '—' }}</dd>
-            <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">触发时间</dt>
-            <dd class="text-zinc-700 font-mono">{{ fmtTimeFull(detail.trigger_time) }}</dd>
-            <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">完成时间</dt>
-            <dd class="text-zinc-700 font-mono">{{ fmtTimeFull(detail.finished_at) }}</dd>
-            <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">耗时</dt>
-            <dd class="text-zinc-700 font-mono">{{ detail.status !== 'running' ? fmtDuration(detail.duration_ms) : '—' }}</dd>
-            <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">LLM 轮数</dt>
-            <dd class="text-zinc-700 font-mono">{{ detail.iterations || '—' }}</dd>
-            <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">Token 用量</dt>
-            <dd class="text-zinc-700 font-mono">
-              {{ detail.total_tokens ? tokenUsageText(detail) : '—' }}
-            </dd>
-          </dl>
+        <!-- 错误信息 -->
+        <div v-if="detail.error" class="text-xs text-[#ff3b30] bg-red-50 border border-red-100 rounded-lg px-3 py-2 whitespace-pre-wrap break-all">
+          {{ detail.error }}
+        </div>
 
-          <!-- 任务内容（触发时发送给 AI 的内容） -->
-          <div v-if="detail.trigger_content">
-            <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium mb-2">任务内容</h3>
-            <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-white/60 rounded-lg px-3 py-2">{{ detail.trigger_content }}</p>
-          </div>
-
-          <!-- 错误信息 -->
-          <div v-if="detail.error" class="text-xs text-[#ff3b30] bg-red-50 border border-red-100 rounded-lg px-3 py-2 whitespace-pre-wrap break-all">
-            {{ detail.error }}
-          </div>
-
-          <!-- 工具调用明细 -->
-          <div v-if="detail.tool_calls?.length" class="space-y-2">
-            <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium">
-              工具调用
-              <span v-if="detail.tool_calls_total > detail.tool_calls.length" class="normal-case tracking-normal text-zinc-300">
-                （共 {{ detail.tool_calls_total }} 次，仅保留前 {{ detail.tool_calls.length }} 条）
-              </span>
-            </h3>
-            <div
-              v-for="(tc, i) in detail.tool_calls"
-              :key="i"
-              class="bg-white border border-white/60 rounded-lg overflow-hidden"
-            >
-              <div class="flex items-center gap-2 px-3 py-2 border-b border-white/50">
-                <span class="text-xs font-mono font-medium text-zinc-800">{{ tc.name }}</span>
-                <span v-if="tc.error" class="text-[11px] px-1.5 py-0.5 rounded bg-red-50 text-[#ff3b30] border border-red-100">失败</span>
-                <span class="ml-auto text-[11px] text-slate-400 font-mono">{{ fmtDuration(tc.duration_ms) }}</span>
+        <!-- 工具调用明细 -->
+        <div v-if="detail.tool_calls?.length" class="space-y-2">
+          <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium">
+            工具调用
+            <span v-if="detail.tool_calls_total > detail.tool_calls.length" class="normal-case tracking-normal text-zinc-300">
+              （共 {{ detail.tool_calls_total }} 次，仅保留前 {{ detail.tool_calls.length }} 条）
+            </span>
+          </h3>
+          <div
+            v-for="(tc, i) in detail.tool_calls"
+            :key="i"
+            class="bg-white border border-white/60 rounded-lg overflow-hidden"
+          >
+            <div class="flex items-center gap-2 px-3 py-2 border-b border-white/50">
+              <span class="text-xs font-mono font-medium text-zinc-800">{{ tc.name }}</span>
+              <Tag v-if="tc.error" variant="solid" size="small" color="app-red">失败</Tag>
+              <span class="ml-auto text-[11px] text-slate-400 font-mono">{{ fmtDuration(tc.duration_ms) }}</span>
+            </div>
+            <div class="px-3 py-2 space-y-2">
+              <div v-if="tc.arguments">
+                <div class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 mb-1">参数</div>
+                <pre class="text-xs text-slate-600 font-mono whitespace-pre-wrap break-all leading-relaxed">{{ tc.arguments }}</pre>
               </div>
-              <div class="px-3 py-2 space-y-2">
-                <div v-if="tc.arguments">
-                  <div class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 mb-1">参数</div>
-                  <pre class="text-xs text-slate-600 font-mono whitespace-pre-wrap break-all leading-relaxed">{{ tc.arguments }}</pre>
-                </div>
-                <div v-if="tc.error">
-                  <div class="text-[10px] tracking-[0.15em] uppercase text-red-400 mb-1">错误</div>
-                  <pre class="text-xs text-[#ff3b30] font-mono whitespace-pre-wrap break-all leading-relaxed">{{ tc.error }}</pre>
-                </div>
-                <div v-else-if="tc.result">
-                  <div class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 mb-1">结果</div>
-                  <pre class="text-xs text-slate-600 font-mono whitespace-pre-wrap break-all leading-relaxed">{{ tc.result }}</pre>
-                </div>
+              <div v-if="tc.error">
+                <div class="text-[10px] tracking-[0.15em] uppercase text-red-400 mb-1">错误</div>
+                <pre class="text-xs text-[#ff3b30] font-mono whitespace-pre-wrap break-all leading-relaxed">{{ tc.error }}</pre>
+              </div>
+              <div v-else-if="tc.result">
+                <div class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 mb-1">结果</div>
+                <pre class="text-xs text-slate-600 font-mono whitespace-pre-wrap break-all leading-relaxed">{{ tc.result }}</pre>
               </div>
             </div>
           </div>
+        </div>
 
-          <!-- 最终回复（AI 调用 skip_output 时未发送给目标，仅存档在此） -->
-          <div v-if="detail.reply">
-            <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium mb-2">
-              最终回复
-              <span v-if="detail.output_skipped" class="normal-case tracking-normal text-amber-600">（已跳过输出，未发送给目标）</span>
-            </h3>
-            <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-white/60 rounded-lg px-3 py-2">{{ detail.reply }}</p>
-          </div>
-          <!-- AI 未输出任何文本但请求了跳过：说明原因，避免只看到空白 -->
-          <div v-else-if="detail.output_skipped" class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-            本次执行已跳过输出，未向目标发送任何消息{{ detail.skip_reason ? '：' + detail.skip_reason : '' }}
-          </div>
+        <!-- 最终回复（AI 调用 skip_output 时未发送给目标，仅存档在此） -->
+        <div v-if="detail.reply">
+          <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium mb-2">
+            最终回复
+            <span v-if="detail.output_skipped" class="normal-case tracking-normal text-amber-600">（已跳过输出，未发送给目标）</span>
+          </h3>
+          <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-white/60 rounded-lg px-3 py-2">{{ detail.reply }}</p>
+        </div>
+        <!-- AI 未输出任何文本但请求了跳过：说明原因，避免只看到空白 -->
+        <div v-else-if="detail.output_skipped" class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+          本次执行已跳过输出，未向目标发送任何消息{{ detail.skip_reason ? '：' + detail.skip_reason : '' }}
         </div>
       </div>
-    </div>
+    </Modal>
 
     <!-- 新建 / 编辑定时任务弹窗 -->
-    <Teleport to="body">
-      <div v-if="clockForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-md p-4" v-backdrop-close="() => (clockForm = null)">
-        <div class="bg-white rounded-xl shadow-2xl border border-zinc-200 w-full max-w-lg max-h-[90vh] overflow-y-auto">
-          <div class="px-6 py-4 border-b border-zinc-100 flex items-center justify-between">
-            <h3 class="text-[10px] tracking-[0.15em] uppercase text-zinc-800 font-medium">{{ clockForm.id ? '编辑定时任务' : '新建定时任务' }}</h3>
-            <button class="text-zinc-400 hover:text-zinc-700 transition-colors" @click="clockForm = null">✕</button>
-          </div>
-          <form class="px-6 py-5 space-y-4" @submit.prevent="saveClock">
-            <div>
-              <label class="form-label">任务标题</label>
-              <input v-model.trim="clockForm.title" type="text" class="form-input" placeholder="如：每日晨报" />
-            </div>
-            <div>
-              <label class="form-label">任务内容 <span class="text-[#ff3b30]">*</span></label>
-              <textarea v-model.trim="clockForm.content" rows="3" class="form-input" placeholder="触发时发送给 AI 的内容"></textarea>
-            </div>
-            <div class="grid grid-cols-2 gap-4">
-              <div>
-                <label class="form-label">Cron 表达式 <span class="text-[#ff3b30]">*</span></label>
-                <input v-model.trim="clockForm.cron" type="text" class="form-input" placeholder="0 8 * * * 或 @every 1h" />
-              </div>
-              <div>
-                <label class="form-label">超时时间（秒，0 为默认）</label>
-                <input v-model.number="clockForm.timeout_sec" type="number" min="0" class="form-input" />
-              </div>
-            </div>
-            <div class="grid grid-cols-2 gap-4">
-              <div>
-                <label class="form-label">触发对象 <span class="text-[#ff3b30]">*</span></label>
-                <select v-model="clockForm.target_type" class="form-input">
-                  <option value="group">群聊</option>
-                  <option value="friend">好友</option>
-                </select>
-              </div>
-              <div>
-                <label class="form-label">{{ clockForm.target_type === 'group' ? '群 ID' : '用户 ID' }} <span class="text-[#ff3b30]">*</span></label>
-                <input v-model.trim="clockForm.target_id" type="text" class="form-input" placeholder="如 123456 或 fs:oc_xxx" />
-              </div>
-            </div>
-            <div v-if="clockForm.target_type === 'group'">
-              <label class="form-label">提醒 @</label>
-              <input v-model.trim="clockForm.created_by" type="text" class="form-input" placeholder="触发时 @ 的用户 ID，如 qq:123456，留空不 @" />
-            </div>
-            <div>
-              <label class="form-label">备注</label>
-              <input v-model.trim="clockForm.note" type="text" class="form-input" placeholder="可选，触发时附带给 AI" />
-            </div>
-            <label class="flex items-center gap-2 text-xs text-zinc-700 select-none">
-              <input v-model="clockForm.run_once" type="checkbox" />
-              单次任务（触发一次后自动删除）
-            </label>
-            <p v-if="clockFormError" class="text-xs text-[#ff3b30]">{{ clockFormError }}</p>
-            <div class="flex justify-end gap-2 pt-1">
-              <button type="button" class="px-4 py-2 text-[11px] tracking-widest uppercase text-zinc-500 hover:text-zinc-800 font-medium transition-colors" @click="clockForm = null">取消</button>
-                <button type="submit" class="px-4 py-2 text-[11px] tracking-widest uppercase btn-accent rounded-md font-medium transition-colors disabled:opacity-50" :disabled="clockSaving">
-                {{ clockSaving ? '保存中…' : '保存' }}
-              </button>
-            </div>
-          </form>
+    <Modal
+      :open="!!clockForm"
+      :typewriter="false"
+      :show-footer="false"
+      variant="default"
+      width="512px"
+      :title="clockForm?.id ? '编辑定时任务' : '新建定时任务'"
+      mask-closable
+      @close="clockForm = null"
+    >
+      <form class="w-full space-y-4" @submit.prevent="saveClock">
+        <div>
+          <label class="form-label">任务标题</label>
+          <Input :model-value="clockForm.title" placeholder="如：每日晨报" class="w-full" @update:model-value="v => (clockForm.title = v.trim())" />
         </div>
-      </div>
-    </Teleport>
+        <div>
+          <label class="form-label">任务内容 <span class="text-[#ff3b30]">*</span></label>
+          <textarea v-model.trim="clockForm.content" rows="3" class="form-input" placeholder="触发时发送给 AI 的内容"></textarea>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="form-label">Cron 表达式 <span class="text-[#ff3b30]">*</span></label>
+            <Input :model-value="clockForm.cron" placeholder="0 8 * * * 或 @every 1h" class="w-full" @update:model-value="v => (clockForm.cron = v.trim())" />
+          </div>
+          <div>
+            <label class="form-label">超时时间（秒，0 为默认）</label>
+            <Input
+              :model-value="String(clockForm.timeout_sec)"
+              type="number"
+              class="w-full"
+              @update:model-value="v => (clockForm.timeout_sec = v === '' ? '' : Number(v))"
+            />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="form-label">触发对象 <span class="text-[#ff3b30]">*</span></label>
+            <Select v-model="clockForm.target_type" :options="targetTypeOptions" class="w-full" />
+          </div>
+          <div>
+            <label class="form-label">{{ clockForm.target_type === 'group' ? '群 ID' : '用户 ID' }} <span class="text-[#ff3b30]">*</span></label>
+            <Input :model-value="clockForm.target_id" placeholder="如 123456 或 fs:oc_xxx" class="w-full" @update:model-value="v => (clockForm.target_id = v.trim())" />
+          </div>
+        </div>
+        <div v-if="clockForm.target_type === 'group'">
+          <label class="form-label">提醒 @</label>
+          <Input :model-value="clockForm.created_by" placeholder="触发时 @ 的用户 ID，如 qq:123456，留空不 @" class="w-full" @update:model-value="v => (clockForm.created_by = v.trim())" />
+        </div>
+        <div>
+          <label class="form-label">备注</label>
+          <Input :model-value="clockForm.note" placeholder="可选，触发时附带给 AI" class="w-full" @update:model-value="v => (clockForm.note = v.trim())" />
+        </div>
+        <label class="flex items-center gap-2 text-xs text-zinc-700 select-none cursor-pointer">
+          <Switch v-model="clockForm.run_once" size="small" />
+          单次任务（触发一次后自动删除）
+        </label>
+        <p v-if="clockFormError" class="text-xs text-[#ff3b30]">{{ clockFormError }}</p>
+        <div class="flex justify-end gap-2 pt-1">
+          <Button type="default" size="small" @click="clockForm = null">取消</Button>
+          <Button type="primary" size="small" html-type="submit" :disabled="clockSaving">
+            {{ clockSaving ? '保存中…' : '保存' }}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+
+    <!-- Notification 命令式通知的挂载容器（App.vue 未挂载，页面内自带一份） -->
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import {
+  Button,
+  Card,
+  Input,
+  Modal,
+  Notification,
+  Select,
+  Switch,
+  Table,
+  Tag,
+} from 'animal-island-vue'
 import { api } from '../api.js'
 
 const typeTabs = [
   { value: '', label: '全部' },
   { value: 'group', label: '群聊' },
   { value: 'friend', label: '私聊' },
+]
+
+// 状态筛选下拉（Select 的 modelValue 必须为字符串）
+const statusOptions = [
+  { key: '', label: '全部' },
+  { key: 'running', label: '执行中' },
+  { key: 'success', label: '成功' },
+  { key: 'timeout', label: '超时' },
+  { key: 'error', label: '出错' },
+  { key: 'interrupted', label: '中断' },
+]
+
+// 定时任务触发对象下拉
+const targetTypeOptions = [
+  { key: 'group', label: '群聊' },
+  { key: 'friend', label: '好友' },
+]
+
+// 定时任务表格列定义（Table 组件）
+const clockColumns = [
+  { title: '任务', dataIndex: 'title' },
+  { title: '目标', dataIndex: 'target_id', width: '16%' },
+  { title: 'Cron', dataIndex: 'cron', width: '14%' },
+  { title: '下次执行', dataIndex: 'next_run_at', width: '17%' },
+  { title: '上次执行', dataIndex: 'last_run_at', width: '17%' },
+  { title: '启用', dataIndex: 'enabled', width: '10%' },
 ]
 
 const icons = {
@@ -441,6 +431,14 @@ function toggleExpand(id) {
   expanded.value = s
 }
 
+// Table 无行展开 API：用 onRow 把行点击挂到 <tr> 上（等价于原来的 @click）
+function clockRowAttrs(record) {
+  return {
+    class: { 'cursor-pointer': true, 'bg-zinc-50/70': expanded.value.has(record.id) },
+    onClick: () => toggleExpand(record.id),
+  }
+}
+
 // 乐观更新开关状态，失败时回滚
 async function toggleClock(t) {
   if (toggling.value.has(t.id)) return
@@ -451,7 +449,7 @@ async function toggleClock(t) {
     await api.updateClock(t.id, { enabled: t.enabled })
   } catch (e) {
     t.enabled = prev
-    alert(e.message || '操作失败')
+    Notification.error({ message: e.message || '操作失败' })
   } finally {
     const s = new Set(toggling.value)
     s.delete(t.id)
@@ -545,7 +543,7 @@ async function removeClock(t) {
     await api.deleteClock(t.id)
     await loadClocks()
   } catch (e) {
-    alert(e.message || '删除失败')
+    Notification.error({ message: e.message || '删除失败' })
   } finally {
     const s = new Set(toggling.value)
     s.delete(t.id)
@@ -604,7 +602,7 @@ async function exportLogs() {
   try {
     await api.exportTaskLogs({ ...applied })
   } catch (e) {
-    alert(e.message || '导出失败')
+    Notification.error({ message: e.message || '导出失败' })
   } finally {
     exporting.value = false
   }
@@ -620,9 +618,9 @@ async function clearLogs() {
     const res = await api.clearTaskLogs({ ...applied })
     resetList()
     await load()
-    alert(`已清除 ${res.removed ?? 0} 条日志`)
+    Notification.success({ message: `已清除 ${res.removed ?? 0} 条日志` })
   } catch (e) {
-    alert(e.message || '清除失败')
+    Notification.error({ message: e.message || '清除失败' })
   } finally {
     clearing.value = false
   }
@@ -701,14 +699,15 @@ function statusText(s) {
   return { running: '执行中', success: '成功', timeout: '超时', error: '出错', interrupted: '中断' }[s] || s
 }
 
-function statusClass(s) {
+// 状态 → Tag 语义色（success 绿 / interrupted 橙 / error 红 / running 蓝 / 其余默认）
+function statusColor(s) {
   return {
-    running: 'btn-accent',
-    success: 'bg-white text-zinc-600 border border-zinc-300',
-    timeout: 'bg-zinc-100 text-zinc-500 border border-zinc-200',
-    error: 'bg-red-50 text-[#ff3b30] border border-red-200',
-    interrupted: 'bg-amber-50 text-[#ff9f0a] border border-amber-200',
-  }[s] || 'bg-slate-100 text-slate-600'
+    running: 'app-blue',
+    success: 'app-green',
+    timeout: 'default',
+    error: 'app-red',
+    interrupted: 'app-orange',
+  }[s] || 'default'
 }
 
 // 刷新：拉取最新一页，新条目插入头部、已有条目原地更新（执行中 → 完成），
