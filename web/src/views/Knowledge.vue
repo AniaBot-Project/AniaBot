@@ -92,6 +92,7 @@
 
     <!-- 新增/编辑弹窗 -->
     <Modal
+      variant="default"
       v-model:open="showForm"
       :title="form.id ? '编辑文档' : '新增文档'"
       :typewriter="false"
@@ -129,6 +130,7 @@
 
     <!-- 导入 URL 弹窗 -->
     <Modal
+      variant="default"
       v-model:open="showImport"
       title="从 URL 导入"
       :typewriter="false"

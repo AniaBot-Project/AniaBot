@@ -293,6 +293,7 @@
 
     <!-- GitHub 在线登录弹窗 -->
     <Modal
+      variant="default"
       v-model:open="oauthOpen"
       :typewriter="false"
       :show-footer="false"
@@ -327,6 +328,7 @@
 
     <!-- 详情弹窗 -->
     <Modal
+      variant="default"
       v-model:open="showDetail"
       :typewriter="false"
       :show-footer="false"
@@ -395,6 +397,7 @@
 
     <!-- 重启中遮罩 -->
     <Modal :open="rebooting" :typewriter="false" :show-footer="false" :mask-closable="false" :width="320">
+      variant="default"
       <div class="w-full text-center space-y-3">
         <span class="mx-auto block w-8 h-8 border-[3px] border-zinc-200 border-t-zinc-800 rounded-full animate-spin" />
         <div class="text-sm font-semibold text-zinc-900 tracking-[0.15em] uppercase">Rebooting</div>

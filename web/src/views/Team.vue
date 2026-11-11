@@ -92,6 +92,7 @@
 
     <!-- 新增/编辑弹窗 -->
     <Modal
+      variant="default"
       v-model:open="showForm"
       :title="form.name ? '编辑团队' : '新增团队'"
       :width="512"

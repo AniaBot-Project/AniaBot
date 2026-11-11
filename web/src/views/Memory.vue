@@ -88,6 +88,7 @@
 
     <!-- 新增/编辑弹窗 -->
     <Modal
+      variant="default"
       v-model:open="showForm"
       :title="form.id ? '编辑记忆' : '新增记忆'"
       :typewriter="false"

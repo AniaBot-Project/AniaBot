@@ -103,6 +103,7 @@
 
     <!-- 重启中遮罩 -->
     <Modal :open="restarting" :typewriter="false" :show-footer="false" :mask-closable="false" :width="320">
+      variant="default"
       <div class="text-center space-y-3 py-2">
         <span class="mx-auto block w-8 h-8 border-[3px] border-black/10 border-t-[#0071e3] rounded-full animate-spin" />
         <div class="text-sm font-bold text-slate-900 tracking-[0.08em]">正在重启…</div>
@@ -112,6 +113,7 @@
 
     <!-- 修改密码弹窗 -->
     <Modal v-model:open="showPwd" title="修改密码" :typewriter="false" :show-footer="false" :width="420">
+      variant="default"
       <form class="space-y-4" @submit.prevent="onChangePwd">
         <Input v-model="pwdForm.next" type="password" placeholder="新密码（至少 6 位）" size="middle" />
         <p v-if="pwdForm.msg" class="text-xs" :class="pwdForm.ok ? 'text-[#34c759]' : 'text-[#ff3b30]'">{{ pwdForm.msg }}</p>

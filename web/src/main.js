@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import App from './App.vue'
 import backdropClose from './directives/backdropClose'
+import { installModalMaskGuard } from './ui/modalMaskGuard.js'
 // 主题库样式（animal-island-vue 的同步副本，见 scripts/sync-theme.mjs）必须先于面板自身样式
 import './styles/animal-island.vendor.css'
 import './style.css'
@@ -37,6 +38,8 @@ async function boot() {
     const { installMock } = await import('./mock')
     installMock()
   }
+  // 组件库弹窗的遮罩点击防误关（拖选文本后松开鼠标落在遮罩上时不应关闭）
+  installModalMaskGuard()
   createApp(App).directive('backdrop-close', backdropClose).use(router).mount('#app')
 }
 

@@ -144,7 +144,7 @@
     <div v-else-if="!hasMore && logs.length" class="py-3 text-xs text-slate-300 text-center">没有更早的记录了</div>
 
     <!-- 详情弹窗：点遮罩 / 右上角关闭 / Esc 均可关闭 -->
-    <Modal v-model:open="detailOpen" :typewriter="false" :show-footer="false" :width="768">
+    <Modal v-model:open="detailOpen" variant="default" :typewriter="false" :show-footer="false" :width="768">
       <!-- 弹窗头部 -->
       <template #title>
         <div class="flex items-center gap-2 flex-wrap w-full font-normal">

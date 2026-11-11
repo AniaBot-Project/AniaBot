@@ -146,6 +146,7 @@
 
     <!-- Prompt 覆盖：新增 / 编辑弹窗 -->
     <Modal
+      variant="default"
       v-model:open="showPromptEditor"
       :title="promptDraft.id ? '编辑覆盖' : '新增覆盖'"
       :width="896"
