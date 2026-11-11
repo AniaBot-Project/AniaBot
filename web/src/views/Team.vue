@@ -6,13 +6,8 @@
         Agent 团队按会话（群聊/私聊）隔离，由 AI 通过 team_create 等工具自行管理；在此可查看与修正，修改立即生效，无需重启
       </div>
       <div class="flex items-center gap-3">
-        <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="load">刷新</button>
-        <button
-          class="text-xs btn-accent px-3.5 py-2 rounded-lg font-medium transition-colors shadow-sm"
-          @click="openCreate"
-        >
-          新增团队
-        </button>
+        <Button type="text" size="small" @click="load">刷新</Button>
+        <Button type="primary" size="small" @click="openCreate">新增团队</Button>
       </div>
     </div>
 
@@ -21,18 +16,18 @@
 
     <div class="flex flex-col lg:flex-row lg:items-start gap-4">
       <!-- 左栏：会话列表 -->
-      <section class="w-full lg:w-72 shrink-0 bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
-        <div class="p-2 border-b border-white/50">
-          <div class="flex items-center gap-1 bg-slate-50 rounded-lg p-1">
-            <button
+      <Card style="padding: 0" class="w-full lg:w-72 shrink-0 overflow-hidden">
+        <div class="p-2">
+          <div class="flex items-center gap-1">
+            <Button
               v-for="t in kindTabs"
               :key="t.value"
-              class="flex-1 px-2 py-1.5 text-xs rounded-md transition-all"
-              :class="kindFilter === t.value ? 'btn-accent font-medium shadow-sm' : 'text-slate-500 hover:text-slate-800'"
+              size="small"
+              :type="kindFilter === t.value ? 'primary' : 'text'"
               @click="kindFilter = t.value"
             >
               {{ t.label }}
-            </button>
+            </Button>
           </div>
         </div>
         <ul class="divide-y divide-slate-100 max-h-128 overflow-y-auto">
@@ -53,10 +48,10 @@
             <div class="text-[11px] font-mono text-slate-400 mt-0.5">{{ s.scope }}</div>
           </li>
         </ul>
-      </section>
+      </Card>
 
       <!-- 右栏：团队列表 -->
-      <section class="flex-1 min-w-0 bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
+      <Card style="padding: 0" class="flex-1 min-w-0 overflow-hidden">
         <div v-if="current" class="px-5 py-3.5 border-b border-white/50 flex items-center justify-between gap-3">
           <div class="min-w-0">
             <span class="text-sm font-semibold text-slate-800">{{ displayName(current) }}</span>
@@ -87,93 +82,87 @@
               </ul>
             </div>
             <div class="flex items-center gap-1 shrink-0">
-              <button
-                class="text-xs text-zinc-600 hover:text-zinc-900 hover:bg-white/60 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
-                @click="openEdit(t)"
-              >
-                编辑
-              </button>
-              <button
-                class="text-xs text-[#ff3b30] hover:text-[#ff3b30] hover:bg-red-50 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
-                @click="onDelete(t)"
-              >
-                删除
-              </button>
+              <Button type="text" size="small" @click="openEdit(t)">编辑</Button>
+              <Button type="text" size="small" danger @click="onDelete(t)">删除</Button>
             </div>
           </li>
         </ul>
-      </section>
+      </Card>
     </div>
 
     <!-- 新增/编辑弹窗 -->
-    <div v-if="showForm" class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4" v-backdrop-close="() => (showForm = false)">
-      <form class="bg-white rounded-2xl shadow-2xl p-6 w-lg max-w-full space-y-4" @submit.prevent="onSubmit">
-        <h2 class="text-base font-semibold text-slate-800">{{ form.name ? '编辑团队' : '新增团队' }}</h2>
+    <Modal
+      v-model:open="showForm"
+      :title="form.name ? '编辑团队' : '新增团队'"
+      :width="512"
+      :typewriter="false"
+      :show-footer="false"
+    >
+      <form class="w-full space-y-4" @submit.prevent="onSubmit">
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-xs text-slate-500 mb-1.5">团队名</label>
-            <input v-model="form.name" placeholder="如：开发小组" required :disabled="!!form.originName" :class="[inputClass, form.originName && 'bg-slate-50 text-slate-400']" />
+            <Input v-model="form.name" placeholder="如：开发小组" :disabled="!!form.originName" />
           </div>
           <div v-if="!form.originName">
             <label class="block text-xs text-slate-500 mb-1.5">会话 scope</label>
-            <input v-model="form.scope" list="team-scope-options" placeholder="如 global、g:123456 或 g:fs:oc_xxx" required :class="inputClass" />
-            <datalist id="team-scope-options">
-              <option v-for="s in scopeOptions" :key="s" :value="s" />
-            </datalist>
+            <Input v-model="form.scope" placeholder="如 global、g:123456 或 g:fs:oc_xxx" />
           </div>
         </div>
         <div>
           <label class="block text-xs text-slate-500 mb-1.5">团队说明（可空）</label>
-          <input v-model="form.desc" placeholder="用途、适合的任务类型等" :class="inputClass" />
+          <Input v-model="form.desc" placeholder="用途、适合的任务类型等" />
         </div>
         <div>
           <label class="block text-xs text-slate-500 mb-1.5">成员（1 至 10 个：可选预置角色自动填充名字，或用 name + 角色描述自定义；角色描述为空且名字命中预置角色时，该成员按预置角色执行）</label>
           <div class="space-y-2">
             <div v-for="(m, i) in form.members" :key="i" class="border border-white/60 rounded-lg p-2.5 space-y-2">
               <div class="flex flex-wrap items-center gap-2">
-                <select :value="presetOf(m)" class="w-44 shrink-0 border border-slate-300/60 rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30" @change="onPresetChange(m, $event)">
-                  <option value="">自定义</option>
-                  <option v-for="r in roles" :key="r.name" :value="r.name" :title="r.summary">
-                    {{ r.name }} · {{ r.summary }}
-                  </option>
-                </select>
-                <input v-model="m.name" placeholder="成员名（选预置角色后自动填充）" required :class="inputClass" />
-                <button
-                  type="button"
-                  class="text-xs text-red-400 hover:text-[#ff3b30] px-2 py-1.5 rounded-lg hover:bg-red-50 font-medium shrink-0 transition-colors"
+                <Select
+                  :model-value="presetOf(m)"
+                  :options="roleOptions"
+                  class="w-44 shrink-0"
+                  @change="onPresetChange(m, $event)"
+                />
+                <Input v-model="m.name" placeholder="成员名（选预置角色后自动填充）" />
+                <Button
+                  type="text"
+                  size="small"
+                  danger
                   :disabled="form.members.length <= 1"
                   @click="form.members.splice(i, 1)"
                 >
                   移除
-                </button>
+                </Button>
               </div>
-              <input v-model="m.role" placeholder="角色描述，如：负责代码审查（可空；填了则优先于预置角色生效）" :class="inputClass" />
+              <Input v-model="m.role" placeholder="角色描述，如：负责代码审查（可空；填了则优先于预置角色生效）" />
             </div>
           </div>
-          <button
-            type="button"
-            class="mt-2 text-xs text-zinc-600 hover:text-zinc-900 hover:bg-white/60 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
+          <Button
+            type="dashed"
+            size="small"
+            class="mt-2"
             :disabled="form.members.length >= 10"
             @click="form.members.push({ name: '', role: '' })"
           >
             + 添加成员
-          </button>
+          </Button>
         </div>
         <p v-if="form.msg" class="text-sm text-[#ff3b30]">{{ form.msg }}</p>
         <div class="flex justify-end gap-2 pt-1">
-          <button type="button" class="px-4 py-2 text-sm text-slate-600 hover:bg-white/60 rounded-lg transition-colors" @click="showForm = false">取消</button>
-        <button type="submit" class="px-4 py-2 text-sm btn-accent rounded-lg transition-colors">保存</button>
+          <Button type="default" @click="showForm = false">取消</Button>
+          <Button type="primary" html-type="submit">保存</Button>
         </div>
       </form>
-    </div>
+    </Modal>
   </div>
 </template>
 
 <script setup>
+import { confirmAction } from '../ui/confirm'
 import { computed, onMounted, reactive, ref } from 'vue'
+import { Button, Card, Input, Modal, Select } from 'animal-island-vue'
 import { api } from '../api.js'
-
-const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow'
 
 const kindTabs = [
   { value: 'all', label: '全部' },
@@ -200,14 +189,11 @@ const filteredScopes = computed(() =>
   kindFilter.value === 'all' ? scopes.value : scopes.value.filter((s) => s.kind === kindFilter.value),
 )
 
-// 新建团队的作用域建议：全局 + 左侧已有的作用域（去重），手输新作用域仍被允许
-const scopeOptions = computed(() => {
-  const list = ['global']
-  for (const s of scopes.value) {
-    if (s.scope !== 'global' && !list.includes(s.scope)) list.push(s.scope)
-  }
-  return list
-})
+// 成员行预置角色下拉选项（Select 组件）：首项为「自定义」
+const roleOptions = computed(() => [
+  { key: '', label: '自定义' },
+  ...roles.value.map((r) => ({ key: r.name, label: `${r.name} · ${r.summary}` })),
+])
 
 // 成员行预置角色下拉的当前值：成员名命中预置角色时显示该角色，否则显示「自定义」
 function presetOf(m) {
@@ -216,8 +202,7 @@ function presetOf(m) {
 }
 
 // 选中预置角色：自动填充成员名并清空角色描述（空角色描述时 team_run 按预置角色执行）
-function onPresetChange(m, event) {
-  const name = event.target.value
+function onPresetChange(m, name) {
   if (name) {
     m.name = name
     m.role = ''
@@ -338,7 +323,7 @@ async function onSubmit() {
 }
 
 async function onDelete(t) {
-  if (!confirm(`确定要删除团队「${t.name}」吗？`)) return
+  if (!await confirmAction(`确定要删除团队「${t.name}」吗？`)) return
   msg.value = ''
   try {
     await api.deleteTeam(current.value.scope, t.name)

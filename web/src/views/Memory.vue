@@ -6,13 +6,8 @@
         AI 长期记忆按会话（群聊/私聊）隔离，由 AI 自行记录；在此可查看与修正，修改立即生效，无需重启
       </div>
       <div class="flex items-center gap-3">
-        <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="load">刷新</button>
-        <button
-          class="text-xs btn-accent px-3.5 py-2 rounded-lg font-medium transition-colors shadow-sm"
-          @click="openCreate"
-        >
-          新增记忆
-        </button>
+        <Button type="text" size="small" @click="load">刷新</Button>
+        <Button type="primary" size="small" @click="openCreate">新增记忆</Button>
       </div>
     </div>
 
@@ -21,18 +16,19 @@
 
     <div class="flex flex-col lg:flex-row lg:items-start gap-4">
       <!-- 左栏：会话列表 -->
-      <section class="w-full lg:w-72 shrink-0 bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
+      <Card style="padding: 0" class="w-full lg:w-72 shrink-0 overflow-hidden">
         <div class="p-2 border-b border-white/50">
-          <div class="flex items-center gap-1 bg-slate-50 rounded-lg p-1">
-            <button
+          <div class="flex items-center gap-1">
+            <Button
               v-for="t in kindTabs"
               :key="t.value"
-              class="flex-1 px-2 py-1.5 text-xs rounded-md transition-all"
-              :class="kindFilter === t.value ? 'btn-accent font-medium shadow-sm' : 'text-slate-500 hover:text-slate-800'"
+              size="small"
+              class="flex-1"
+              :type="kindFilter === t.value ? 'primary' : 'text'"
               @click="kindFilter = t.value"
             >
               {{ t.label }}
-            </button>
+            </Button>
           </div>
         </div>
         <ul class="divide-y divide-slate-100 max-h-[32rem] overflow-y-auto">
@@ -48,15 +44,15 @@
           >
             <div class="flex items-center justify-between gap-2">
               <span class="text-sm font-medium text-slate-800 truncate">{{ displayName(s) }}</span>
-              <span class="text-[11px] px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-600 shrink-0">{{ s.count }} 条</span>
+              <Tag variant="soft" size="small" class="shrink-0">{{ s.count }} 条</Tag>
             </div>
             <div class="text-[11px] font-mono text-slate-400 mt-0.5">{{ s.scope }}</div>
           </li>
         </ul>
-      </section>
+      </Card>
 
       <!-- 右栏：记忆条目 -->
-      <section class="flex-1 min-w-0 bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
+      <Card style="padding: 0" class="flex-1 min-w-0 overflow-hidden">
         <div v-if="current" class="px-5 py-3.5 border-b border-white/50 flex items-center justify-between gap-3">
           <div class="min-w-0">
             <span class="text-sm font-semibold text-slate-800">{{ displayName(current) }}</span>
@@ -76,37 +72,32 @@
               <p class="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap break-words">{{ e.content }}</p>
               <div class="flex items-center gap-1.5 mt-2 flex-wrap">
                 <span class="text-[11px] font-mono text-slate-400">{{ e.id }}</span>
-                <span v-if="e.user_id" class="text-[11px] px-2 py-0.5 rounded-full bg-[#0071e3]/10 text-zinc-500 border border-zinc-200/60 font-mono">{{ e.user_id }}</span>
-                <span v-for="t in e.tags" :key="t" class="text-[11px] px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-600">{{ t }}</span>
+                <Tag v-if="e.user_id" variant="soft" size="small" color="app-blue">{{ e.user_id }}</Tag>
+                <Tag v-for="t in e.tags" :key="t" variant="soft" size="small">{{ t }}</Tag>
                 <span class="text-[11px] text-slate-400">记于 {{ fmtDate(e.created_at) }}</span>
               </div>
             </div>
             <div class="flex items-center gap-1 shrink-0">
-              <button
-                class="text-xs text-zinc-600 hover:text-zinc-900 hover:bg-white/60 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
-                @click="openEdit(e)"
-              >
-                编辑
-              </button>
-              <button
-                class="text-xs text-[#ff3b30] hover:text-[#ff3b30] hover:bg-red-50 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
-                @click="onDelete(e)"
-              >
-                删除
-              </button>
+              <Button type="text" size="small" @click="openEdit(e)">编辑</Button>
+              <Button type="default" size="small" danger @click="onDelete(e)">删除</Button>
             </div>
           </li>
         </ul>
-      </section>
+      </Card>
     </div>
 
     <!-- 新增/编辑弹窗 -->
-    <div v-if="showForm" class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4" v-backdrop-close="() => (showForm = false)">
-      <form class="bg-white rounded-2xl shadow-2xl p-6 w-[28rem] max-w-full space-y-4" @submit.prevent="onSubmit">
-        <h2 class="text-base font-semibold text-slate-800">{{ form.id ? '编辑记忆' : '新增记忆' }}</h2>
+    <Modal
+      v-model:open="showForm"
+      :title="form.id ? '编辑记忆' : '新增记忆'"
+      :typewriter="false"
+      :show-footer="false"
+      :width="448"
+    >
+      <form class="w-full space-y-4" @submit.prevent="onSubmit">
         <div v-if="!form.id">
           <label class="block text-xs text-slate-500 mb-1.5">会话 scope（g:会话ID / f:用户ID）</label>
-          <input v-model="form.scope" placeholder="如 g:123456 或 g:fs:oc_xxx" required :class="inputClass" />
+          <Input v-model="form.scope" placeholder="如 g:123456 或 g:fs:oc_xxx" />
         </div>
         <div>
           <label class="block text-xs text-slate-500 mb-1.5">内容（一条完整自洽的事实）</label>
@@ -114,24 +105,26 @@
         </div>
         <div>
           <label class="block text-xs text-slate-500 mb-1.5">关联用户 ID（可空，表示属于整个会话）</label>
-          <input v-model="form.user_id" placeholder="用户 ID（QQ 数字 / LLBot lil:123456 / 飞书 fs:ou_xxx / Telegram tg:123456 / Discord dc:123456）" :class="inputClass" />
+          <Input v-model="form.user_id" placeholder="用户 ID（QQ 数字 / LLBot lil:123456 / 飞书 fs:ou_xxx / Telegram tg:123456 / Discord dc:123456）" />
         </div>
         <div>
           <label class="block text-xs text-slate-500 mb-1.5">标签（逗号分隔，可空）</label>
-          <input v-model="form.tagsText" placeholder="如：偏好, 称呼" :class="inputClass" />
+          <Input v-model="form.tagsText" placeholder="如：偏好, 称呼" />
         </div>
         <p v-if="form.msg" class="text-sm text-[#ff3b30]">{{ form.msg }}</p>
         <div class="flex justify-end gap-2 pt-1">
-          <button type="button" class="px-4 py-2 text-sm text-slate-600 hover:bg-white/60 rounded-lg transition-colors" @click="showForm = false">取消</button>
-        <button type="submit" class="px-4 py-2 text-sm btn-accent rounded-lg transition-colors">保存</button>
+          <Button type="default" @click="showForm = false">取消</Button>
+          <Button type="primary" html-type="submit">保存</Button>
         </div>
       </form>
-    </div>
+    </Modal>
   </div>
 </template>
 
 <script setup>
+import { confirmAction } from '../ui/confirm'
 import { computed, onMounted, reactive, ref } from 'vue'
+import { Button, Card, Input, Modal, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
 
 const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow'
@@ -266,7 +259,7 @@ async function onSubmit() {
 }
 
 async function onDelete(e) {
-  if (!confirm(`确定要删除这条记忆吗？\n\n${e.content}`)) return
+  if (!await confirmAction(`确定要删除这条记忆吗？\n\n${e.content}`)) return
   msg.value = ''
   try {
     await api.deleteMemory(current.value.scope, e.id)

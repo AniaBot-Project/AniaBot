@@ -13,46 +13,46 @@
   <div v-else class="app-shell min-h-screen flex">
     <!-- 移动端抽屉遮罩 -->
     <Transition name="fade">
-      <div v-if="mobileOpen" class="fixed inset-0 bg-black/30 backdrop-blur-md z-40 md:hidden" @click="mobileOpen = false" />
+      <div v-if="mobileOpen" class="fixed inset-0 bg-black/30 backdrop-blur-[2px] z-40 md:hidden" @click="mobileOpen = false" />
     </Transition>
 
-    <!-- 侧边导航：深色玻璃，移动端为抽屉，桌面端常驻 -->
+    <!-- 侧边导航：奶油小岛侧栏，移动端为抽屉，桌面端常驻 -->
     <aside
-      class="sidebar-glass fixed inset-y-0 left-0 z-50 w-64 h-screen flex flex-col shrink-0 transition-transform duration-200 md:sticky md:top-0 md:inset-auto md:z-auto md:w-64"
+      class="sidebar-island fixed inset-y-0 left-0 z-50 w-64 h-screen flex flex-col shrink-0 transition-transform duration-200 md:sticky md:top-0 md:inset-auto md:z-auto md:w-64"
       :class="mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'"
     >
       <div class="px-5 pt-6 pb-5 flex items-center gap-3">
-        <img :src="logoUrl" alt="AniaBot" class="w-9 h-9 rounded-full object-cover shadow-md ring-1 ring-black/5" />
+        <img :src="logoUrl" alt="AniaBot" class="w-10 h-10 rounded-2xl object-cover border-2 border-white shadow-[0_2px_0_0_#d4c9b4]" />
         <div>
-          <div class="text-[#1d1d1f] font-semibold leading-tight tracking-[0.2em]">ANIABOT</div>
-          <div class="text-[10px] text-slate-500 leading-tight tracking-[0.15em] uppercase mt-0.5">Console · 控制面板</div>
+          <div class="text-[15px] font-extrabold leading-tight tracking-[0.02em] text-[#5f4423]">AniaBot</div>
+          <div class="text-[10px] text-slate-500 leading-tight tracking-[0.12em] mt-0.5">CONSOLE · 控制面板</div>
         </div>
         <button class="ml-auto md:hidden text-slate-500 hover:text-slate-900 p-1" aria-label="关闭菜单" @click="mobileOpen = false">
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
         </button>
       </div>
       <!-- 演示模式徽章（demo 构建专属，正式构建静态为 false 不渲染） -->
-      <div v-if="isDemo" class="mx-5 mb-2">
-        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] tracking-wide bg-amber-50 text-amber-700 border border-amber-200">
+      <div v-if="isDemo" class="mx-5 mb-3">
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold tracking-wide bg-amber-50 text-amber-700 border border-amber-200">
           <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
           演示模式
         </span>
       </div>
-      <div class="mx-5 h-px bg-black/5" />
+      <div class="mx-4 h-0.5 rounded-full bg-black/5" />
 
-      <nav class="flex-1 px-3 py-3 space-y-1 overflow-y-auto">
+      <nav class="flex-1 px-2.5 py-3 space-y-0.5 overflow-y-auto">
         <RouterLink
           v-for="item in navItems"
           :key="item.to"
           :to="item.to"
-          class="group relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-[11px] tracking-[0.15em] border transition-all duration-200"
+          class="group relative flex items-center gap-3 px-3 h-10 rounded-xl text-[13px] font-semibold border-2 border-transparent transition-all duration-150"
           :class="$route.path === item.to
             ? 'nav-active'
-            : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-black/5'"
+            : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'"
         >
-          <span v-html="item.icon" class="shrink-0 [&>svg]:w-4 [&>svg]:h-4" />
+          <span v-html="item.icon" class="shrink-0 [&>svg]:w-[18px] [&>svg]:h-[18px]" />
           {{ item.label }}
-          <span v-if="$route.path === item.to" class="ml-auto w-1.5 h-1.5 rounded-full bg-[#0071e3] shadow-[0_0_8px_2px_rgba(0,113,227,0.35)]" />
+          <span v-if="$route.path === item.to" class="ml-auto w-2 h-2 rounded-full bg-white/90 shadow-[0_0_0_2px_rgba(255,255,255,0.35)]" />
         </RouterLink>
       </nav>
 
@@ -78,17 +78,19 @@
 
     <!-- 主内容 -->
     <main class="flex-1 min-w-0 flex flex-col">
-      <!-- 悬浮玻璃工具栏 -->
-      <header class="topbar-glass sticky top-3 z-30 mx-3 sm:mx-5 xl:mx-7 mt-3 px-4 sm:px-5 py-3 flex items-center justify-between gap-3">
+      <!-- 悬浮工具栏：奶油贴纸条 -->
+      <header class="topbar-island sticky top-3 z-30 mx-3 sm:mx-5 xl:mx-7 mt-3 px-4 sm:px-5 py-2.5 flex items-center justify-between gap-3">
         <div class="flex items-center gap-2 min-w-0">
-          <button class="md:hidden -ml-1 p-1.5 rounded-lg text-slate-600 hover:bg-white/60 transition-colors" aria-label="打开菜单" @click="mobileOpen = true">
-            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
+          <button class="md:hidden -ml-1 p-1.5 rounded-xl text-slate-600 hover:bg-black/5 transition-colors" aria-label="打开菜单" @click="mobileOpen = true">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
           </button>
-          <h1 class="text-[11px] tracking-[0.22em] uppercase text-slate-500 font-medium truncate">
-            <span class="text-slate-300 mr-2">//</span>{{ $route.meta.title || '' }}
+          <h1 class="text-[12.5px] font-bold tracking-[0.04em] text-slate-600 truncate">
+            <span class="text-slate-300 mr-2">✦</span>{{ $route.meta.title || '' }}
           </h1>
         </div>
-        <span class="tpill shrink-0"><span class="tdot bg-[#34c759] pulse-dot" />Bot Online</span>
+        <Tag variant="solid" color="app-green" size="small" class="shrink-0">
+          <span class="w-1.5 h-1.5 rounded-full bg-white/90 pulse-dot" />Bot Online
+        </Tag>
       </header>
       <div class="px-3 sm:px-5 xl:px-7 py-4 sm:py-5 flex-1">
         <RouterView v-slot="{ Component }">
@@ -100,33 +102,39 @@
     </main>
 
     <!-- 重启中遮罩 -->
-    <div v-if="restarting" class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4">
-      <div class="tcard p-8 w-80 max-w-full text-center space-y-3">
+    <Modal :open="restarting" :typewriter="false" :show-footer="false" :mask-closable="false" :width="320">
+      <div class="text-center space-y-3 py-2">
         <span class="mx-auto block w-8 h-8 border-[3px] border-black/10 border-t-[#0071e3] rounded-full animate-spin" />
-        <div class="text-sm font-semibold text-slate-900 tracking-[0.15em] uppercase">Rebooting</div>
+        <div class="text-sm font-bold text-slate-900 tracking-[0.08em]">正在重启…</div>
         <p class="text-xs text-slate-500">配置修改将在重启后生效，恢复后页面自动刷新</p>
       </div>
-    </div>
+    </Modal>
 
     <!-- 修改密码弹窗 -->
-    <div v-if="showPwd" class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4" v-backdrop-close="() => (showPwd = false)">
-      <form class="tcard p-6 w-96 max-w-full space-y-4" @submit.prevent="onChangePwd">
-        <h2 class="text-[11px] tracking-[0.22em] uppercase text-slate-500 font-medium">修改密码</h2>
-        <input v-model="pwdForm.next" type="password" placeholder="新密码（至少 6 位）" required minlength="6" :class="inputClass" />
+    <Modal v-model:open="showPwd" title="修改密码" :typewriter="false" :show-footer="false" :width="420">
+      <form class="space-y-4" @submit.prevent="onChangePwd">
+        <Input v-model="pwdForm.next" type="password" placeholder="新密码（至少 6 位）" size="middle" />
         <p v-if="pwdForm.msg" class="text-xs" :class="pwdForm.ok ? 'text-[#34c759]' : 'text-[#ff3b30]'">{{ pwdForm.msg }}</p>
         <div class="flex justify-end gap-2 pt-1">
-          <button type="button" class="px-4 py-2 text-[11px] tracking-widest uppercase text-slate-500 hover:bg-black/5 rounded-lg transition-colors" @click="showPwd = false">取消</button>
-        <button type="submit" class="btn-accent px-4 py-2 text-[11px] tracking-widest uppercase rounded-lg">保存</button>
+          <Button type="text" @click="showPwd = false">取消</Button>
+          <Button type="primary" html-type="submit">保存</Button>
         </div>
       </form>
-    </div>
+    </Modal>
+
+    <!-- 命令式通知宿主（全站唯一，避免重复弹窗） -->
+    <NotificationContainer />
+    <ConfirmDialog />
   </div>
 </template>
 
 <script setup>
+import { confirmAction } from './ui/confirm'
 import { onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { Button, Input, Modal, Notification, NotificationContainer, Tag } from 'animal-island-vue'
 import { api, auth } from './api.js'
+import ConfirmDialog from './ui/ConfirmDialog.vue'
 import Login from './views/Login.vue'
 import Wizard from './views/Wizard.vue'
 
@@ -182,8 +190,6 @@ const navItems = [
   { to: '/update', label: '自动更新', icon: icons.update },
 ]
 
-const inputClass = 'w-full border rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 transition-shadow'
-
 const showPwd = ref(false)
 const pwdForm = reactive({ next: '', msg: '', ok: false })
 const restarting = ref(false)
@@ -202,7 +208,7 @@ async function onLogout() {
 }
 
 async function onRestart() {
-  if (!confirm('确定要重启 Bot 吗？配置修改将在重启后生效。')) return
+  if (!await confirmAction('确定要重启 Bot 吗？配置修改将在重启后生效。')) return
   restarting.value = true
   try {
     await api.restart()
@@ -212,12 +218,17 @@ async function onRestart() {
     location.reload()
   } else {
     restarting.value = false
-    alert('等待重启超时，请检查 Bot 运行状态')
+    Notification.error({ message: '等待重启超时，请检查 Bot 运行状态' })
   }
 }
 
 async function onChangePwd() {
   pwdForm.msg = ''
+  if (!pwdForm.next || pwdForm.next.length < 6) {
+    pwdForm.ok = false
+    pwdForm.msg = '新密码至少 6 位'
+    return
+  }
   try {
     await api.changePassword(pwdForm.next)
     // 修改密码后服务端会销毁所有会话，退回登录页重新登录
@@ -233,32 +244,31 @@ async function onChangePwd() {
 </script>
 
 <style scoped>
-/* 侧边栏：浅色磨砂玻璃（Apple 侧栏质感） */
-.sidebar-glass {
-  background: linear-gradient(180deg, rgb(255 255 255 / 0.82) 0%, rgb(255 255 255 / 0.7) 100%);
-  border-right: 1px solid rgb(0 0 0 / 0.06);
-  box-shadow: 16px 0 40px -38px rgb(0 0 0 / 0.4);
-  backdrop-filter: blur(26px) saturate(180%);
-  -webkit-backdrop-filter: blur(26px) saturate(180%);
+/* 侧边栏：奶油小岛面板（浅色渐变 + 暖色描边） */
+.sidebar-island {
+  background:
+    radial-gradient(circle, rgb(196 184 158 / 0.22) 1.1px, transparent 1.1px) 0 0 / 20px 20px,
+    linear-gradient(180deg, #fdf8ea 0%, #f8f2e0 46%, #f3ecd8 100%);
+  border-right: 2px solid var(--line-strong);
+  box-shadow: 10px 0 30px -26px rgb(61 52 40 / 0.9);
 }
 
-/* 顶部工具栏：悬浮玻璃条 */
-.topbar-glass {
-  border-radius: 16px;
-  background: rgb(255 255 255 / 0.72);
-  border: 1px solid rgb(0 0 0 / 0.06);
-  box-shadow: 0 8px 26px -24px rgb(0 0 0 / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.8);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
+/* 顶部工具栏：奶油贴纸条 */
+.topbar-island {
+  border-radius: 20px;
+  background: rgb(255 253 247 / 0.92);
+  border: 2px solid var(--line);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
-/* 当前导航项：淡淡一层系统蓝 + 蓝色文字（Apple 侧栏选中态） */
+/* 当前导航项：雾霾蓝 pill + 白字（主题库 Demo 侧栏选中态） */
 .nav-active {
-  color: #0066cc;
-  font-weight: 600;
-  border-color: rgb(0 113 227 / 0.14);
-  background: rgb(0 113 227 / 0.1);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.7);
+  color: #fff;
+  font-weight: 700;
+  background: #b7c6e5;
+  box-shadow: 0 2px 0 0 #a3b4d8, inset 0 1px 0 rgb(255 255 255 / 0.35);
 }
 
 /* 侧边栏底部小按钮（图标 + hover 提示） */
@@ -267,39 +277,36 @@ async function onChangePwd() {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 0.625rem;
-  color: rgb(110 110 115);
-  transition: color 0.15s, background-color 0.15s, box-shadow 0.15s;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 12px;
+  color: var(--ink-soft);
+  transition: color 0.15s, background-color 0.15s;
 }
 .nav-ico:hover {
-  color: rgb(29 29 31);
-  background: rgb(0 0 0 / 0.05);
+  color: var(--ink);
+  background: rgb(114 93 66 / 0.08);
 }
 .nav-ico .tip {
   position: absolute;
   bottom: calc(100% + 0.5rem);
   left: 50%;
   z-index: 20;
-  padding: 0.3rem 0.55rem;
-  border-radius: 0.5rem;
-  background: rgb(29 29 31 / 0.92);
-  border: 1px solid rgb(255 255 255 / 0.14);
-  color: rgb(245 245 247);
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  background: #2b2118;
+  color: #f7ecd6;
   font-size: 10px;
-  letter-spacing: 0.12em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
   transform: translateX(-50%) translateY(3px);
   transition: opacity 0.15s, transform 0.15s;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 .nav-ico:hover .tip {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
 </style>
-

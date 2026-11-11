@@ -4,15 +4,21 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "sync:theme": "node scripts/sync-theme.mjs",
+    "predev": "npm run sync:theme",
     "dev": "vite",
+    "prebuild": "npm run sync:theme",
     "build": "vite build",
     "preview": "vite preview",
+    "predev:demo": "npm run sync:theme",
     "dev:demo": "vite --mode demo",
+    "prebuild:demo": "npm run sync:theme",
     "build:demo": "vite build --mode demo --outDir dist-demo --emptyOutDir",
     "preview:demo": "vite preview --outDir dist-demo"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.3.0",
+    "animal-island-vue": "^1.5.0",
     "dompurify": "^3.4.14",
     "marked": "^18.0.11",
     "vue": "^3.5.13",

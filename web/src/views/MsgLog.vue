@@ -2,30 +2,28 @@
   <div class="space-y-4">
     <!-- 筛选与操作栏 -->
     <div class="flex items-center justify-between flex-wrap gap-3">
-      <div class="flex items-center gap-1 glass rounded-xl p-1">
-        <button
+      <div class="flex items-center gap-1">
+        <Button
           v-for="t in typeTabs"
           :key="t.value"
-          class="px-3 py-1.5 text-xs rounded-md transition-all"
-          :class="filter === t.value
-            ? 'btn-accent font-medium shadow-sm'
-            : 'text-slate-500 hover:text-slate-800 hover:bg-white/60'"
+          size="small"
+          :type="filter === t.value ? 'primary' : 'text'"
           @click="filter = t.value"
         >
           {{ t.label }}
-        </button>
+        </Button>
       </div>
       <div class="flex items-center gap-3">
         <label class="flex items-center gap-1.5 text-xs text-slate-500 select-none cursor-pointer">
-          <input v-model="autoRefresh" type="checkbox" />
+          <Switch v-model="autoRefresh" size="small" />
           自动刷新
         </label>
-        <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="load">刷新</button>
+        <Button type="text" size="small" @click="load">刷新</Button>
       </div>
     </div>
 
     <!-- 日志列表（旧在上、新在下，自动滚到底部；滚动到顶部加载更早的记录） -->
-    <section class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
+    <Card style="padding: 0" class="overflow-hidden">
       <ul ref="listEl" class="h-[60vh] overflow-y-auto px-5 py-3 space-y-3" @scroll="onScroll">
         <li v-if="loadingMore" class="py-2 text-xs text-slate-400 text-center list-none">加载更早的消息…</li>
         <li v-else-if="!hasMore && logs.length" class="py-2 text-xs text-slate-300 text-center list-none">没有更早的消息了</li>
@@ -34,9 +32,9 @@
         </li>
         <li v-for="log in filtered" :key="log.id" class="flex items-start gap-3">
           <span class="text-xs text-slate-400 font-mono whitespace-nowrap pt-0.5 w-16 shrink-0">{{ fmtTime(log.time) }}</span>
-          <span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap shrink-0" :class="typeClass(log.type)">
+          <Tag variant="solid" size="small" :color="typeColor(log.type)" class="shrink-0">
             {{ typeText(log) }}
-          </span>
+          </Tag>
           <div class="min-w-0 flex-1">
             <div class="text-xs text-slate-400 mb-0.5">
               <template v-if="log.type === 'notice'">
@@ -56,19 +54,17 @@
 
       <!-- 有新消息提示（用户上翻查看历史时） -->
       <div v-if="hasNew" class="border-t border-white/50 px-5 py-2 flex justify-center">
-        <button
-          class="text-xs btn-accent px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm"
-          @click="scrollToBottom(true)"
-        >
+        <Button type="primary" size="small" @click="scrollToBottom(true)">
           ↓ 有新消息，回到底部
-        </button>
+        </Button>
       </div>
-    </section>
+    </Card>
   </div>
 </template>
 
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { Button, Card, Switch, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
 
 const typeTabs = [
@@ -109,12 +105,13 @@ function typeText(log) {
   return { group: '群消息', friend: '好友', notice: '通知' }[log.type] || log.type
 }
 
-function typeClass(type) {
+// 消息类型药丸颜色（Tag color）：群消息走主题强调色，好友/通知为普通灰
+function typeColor(type) {
   return {
-    group: 'btn-accent',
-    friend: 'bg-zinc-100 text-zinc-700 border border-zinc-200',
-    notice: 'bg-white text-zinc-500 border border-zinc-300',
-  }[type] || 'bg-slate-100 text-slate-600'
+    group: 'app-teal',
+    friend: 'default',
+    notice: 'default',
+  }[type] || 'default'
 }
 
 function nearBottom() {

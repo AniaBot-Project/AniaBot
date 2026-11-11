@@ -2,30 +2,28 @@
   <div class="space-y-4">
     <!-- 筛选与操作栏 -->
     <div class="flex items-center justify-between flex-wrap gap-3">
-      <div class="flex items-center gap-1 glass rounded-xl p-1 overflow-x-auto">
-        <button
+      <div class="flex items-center gap-1 overflow-x-auto">
+        <Button
           v-for="t in categoryTabs"
           :key="t.value"
-          class="px-3 py-1.5 text-xs rounded-md transition-all whitespace-nowrap"
-          :class="filters.category === t.value
-            ? 'btn-accent font-medium shadow-sm'
-            : 'text-slate-500 hover:text-slate-800 hover:bg-white/60'"
+          size="small"
+          :type="filters.category === t.value ? 'primary' : 'text'"
           @click="filters.category = t.value; applyFilters()"
         >
           {{ t.label }}
-        </button>
+        </Button>
       </div>
       <div class="flex items-center gap-3">
         <label class="flex items-center gap-1.5 text-xs text-slate-500 select-none cursor-pointer">
-          <input v-model="autoRefresh" type="checkbox" />
+          <Switch v-model="autoRefresh" size="small" />
           自动刷新
         </label>
-        <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="load">刷新</button>
+        <Button type="text" size="small" @click="load">刷新</Button>
       </div>
     </div>
 
     <!-- 条件查询栏 -->
-    <section class="bg-white rounded-xl shadow-sm border border-white/60 px-5 py-4">
+    <Card>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
         <label class="block">
           <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">开始时间</span>
@@ -37,36 +35,31 @@
         </label>
         <label class="block">
           <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">关键词</span>
-          <input v-model.trim="filters.keyword" type="text" placeholder="匹配操作名 / 详情" :class="inputClass" @keyup.enter="applyFilters" />
+          <Input
+            class="mt-1 w-full"
+            :model-value="filters.keyword"
+            placeholder="匹配操作名 / 详情"
+            @update:model-value="v => (filters.keyword = v.trim())"
+            @keyup.enter="applyFilters"
+          />
         </label>
         <div class="flex items-end gap-2">
-          <button
-            class="px-4 py-1.5 text-[11px] tracking-widest uppercase btn-accent rounded-md transition-colors"
-            @click="applyFilters"
-          >
-            查询
-          </button>
-          <button
-            v-if="hasFilter"
-            class="px-3 py-1.5 text-[11px] tracking-widest uppercase text-zinc-500 hover:bg-white/60 rounded-md transition-colors"
-            @click="resetFilters"
-          >
-            重置
-          </button>
+          <Button type="primary" size="small" @click="applyFilters">查询</Button>
+          <Button v-if="hasFilter" type="text" size="small" @click="resetFilters">重置</Button>
         </div>
       </div>
-    </section>
+    </Card>
 
     <!-- 日志列表（新在上，滚动到底部自动加载更早的记录） -->
-    <section class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
+    <Card style="padding: 0" class="overflow-hidden">
       <div v-if="logs.length === 0" class="py-12 text-sm text-slate-400 text-center">
         暂无符合条件的操作日志（登录、配置修改、内容管理、AI 工具操作等在此展示）
       </div>
       <ul v-else class="divide-y divide-zinc-100">
         <li v-for="log in logs" :key="log.id" class="px-5 py-3 flex items-start gap-3 hover:bg-white/55 transition-colors">
-          <span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap mt-0.5" :class="categoryClass(log.category)">
+          <Tag variant="solid" size="small" :color="categoryColor(log.category)" class="mt-0.5 shrink-0">
             {{ categoryText(log.category) }}
-          </span>
+          </Tag>
           <div class="min-w-0 flex-1">
             <div class="text-xs font-mono text-zinc-500">{{ log.action }}</div>
             <p class="mt-0.5 text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed">{{ log.detail }}</p>
@@ -74,7 +67,7 @@
           <span class="ml-auto text-xs text-slate-400 font-mono whitespace-nowrap mt-0.5">{{ fmtTime(log.time) }}</span>
         </li>
       </ul>
-    </section>
+    </Card>
 
     <!-- 滚动分页哨兵：进入视口即加载下一页 -->
     <div ref="sentinel" class="h-px" />
@@ -85,6 +78,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { Button, Card, Input, Switch, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
 
 const categoryTabs = [
@@ -157,14 +151,15 @@ function categoryText(c) {
   return categoryLabels[c] || c
 }
 
-function categoryClass(c) {
+// 分类药丸颜色（Tag color）：认证/配置为强调色，AI 操作绿色，系统/更新为普通灰
+function categoryColor(c) {
   return {
-    auth: 'bg-amber-50 text-amber-700 border border-amber-200',
-    config: 'btn-accent',
-    ai: 'bg-[#34c759]/10 text-[#248a3d] border border-[#34c759]/40',
-    system: 'bg-zinc-100 text-zinc-600 border border-zinc-200',
-    update: 'bg-zinc-100 text-zinc-600 border border-zinc-200',
-  }[c] || 'bg-white text-zinc-600 border border-zinc-300'
+    auth: 'app-orange',
+    config: 'app-teal',
+    ai: 'app-green',
+    system: 'default',
+    update: 'default',
+  }[c] || 'default'
 }
 
 // 刷新：拉取最新一页，仅把新出现的条目合并到头部，已加载的更早分页保留

@@ -3,55 +3,63 @@
     <!-- 筛选与操作栏 -->
     <div class="flex items-center justify-between flex-wrap gap-3">
       <div class="flex items-center gap-2 flex-wrap">
-        <div class="flex items-center gap-1 glass rounded-xl p-1">
-          <button
+        <div class="flex items-center gap-1">
+          <Button
             v-for="t in typeTabs"
             :key="t.value"
-            class="px-3 py-1.5 text-xs rounded-md transition-all"
-            :class="filters.chat_type === t.value
-              ? 'btn-accent font-medium shadow-sm'
-              : 'text-slate-500 hover:text-slate-800 hover:bg-white/60'"
+            size="small"
+            :type="filters.chat_type === t.value ? 'primary' : 'text'"
             @click="filters.chat_type = t.value; applyFilters()"
           >
             {{ t.label }}
-          </button>
+          </Button>
         </div>
         <!-- 来源：普通对话 / 主动互动（AI 自行发起的发言） -->
-        <div class="flex items-center gap-1 glass rounded-xl p-1">
-          <button
+        <div class="flex items-center gap-1">
+          <Button
             v-for="t in kindTabs"
             :key="t.value"
-            class="px-3 py-1.5 text-xs rounded-md transition-all"
-            :class="filters.kind === t.value
-              ? 'btn-accent font-medium shadow-sm'
-              : 'text-slate-500 hover:text-slate-800 hover:bg-white/60'"
+            size="small"
+            :type="filters.kind === t.value ? 'primary' : 'text'"
             @click="filters.kind = t.value; applyFilters()"
           >
             {{ t.label }}
-          </button>
+          </Button>
         </div>
       </div>
       <div class="flex items-center gap-3">
         <label class="flex items-center gap-1.5 text-xs text-slate-500 select-none cursor-pointer">
-          <input v-model="autoRefresh" type="checkbox" />
+          <Switch v-model="autoRefresh" size="small" />
           自动刷新
         </label>
-        <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors disabled:opacity-50" :disabled="exporting" @click="exportLogs">导出日志</button>
-        <button class="text-xs text-zinc-500 hover:text-[#ff3b30] font-medium transition-colors disabled:opacity-50" :disabled="clearing" @click="clearLogs">清除日志</button>
-        <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="load">刷新</button>
+        <Button type="text" size="small" :disabled="exporting" @click="exportLogs">导出日志</Button>
+        <Button type="default" size="small" danger :disabled="clearing" @click="clearLogs">清除日志</Button>
+        <Button type="text" size="small" @click="load">刷新</Button>
       </div>
     </div>
 
     <!-- 条件查询栏 -->
-    <section class="bg-white rounded-xl shadow-sm border border-white/60 px-5 py-4">
+    <Card>
       <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         <label class="block">
           <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">触发人 ID</span>
-          <input v-model.trim="filters.sender" type="text" placeholder="精确匹配" :class="inputClass" @keyup.enter="applyFilters" />
+          <Input
+            class="mt-1 w-full"
+            :model-value="filters.sender"
+            placeholder="精确匹配"
+            @update:modelValue="v => (filters.sender = v.trim())"
+            @keyup.enter="applyFilters"
+          />
         </label>
         <label class="block">
           <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">目标会话 ID</span>
-          <input v-model.trim="filters.target_id" type="text" placeholder="精确匹配" :class="inputClass" @keyup.enter="applyFilters" />
+          <Input
+            class="mt-1 w-full"
+            :model-value="filters.target_id"
+            placeholder="精确匹配"
+            @update:modelValue="v => (filters.target_id = v.trim())"
+            @keyup.enter="applyFilters"
+          />
         </label>
         <label class="block">
           <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">开始时间</span>
@@ -63,52 +71,51 @@
         </label>
         <label class="block">
           <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">关键词</span>
-          <input v-model.trim="filters.keyword" type="text" placeholder="匹配用户输入" :class="inputClass" @keyup.enter="applyFilters" />
+          <Input
+            class="mt-1 w-full"
+            :model-value="filters.keyword"
+            placeholder="匹配用户输入"
+            @update:modelValue="v => (filters.keyword = v.trim())"
+            @keyup.enter="applyFilters"
+          />
         </label>
         <div class="flex items-end gap-2">
-          <button
-            class="px-4 py-1.5 text-[11px] tracking-[0.1em] uppercase btn-accent rounded-md transition-colors"
-            @click="applyFilters"
-          >
-            查询
-          </button>
-          <button
-            v-if="hasFilter"
-            class="px-3 py-1.5 text-[11px] tracking-[0.1em] uppercase text-zinc-500 hover:bg-white/60 rounded-md transition-colors"
-            @click="resetFilters"
-          >
-            重置
-          </button>
+          <Button type="primary" size="small" @click="applyFilters">查询</Button>
+          <Button v-if="hasFilter" type="text" size="small" @click="resetFilters">重置</Button>
         </div>
       </div>
-    </section>
+    </Card>
 
     <!-- 日志列表（新在上，滚动到底部自动加载更早的记录） -->
     <section class="space-y-3">
-      <div v-if="logs.length === 0" class="bg-white rounded-xl shadow-sm border border-white/60 py-12 text-sm text-slate-400 text-center">
-        暂无符合条件的 Query 记录（@ 机器人或私聊触发 AI 回复、或主动互动发言后在此展示）
-      </div>
+      <Card v-if="logs.length === 0" style="padding: 0">
+        <div class="py-12 text-sm text-slate-400 text-center">
+          暂无符合条件的 Query 记录（@ 机器人或私聊触发 AI 回复、或主动互动发言后在此展示）
+        </div>
+      </Card>
 
-      <div
+      <Card
         v-for="log in logs"
         :key="log.id"
-        class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden"
+        hoverable
+        style="padding: 0"
+        @click="detail = log"
       >
         <!-- 摘要行（点击弹出详情窗口） -->
-        <button class="w-full text-left px-5 py-3.5 hover:bg-white/55 transition-colors" @click="detail = log">
+        <div class="px-5 py-3.5">
           <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap" :class="statusClass(log.status)">
+            <Tag variant="solid" size="small" :color="statusColor(log.status)">
               {{ statusText(log.status) }}
-            </span>
-            <span v-if="log.kind === 'proactive'" class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap bg-blue-50 text-[#0071e3] border border-blue-200">
+            </Tag>
+            <Tag v-if="log.kind === 'proactive'" variant="solid" size="small" color="app-blue">
               主动互动
-            </span>
-            <span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap bg-zinc-100 text-zinc-600 border border-zinc-200">
+            </Tag>
+            <Tag variant="solid" size="small">
               {{ log.chat_type === 'group' ? '群聊' : '私聊' }} · {{ log.target_id }}
-            </span>
-            <span v-if="log.tool_calls?.length" class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap bg-zinc-100 text-zinc-600 border border-zinc-200">
+            </Tag>
+            <Tag v-if="log.tool_calls?.length" variant="solid" size="small">
               {{ log.tool_calls_total || log.tool_calls.length }} 次工具调用
-            </span>
+            </Tag>
             <span class="ml-auto text-xs text-slate-400 font-mono whitespace-nowrap">{{ fmtTime(log.time) }}</span>
           </div>
           <p class="mt-2 text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed line-clamp-3">{{ log.query }}</p>
@@ -127,8 +134,8 @@
             <span v-if="log.senders?.length">来自 {{ log.senders.join(', ') }}</span>
             <span class="ml-auto text-zinc-400">详情 ⤢</span>
           </div>
-        </button>
-      </div>
+        </div>
+      </Card>
     </section>
 
     <!-- 滚动分页哨兵：进入视口即加载下一页 -->
@@ -137,125 +144,123 @@
     <div v-else-if="!hasMore && logs.length" class="py-3 text-xs text-slate-300 text-center">没有更早的记录了</div>
 
     <!-- 详情弹窗：点遮罩 / 右上角关闭 / Esc 均可关闭 -->
-    <div
-      v-if="detail"
-      class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4"
-      v-backdrop-close="() => (detail = null)"
-    >
-      <div class="bg-white rounded-xl shadow-2xl border border-zinc-200 w-full max-w-3xl max-h-[85vh] flex flex-col">
-        <!-- 弹窗头部 -->
-        <div class="flex items-center gap-2 flex-wrap px-5 py-3.5 border-b border-zinc-100 shrink-0">
-          <span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap" :class="statusClass(detail.status)">
+    <Modal v-model:open="detailOpen" :typewriter="false" :show-footer="false" :width="768">
+      <!-- 弹窗头部 -->
+      <template #title>
+        <div class="flex items-center gap-2 flex-wrap w-full font-normal">
+          <Tag variant="solid" size="small" :color="statusColor(detail.status)">
             {{ statusText(detail.status) }}
-          </span>
-          <span v-if="detail.kind === 'proactive'" class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap bg-blue-50 text-[#0071e3] border border-blue-200">
+          </Tag>
+          <Tag v-if="detail.kind === 'proactive'" variant="solid" size="small" color="app-blue">
             主动互动
-          </span>
-          <span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap bg-zinc-100 text-zinc-600 border border-zinc-200">
+          </Tag>
+          <Tag variant="solid" size="small">
             {{ detail.chat_type === 'group' ? '群聊' : '私聊' }} · {{ detail.target_id }}
-          </span>
+          </Tag>
           <span class="text-[11px] text-slate-400 font-mono">{{ fmtTime(detail.time) }}</span>
-          <button
-            class="ml-auto w-7 h-7 flex items-center justify-center rounded-md text-zinc-400 hover:text-zinc-800 hover:bg-white/60 transition-colors"
-            title="关闭"
-            @click="detail = null"
-          >
-            ✕
-          </button>
+          <Tooltip class="ml-auto" title="关闭" placement="bottom">
+            <Button type="text" size="small" @click="detail = null">✕</Button>
+          </Tooltip>
+        </div>
+      </template>
+
+      <!-- 弹窗内容（可滚动） -->
+      <div class="w-full space-y-4 font-normal">
+        <!-- 概要指标 -->
+        <div class="flex items-center gap-x-3 gap-y-1 text-[11px] text-slate-400 font-mono flex-wrap">
+          <span>{{ detail.status === 'running' ? '已用时' : '用时' }} {{ fmtDuration(elapsedMs(detail)) }}</span>
+          <span v-if="detail.iterations">LLM {{ detail.iterations }} 轮</span>
+          <template v-if="detail.total_tokens">
+            <span>tokens 总计 <span class="tokval">{{ fmtInt(detail.total_tokens) }}</span></span>
+            <span>输入 <span class="tokval">{{ fmtInt(detail.prompt_tokens) }}</span></span>
+            <span>输出 <span class="tokval">{{ fmtInt(detail.completion_tokens) }}</span></span>
+            <span v-if="detail.cached_tokens" :title="cacheTip(detail)">
+              缓存命中 <span class="tokval">{{ fmtInt(detail.cached_tokens) }}</span>
+              <template v-if="cacheRate(detail) > 0"> · 命中率 <span class="ratehit">{{ cachePct(detail) }}</span></template>
+            </span>
+          </template>
+          <span v-if="detail.senders?.length">来自 {{ detail.senders.join(', ') }}</span>
         </div>
 
-        <!-- 弹窗内容（可滚动） -->
-        <div class="px-5 py-4 space-y-4 overflow-y-auto">
-          <!-- 概要指标 -->
-          <div class="flex items-center gap-x-3 gap-y-1 text-[11px] text-slate-400 font-mono flex-wrap">
-            <span>{{ detail.status === 'running' ? '已用时' : '用时' }} {{ fmtDuration(elapsedMs(detail)) }}</span>
-            <span v-if="detail.iterations">LLM {{ detail.iterations }} 轮</span>
-            <template v-if="detail.total_tokens">
-              <span>tokens 总计 <span class="tokval">{{ fmtInt(detail.total_tokens) }}</span></span>
-              <span>输入 <span class="tokval">{{ fmtInt(detail.prompt_tokens) }}</span></span>
-              <span>输出 <span class="tokval">{{ fmtInt(detail.completion_tokens) }}</span></span>
-              <span v-if="detail.cached_tokens" :title="cacheTip(detail)">
-                缓存命中 <span class="tokval">{{ fmtInt(detail.cached_tokens) }}</span>
-                <template v-if="cacheRate(detail) > 0"> · 命中率 <span class="ratehit">{{ cachePct(detail) }}</span></template>
-              </span>
-            </template>
-            <span v-if="detail.senders?.length">来自 {{ detail.senders.join(', ') }}</span>
-          </div>
+        <!-- 用户输入（主动互动为触发说明） -->
+        <div>
+          <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium mb-2">{{ detail.kind === 'proactive' ? '触发说明' : '用户输入' }}</h3>
+          <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-white/60 rounded-lg px-3 py-2">{{ detail.query }}</p>
+        </div>
 
-          <!-- 用户输入（主动互动为触发说明） -->
-          <div>
-            <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium mb-2">{{ detail.kind === 'proactive' ? '触发说明' : '用户输入' }}</h3>
-            <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-white/60 rounded-lg px-3 py-2">{{ detail.query }}</p>
-          </div>
+        <!-- 错误信息 -->
+        <div v-if="detail.error" class="text-xs text-[#ff3b30] bg-red-50 border border-red-100 rounded-lg px-3 py-2 whitespace-pre-wrap break-all">
+          {{ detail.error }}
+        </div>
 
-          <!-- 错误信息 -->
-          <div v-if="detail.error" class="text-xs text-[#ff3b30] bg-red-50 border border-red-100 rounded-lg px-3 py-2 whitespace-pre-wrap break-all">
-            {{ detail.error }}
-          </div>
+        <!-- 补充说明（如主动互动保持安静的原因） -->
+        <div v-if="detail.note" class="text-xs text-slate-600 bg-slate-50 border border-white/60 rounded-lg px-3 py-2 whitespace-pre-wrap break-all">
+          {{ detail.note }}
+        </div>
 
-          <!-- 补充说明（如主动互动保持安静的原因） -->
-          <div v-if="detail.note" class="text-xs text-slate-600 bg-slate-50 border border-white/60 rounded-lg px-3 py-2 whitespace-pre-wrap break-all">
-            {{ detail.note }}
-          </div>
-
-          <!-- 工具调用明细 -->
-          <div v-if="detail.tool_calls?.length" class="space-y-2">
-            <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium">
-              工具调用
-              <span v-if="detail.tool_calls_total > detail.tool_calls.length" class="normal-case tracking-normal text-zinc-300">
-                （共 {{ detail.tool_calls_total }} 次，仅保留前 {{ detail.tool_calls.length }} 条）
-              </span>
-            </h3>
-            <div
-              v-for="(tc, i) in detail.tool_calls"
-              :key="i"
-              class="bg-white border border-white/60 rounded-lg overflow-hidden"
-            >
-              <div class="flex items-center gap-2 px-3 py-2 border-b border-white/50">
-                <span class="text-xs font-mono font-medium text-zinc-800">{{ tc.name }}</span>
-                <span v-if="tc.error" class="text-[11px] px-1.5 py-0.5 rounded bg-red-50 text-[#ff3b30] border border-red-100">失败</span>
-                <span class="ml-auto text-[11px] text-slate-400 font-mono">{{ fmtDuration(tc.duration_ms) }}</span>
+        <!-- 工具调用明细 -->
+        <div v-if="detail.tool_calls?.length" class="space-y-2">
+          <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium">
+            工具调用
+            <span v-if="detail.tool_calls_total > detail.tool_calls.length" class="normal-case tracking-normal text-zinc-300">
+              （共 {{ detail.tool_calls_total }} 次，仅保留前 {{ detail.tool_calls.length }} 条）
+            </span>
+          </h3>
+          <div
+            v-for="(tc, i) in detail.tool_calls"
+            :key="i"
+            class="bg-white border border-white/60 rounded-lg overflow-hidden"
+          >
+            <div class="flex items-center gap-2 px-3 py-2 border-b border-white/50">
+              <span class="text-xs font-mono font-medium text-zinc-800">{{ tc.name }}</span>
+              <Tag v-if="tc.error" variant="solid" size="small" color="app-red">失败</Tag>
+              <span class="ml-auto text-[11px] text-slate-400 font-mono">{{ fmtDuration(tc.duration_ms) }}</span>
+            </div>
+            <div class="px-3 py-2 space-y-2">
+              <div v-if="tc.arguments">
+                <div class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 mb-1">参数</div>
+                <pre class="text-xs text-slate-600 font-mono whitespace-pre-wrap break-all leading-relaxed">{{ tc.arguments }}</pre>
               </div>
-              <div class="px-3 py-2 space-y-2">
-                <div v-if="tc.arguments">
-                  <div class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 mb-1">参数</div>
-                  <pre class="text-xs text-slate-600 font-mono whitespace-pre-wrap break-all leading-relaxed">{{ tc.arguments }}</pre>
+              <div v-if="tc.error">
+                <div class="text-[10px] tracking-[0.15em] uppercase text-red-400 mb-1">错误</div>
+                <pre class="text-xs text-[#ff3b30] font-mono whitespace-pre-wrap break-all leading-relaxed">{{ tc.error }}</pre>
+              </div>
+              <div v-else-if="tc.result">
+                <div class="flex items-center gap-2 mb-1">
+                  <div class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">结果</div>
+                  <span v-if="isLongText(tc.result)" class="text-[10px] text-zinc-400 font-mono">{{ charCount(tc.result) }} 字符</span>
                 </div>
-                <div v-if="tc.error">
-                  <div class="text-[10px] tracking-[0.15em] uppercase text-red-400 mb-1">错误</div>
-                  <pre class="text-xs text-[#ff3b30] font-mono whitespace-pre-wrap break-all leading-relaxed">{{ tc.error }}</pre>
-                </div>
-                <div v-else-if="tc.result">
-                  <div class="flex items-center gap-2 mb-1">
-                    <div class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">结果</div>
-                    <span v-if="isLongText(tc.result)" class="text-[10px] text-zinc-400 font-mono">{{ charCount(tc.result) }} 字符</span>
-                  </div>
-                  <pre class="text-xs text-slate-600 font-mono whitespace-pre-wrap break-all leading-relaxed">{{ shownResult(detail, i, tc.result) }}</pre>
-                  <button
-                    v-if="isLongText(tc.result)"
-                    class="mt-1.5 text-[11px] text-[#0071e3] hover:underline"
-                    @click="toggleResult(detail, i)"
-                  >
-                    {{ resultExpanded(detail, i) ? '收起' : `展开全部（超过 ${FOLD_CHARS} 字符）` }}
-                  </button>
-                </div>
+                <pre class="text-xs text-slate-600 font-mono whitespace-pre-wrap break-all leading-relaxed">{{ shownResult(detail, i, tc.result) }}</pre>
+                <Button
+                  v-if="isLongText(tc.result)"
+                  class="mt-1.5"
+                  type="link"
+                  size="small"
+                  @click="toggleResult(detail, i)"
+                >
+                  {{ resultExpanded(detail, i) ? '收起' : `展开全部（超过 ${FOLD_CHARS} 字符）` }}
+                </Button>
               </div>
             </div>
           </div>
+        </div>
 
-          <!-- 最终回复 -->
-          <div v-if="detail.reply">
-            <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium mb-2">最终回复</h3>
-            <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-white/60 rounded-lg px-3 py-2">{{ detail.reply }}</p>
-          </div>
+        <!-- 最终回复 -->
+        <div v-if="detail.reply">
+          <h3 class="text-[11px] tracking-[0.2em] uppercase text-zinc-400 font-medium mb-2">最终回复</h3>
+          <p class="text-sm text-slate-700 whitespace-pre-wrap break-all leading-relaxed bg-slate-50 border border-white/60 rounded-lg px-3 py-2">{{ detail.reply }}</p>
         </div>
       </div>
-    </div>
+    </Modal>
+
+    <!-- 命令式通知（替换 alert）的渲染容器 -->
   </div>
 </template>
 
 <script setup>
+import { confirmAction } from '../ui/confirm'
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { Button, Card, Input, Modal, Notification, Switch, Tag, Tooltip } from 'animal-island-vue'
 import { api } from '../api.js'
 
 const typeTabs = [
@@ -290,6 +295,11 @@ const FOLD_CHARS = 1000
 const expandedResults = reactive(new Set())
 // detail 为当前弹窗展示的日志（null 表示弹窗关闭）
 const detail = ref(null)
+// 弹窗开关：Modal 需要布尔 open，这里与 detail 互转（关闭时清空 detail）
+const detailOpen = computed({
+  get: () => !!detail.value,
+  set: (open) => { if (!open) detail.value = null },
+})
 // now 每秒跳动一次，驱动 running 条目「已用时」实时刷新
 const now = ref(Date.now())
 const hasMore = ref(false) // 是否还有更早的日志可加载
@@ -328,7 +338,7 @@ async function exportLogs() {
   try {
     await api.exportQueryLogs({ ...applied })
   } catch (e) {
-    alert(e.message || '导出失败')
+    Notification.error({ message: e.message || '导出失败' })
   } finally {
     exporting.value = false
   }
@@ -338,15 +348,15 @@ async function exportLogs() {
 async function clearLogs() {
   if (clearing.value) return
   const scope = hasFilter.value ? '当前筛选条件下的' : '全部'
-  if (!confirm(`确定清除${scope} Query 日志吗？清除后不可恢复，建议先导出备份。`)) return
+  if (!await confirmAction(`确定清除${scope} Query 日志吗？清除后不可恢复，建议先导出备份。`)) return
   clearing.value = true
   try {
     const res = await api.clearQueryLogs({ ...applied })
     resetList()
     await load()
-    alert(`已清除 ${res.removed ?? 0} 条日志`)
+    Notification.success({ message: `已清除 ${res.removed ?? 0} 条日志` })
   } catch (e) {
-    alert(e.message || '清除失败')
+    Notification.error({ message: e.message || '清除失败' })
   } finally {
     clearing.value = false
   }
@@ -435,16 +445,17 @@ function statusText(s) {
   return { running: '执行中', success: '成功', skipped: '保持安静', stopped: '已停止', timeout: '超时', error: '出错', interrupted: '中断' }[s] || s
 }
 
-function statusClass(s) {
+// 状态药丸颜色（Tag color）：成功绿、警告橙、错误红，其余走默认/主题色
+function statusColor(s) {
   return {
-    running: 'btn-accent',
-    success: 'bg-white text-zinc-600 border border-zinc-300',
-    skipped: 'bg-blue-50 text-[#0071e3] border border-blue-200',
-    stopped: 'bg-zinc-100 text-zinc-500 border border-zinc-200',
-    timeout: 'bg-zinc-100 text-zinc-500 border border-zinc-200',
-    error: 'bg-red-50 text-[#ff3b30] border border-red-200',
-    interrupted: 'bg-amber-50 text-[#ff9f0a] border border-amber-200',
-  }[s] || 'bg-slate-100 text-slate-600'
+    running: 'app-teal',
+    success: 'app-green',
+    skipped: 'app-blue',
+    stopped: 'default',
+    timeout: 'app-orange',
+    error: 'app-red',
+    interrupted: 'app-orange',
+  }[s] || 'default'
 }
 
 // 刷新：拉取最新一页，新条目插入头部、已有条目原地更新（执行中 → 完成），

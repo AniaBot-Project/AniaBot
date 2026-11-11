@@ -6,13 +6,8 @@
         按每会话与全局两个维度限制每日 Token 消耗，超限后 AI 请求被拒绝；计数含子代理、定时任务的消耗。在「配置管理 → AI 对话 · 配额」启用
       </span>
       <div class="flex items-center gap-3">
-        <button class="text-xs text-zinc-700 hover:text-zinc-900 font-medium transition-colors" @click="load">刷新</button>
-        <button
-          class="text-xs btn-accent px-3.5 py-2 rounded-lg font-medium transition-colors shadow-sm"
-          @click="resetAll"
-        >
-          全部清零
-        </button>
+        <Button type="text" size="small" @click="load">刷新</Button>
+        <Button type="primary" size="small" @click="resetAll">全部清零</Button>
       </div>
     </div>
 
@@ -20,16 +15,16 @@
     <p v-if="msg" class="text-xs" :class="msgOk ? 'text-[#34c759]' : 'text-[#ff3b30]'">{{ msg }}</p>
 
     <!-- 未启用 -->
-    <section v-if="notEnabled" class="tcard p-12 text-center">
+    <Card v-if="notEnabled" style="padding: 48px 24px" class="text-center">
       <div class="tlabel mb-2">Quota · 配额限制</div>
       <p class="text-sm text-zinc-500">
         配额功能未启用，请在「配置管理」中设置 plugin.ai_chat_bot.quota.enable=true 并重启 Bot 后使用
       </p>
-    </section>
+    </Card>
 
     <template v-else>
       <!-- 全局总览 -->
-      <section class="tcard p-6">
+      <Card style="padding: 24px">
         <div class="flex items-center justify-between flex-wrap gap-x-8 gap-y-3">
           <div>
             <span class="tlabel">Global · 全局今日用量</span>
@@ -44,24 +39,24 @@
             <div class="mt-1.5 text-sm text-zinc-600">{{ global.limit ? fmt(global.remaining) : '—' }}</div>
           </div>
           <div class="ml-auto">
-            <span class="tpill">
-              <span class="tdot" :class="global.reached ? 'bg-[#ff3b30]' : 'bg-[#34c759]'" />
+            <Tag variant="solid" size="small" :color="global.reached ? 'app-red' : 'app-green'">
               {{ global.reached ? '已用尽' : '正常' }}
-            </span>
+            </Tag>
           </div>
         </div>
-        <div v-if="global.limit > 0" class="mt-4 h-1.5 bg-zinc-100 rounded-full overflow-hidden">
-          <div
-            class="h-full transition-all"
-            :class="global.reached ? 'bg-[#ff3b30]' : 'bg-zinc-800'"
-            :style="{ width: pct(global.used, global.limit) + '%' }"
-          />
-        </div>
+        <Progress
+          v-if="global.limit > 0"
+          class="mt-4"
+          :percent="pct(global.used, global.limit)"
+          :show-info="false"
+          size="small"
+          aria-label="全局配额使用率"
+        />
         <div class="tlabel mt-3">{{ data.date }}</div>
-      </section>
+      </Card>
 
       <!-- 会话明细 -->
-      <section class="tcard overflow-hidden">
+      <Card style="padding: 0" class="overflow-hidden">
         <div class="px-6 py-4 border-b border-zinc-100 flex items-center justify-between">
           <span class="tlabel">Sessions · 会话用量</span>
           <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">{{ sessions.length }} 个会话</span>
@@ -80,33 +75,29 @@
                 <span>已用 {{ fmt(s.used) }} / {{ s.limit ? fmt(s.limit) : '不限' }}</span>
                 <span>{{ s.limit ? '剩余 ' + fmt(s.remaining) : '' }}</span>
               </div>
-              <div v-if="s.limit > 0" class="h-1 bg-zinc-100 rounded-full overflow-hidden">
-                <div
-                  class="h-full"
-                  :class="s.reached ? 'bg-[#ff3b30]' : 'bg-zinc-800'"
-                  :style="{ width: pct(s.used, s.limit) + '%' }"
-                />
-              </div>
+              <Progress
+                v-if="s.limit > 0"
+                :percent="pct(s.used, s.limit)"
+                :show-info="false"
+                size="small"
+                aria-label="会话配额使用率"
+              />
             </div>
-            <span class="tpill shrink-0">
-              <span class="tdot" :class="s.reached ? 'bg-[#ff3b30]' : 'bg-[#34c759]'" />
+            <Tag variant="solid" size="small" :color="s.reached ? 'app-red' : 'app-green'" class="shrink-0">
               {{ s.reached ? '已用尽' : '正常' }}
-            </span>
-            <button
-              class="text-[11px] text-zinc-500 hover:text-[#ff3b30] font-medium transition-colors shrink-0"
-              @click="resetOne(s.key)"
-            >
-              清零
-            </button>
+            </Tag>
+            <Button type="default" size="small" danger class="shrink-0" @click="resetOne(s.key)">清零</Button>
           </li>
         </ul>
-      </section>
+      </Card>
     </template>
   </div>
 </template>
 
 <script setup>
+import { confirmAction } from '../ui/confirm'
 import { computed, onMounted, ref } from 'vue'
+import { Button, Card, Progress, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
 
 const data = ref({})
@@ -143,7 +134,7 @@ async function load() {
 }
 
 async function doReset(scope, label) {
-  if (!window.confirm(`确定清零${label}的今日用量？`)) return
+  if (!await confirmAction(`确定清零${label}的今日用量？`)) return
   try {
     await api.resetQuota(scope)
     msg.value = '已清零'

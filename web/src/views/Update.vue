@@ -1,28 +1,28 @@
 <template>
   <div class="space-y-5 max-w-4xl">
     <!-- 运行模式 / 配置提示 -->
-    <div v-if="info && info.mode === 'dev'" class="tcard p-4 border-l-2 border-l-amber-400 flex items-start gap-3">
+    <Card v-if="info && info.mode === 'dev'" color="app-yellow" class="flex items-start gap-3">
       <span class="tdot bg-[#ff9f0a] mt-1.5 shrink-0" />
       <div class="text-xs text-zinc-600 leading-relaxed">
         当前为 <span class="font-semibold text-zinc-900">go run 开发模式</span>运行，自动更新已禁用。
         请以编译后的二进制方式部署后再使用此功能。
       </div>
-    </div>
-    <div v-else-if="info && !info.configured" class="tcard p-4 border-l-2 border-l-amber-400 flex items-start gap-3">
+    </Card>
+    <Card v-else-if="info && !info.configured" color="app-yellow" class="flex items-start gap-3">
       <span class="tdot bg-[#ff9f0a] mt-1.5 shrink-0" />
       <div class="text-xs text-zinc-600 leading-relaxed">
         尚未配置源码目录。请先在
         <RouterLink to="/config" class="font-semibold text-zinc-900 underline underline-offset-2">配置管理</RouterLink>
         的「自动更新」分组中设置 <span class="font-mono">bot.update.source_dir</span>（AniaBot 仓库的克隆路径）。
       </div>
-    </div>
+    </Card>
 
     <!-- 版本信息 -->
-    <div class="tcard p-5">
+    <Card>
       <div class="flex items-center justify-between mb-4">
         <span class="tlabel">Version / 版本信息</span>
-        <span v-if="info && info.updateAvailable" class="tpill"><span class="tdot bg-[#34c759]" />有新版本</span>
-        <span v-else-if="info && info.remoteCommit" class="tpill"><span class="tdot bg-zinc-300" />已是最新</span>
+        <Tag v-if="info && info.updateAvailable" color="app-green" variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-white/85" />有新版本</Tag>
+        <Tag v-else-if="info && info.remoteCommit" variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-[#725d42]" />已是最新</Tag>
       </div>
       <div v-if="info" class="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div>
@@ -59,34 +59,36 @@
         <span class="tdot bg-red-400 mt-1 shrink-0" />
         {{ info.dirError }}
       </div>
-    </div>
+    </Card>
 
     <!-- 操作 -->
     <div class="flex items-center gap-3">
-      <button
-        class="text-[10px] tracking-[0.15em] uppercase btn-accent px-3 py-1.5 rounded-md font-medium transition-colors disabled:opacity-50"
+      <Button
+        type="primary"
+        size="small"
         :disabled="!canUpdate"
         @click="onStart"
-      >开始更新</button>
-      <button
-        class="text-[10px] tracking-[0.15em] uppercase text-zinc-500 hover:text-zinc-900 font-medium transition-colors disabled:opacity-50"
+      >开始更新</Button>
+      <Button
+        type="text"
+        size="small"
         :disabled="infoLoading || status.running"
         @click="loadInfo"
-      >{{ infoLoading ? '检查中...' : '检查更新' }}</button>
+      >{{ infoLoading ? '检查中...' : '检查更新' }}</Button>
       <span v-if="startMsg" class="text-xs text-[#ff3b30]">{{ startMsg }}</span>
     </div>
 
     <!-- 失败原因 -->
-    <div v-if="status.error" class="tcard p-4 border-l-2 border-l-red-400">
+    <Card v-if="status.error">
       <div class="flex items-center gap-2 mb-1.5">
-        <span class="tpill"><span class="tdot bg-red-400" />{{ status.errKind || '更新失败' }}</span>
+        <Tag color="app-red" variant="solid" size="small">{{ status.errKind || '更新失败' }}</Tag>
       </div>
       <p class="text-xs text-[#ff3b30] font-mono break-all leading-relaxed">{{ status.error }}</p>
       <p class="text-[10px] text-zinc-400 mt-2">更新已中止，当前运行的版本未受影响。修复问题后可重新点击「开始更新」。</p>
-    </div>
+    </Card>
 
     <!-- 进度 -->
-    <div v-if="started" class="tcard p-5">
+    <Card v-if="started">
       <div class="tlabel mb-4">Progress / 更新进度</div>
       <div v-if="status.restarting" class="mb-3 text-xs text-zinc-500">更新完成，等待 Bot 重启...</div>
       <div class="flex flex-wrap items-center gap-y-2 mb-5">
@@ -111,21 +113,25 @@
           执行中...
         </div>
       </div>
-    </div>
+    </Card>
 
     <!-- 重启中遮罩 -->
-    <div v-if="rebooting" class="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4">
-      <div class="tcard p-8 w-80 max-w-full text-center space-y-3">
+    <Modal :open="rebooting" :typewriter="false" :show-footer="false" :mask-closable="false" :width="320">
+      <div class="w-full text-center space-y-3">
         <span class="mx-auto block w-8 h-8 border-[3px] border-zinc-200 border-t-zinc-800 rounded-full animate-spin" />
         <div class="text-sm font-semibold text-zinc-900 tracking-[0.15em] uppercase">Updating</div>
         <p class="text-xs text-zinc-500">更新完成，Bot 正在重启，恢复后页面自动刷新</p>
       </div>
-    </div>
+    </Modal>
+
+    <!-- 命令式通知宿主（alert 已改为 Notification） -->
   </div>
 </template>
 
 <script setup>
+import { confirmAction } from '../ui/confirm'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { Button, Card, Modal, Notification, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
 
 const phases = [
@@ -198,7 +204,7 @@ async function pollStatus() {
 
 async function onStart() {
   startMsg.value = ''
-  if (!confirm('确定要开始更新吗？将拉取最新代码、重新编译并重启 Bot，过程约需几分钟。')) return
+  if (!await confirmAction('确定要开始更新吗？将拉取最新代码、重新编译并重启 Bot，过程约需几分钟。')) return
   try {
     await api.startUpdate()
     started.value = true
@@ -215,7 +221,7 @@ async function waitReboot() {
     location.reload()
   } else {
     rebooting.value = false
-    alert('等待重启超时，请检查 Bot 运行状态')
+    Notification.error({ message: '等待重启超时，请检查 Bot 运行状态' })
   }
 }
 

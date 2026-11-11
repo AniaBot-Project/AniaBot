@@ -32,6 +32,8 @@ cd cmd && GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../build/AniaBot
 
 The panel frontend's built `dist/` is gitignored (build artifact). `bot/adminpanel` embeds it via `go:embed`, so run `make web` (or `cd web && npm run build`) at least once before `go build` on a fresh clone.
 
+Panel styling uses the animal-island theme (`animal-island-vue`, the Vue port of `animal-island-ui`): `web/scripts/sync-theme.mjs` runs before `npm run dev`/`build` and emits `web/src/styles/animal-island.vendor.css` from the package (dropping the 3.4MB CJK font subsets), `web/src/style.css` holds the design tokens plus the Tailwind-utility → theme mapping layer. Page controls (Button/Input/Select/Switch/Checkbox/Tabs/Table/Modal/Tag/Progress/DatePicker/…) are the library components themselves — prefer them over hand-written HTML controls when editing views. Both generated files are gitignored.
+
 ### Test
 
 ```bash

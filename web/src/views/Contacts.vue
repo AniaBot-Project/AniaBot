@@ -1,95 +1,85 @@
 <template>
   <div class="space-y-5">
-    <div v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">{{ error }}</div>
+    <Card v-if="error" color="app-red">
+      <p class="text-sm">{{ error }}</p>
+    </Card>
 
-    <div v-if="!sources.length && loaded" class="bg-white border border-white/60 rounded-xl px-5 py-8 text-center text-sm text-slate-500 shadow-sm">
-      当前没有已启用的适配器支持通讯录
+    <Card v-if="!sources.length && loaded" class="text-center">
+      <div class="text-sm text-slate-500">当前没有已启用的适配器支持通讯录</div>
       <p class="mt-1 text-xs text-slate-400">Telegram、QQ 官方等平台没有联系人枚举接口，故不提供群/好友列表</p>
-    </div>
+    </Card>
 
     <template v-else>
-      <!-- 平台标签页：一个适配器一枚 -->
+      <!-- 平台切换：一个适配器一枚按钮 -->
       <div class="flex flex-wrap gap-2">
-        <button
+        <Button
           v-for="s in sources"
           :key="s.adapter"
-          class="px-3.5 py-1.5 text-sm rounded-lg border transition-colors"
-          :class="adapter === s.adapter
-            ? 'btn-accent font-medium shadow-sm'
-            : 'bg-white text-slate-500 border-white/60 hover:text-slate-800 hover:border-slate-300/60'"
+          size="small"
+          :type="adapter === s.adapter ? 'primary' : 'default'"
           @click="switchPlatform(s.adapter)"
         >
           {{ platformLabel(s.platform) }}
           <span class="text-xs opacity-60 ml-1">{{ s.adapter }}</span>
-        </button>
+        </Button>
       </div>
 
-      <div class="flex items-center justify-between">
-        <div class="flex gap-1 glass rounded-xl p-1">
-          <button
-            v-for="tab in [['groups', '群列表'], ['friends', '好友列表']]"
-            :key="tab[0]"
-            class="px-4 py-1.5 text-sm rounded-md transition-colors"
-            :class="current === tab[0] ? 'btn-accent font-medium shadow-sm' : 'text-slate-500 hover:text-slate-800'"
-            @click="switchTab(tab[0])"
-          >
-            {{ tab[1] }}
-          </button>
-        </div>
-        <span class="text-xs text-slate-400">共 {{ current === 'groups' ? groups.length : friends.length }} 条</span>
-      </div>
-
-      <section class="bg-white rounded-xl shadow-sm border border-white/60 overflow-hidden">
-        <div v-if="current === 'groups'" class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead>
-              <tr class="text-left text-xs text-slate-400 bg-slate-50/60 border-b border-white/50">
-                <th class="px-3 py-3 sm:px-6 font-medium whitespace-nowrap">群 ID</th>
-                <th class="px-3 py-3 sm:px-6 font-medium">群名称</th>
-                <th class="px-3 py-3 sm:px-6 font-medium whitespace-nowrap">成员数</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="g in groups" :key="g.group_id" class="border-b border-slate-50 last:border-0 hover:bg-white/55 transition-colors">
-                <td class="px-3 py-3 sm:px-6 text-slate-500 font-mono text-xs">{{ g.group_id }}</td>
-                <td class="px-3 py-3 sm:px-6 text-slate-700 font-medium">{{ g.group_name || '—' }}</td>
-                <td class="px-3 py-3 sm:px-6 text-slate-600 whitespace-nowrap">{{ memberText(g) }}</td>
-              </tr>
-              <tr v-if="!groups.length">
-                <td colspan="3" class="px-6 py-8 text-center text-slate-400">该平台暂无群聊</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div v-else class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead>
-              <tr class="text-left text-xs text-slate-400 bg-slate-50/60 border-b border-white/50">
-                <th class="px-3 py-3 sm:px-6 font-medium whitespace-nowrap">用户 ID</th>
-                <th class="px-3 py-3 sm:px-6 font-medium">昵称</th>
-                <th class="px-3 py-3 sm:px-6 font-medium">备注</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="f in friends" :key="f.user_id" class="border-b border-slate-50 last:border-0 hover:bg-white/55 transition-colors">
-                <td class="px-3 py-3 sm:px-6 text-slate-500 font-mono text-xs">{{ f.user_id }}</td>
-                <td class="px-3 py-3 sm:px-6 text-slate-700 font-medium">{{ f.nickname || '—' }}</td>
-                <td class="px-3 py-3 sm:px-6 text-slate-600">{{ f.remark || '—' }}</td>
-              </tr>
-              <tr v-if="!friends.length">
-                <td colspan="3" class="px-6 py-8 text-center text-slate-400">该平台无好友列表（平台不支持枚举私聊对端）</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <!-- 群聊 / 好友 列表：页签 + 表格 -->
+      <Card style="padding: 0" class="overflow-hidden">
+        <Tabs :model-value="current" :items="contactTabs" @update:modelValue="switchTab">
+          <template #groups>
+            <div class="flex items-center justify-end mb-3 text-xs text-slate-400">共 {{ groups.length }} 条</div>
+            <Table
+              key="groups"
+              :columns="groupColumns"
+              :data-source="groups"
+              row-key="group_id"
+              :pagination="false"
+              :scroll="{ x: '100%' }"
+              empty-text="该平台暂无群聊"
+            >
+              <template #cell-group_id="{ value }">
+                <span class="font-mono text-xs">{{ value }}</span>
+              </template>
+              <template #cell-group_name="{ value }">
+                {{ value || '—' }}
+              </template>
+              <template #cell-member_count="{ record }">
+                {{ memberText(record) }}
+              </template>
+            </Table>
+          </template>
+          <template #friends>
+            <div class="flex items-center justify-end mb-3 text-xs text-slate-400">共 {{ friends.length }} 条</div>
+            <Table
+              key="friends"
+              :columns="friendColumns"
+              :data-source="friends"
+              row-key="user_id"
+              :pagination="false"
+              :scroll="{ x: '100%' }"
+              empty-text="该平台无好友列表（平台不支持枚举私聊对端）"
+            >
+              <template #cell-user_id="{ value }">
+                <span class="font-mono text-xs">{{ value }}</span>
+              </template>
+              <template #cell-nickname="{ value }">
+                {{ value || '—' }}
+              </template>
+              <template #cell-remark="{ value }">
+                {{ value || '—' }}
+              </template>
+            </Table>
+          </template>
+        </Tabs>
+      </Card>
     </template>
   </div>
 </template>
 
 <script setup>
 import { onMounted, ref } from 'vue'
+import { Button, Card, Table, Tabs } from 'animal-island-vue'
 import { api } from '../api.js'
 
 const PLATFORM_LABELS = {
@@ -99,6 +89,22 @@ const PLATFORM_LABELS = {
   telegram: 'Telegram',
   discord: 'Discord',
 }
+
+// 群 / 好友页签与表格列定义（Tabs / Table 组件）
+const contactTabs = [
+  { key: 'groups', label: '群列表' },
+  { key: 'friends', label: '好友列表' },
+]
+const groupColumns = [
+  { title: '群 ID', dataIndex: 'group_id' },
+  { title: '群名称', dataIndex: 'group_name' },
+  { title: '成员数', dataIndex: 'member_count' },
+]
+const friendColumns = [
+  { title: '用户 ID', dataIndex: 'user_id' },
+  { title: '昵称', dataIndex: 'nickname' },
+  { title: '备注', dataIndex: 'remark' },
+]
 
 const sources = ref([])
 const adapter = ref('')
