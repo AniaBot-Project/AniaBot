@@ -168,7 +168,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { Icon } from 'animal-island-vue'
-import { auth, canDirectMsgMedia, msgMediaUrl } from '../api.js'
+import { auth, canDirectMsgMedia, msgMediaLinkUrl, msgMediaUrl } from '../api.js'
 import { avatarGradient, avatarInitials, qqUserAvatarUrl } from '../utils/avatar.js'
 import {
   friendlyPreview,
@@ -251,15 +251,16 @@ function refFor(m) {
   return { entry: props.log.id, index, attempt: attempts.value[mediaKey(m)] || 0 }
 }
 
-// 图片优先直连平台 CDN：由浏览器直接向 CDN 取图，不再经过 bot 中转，省掉
-// 服务器「下载 + 再上传」的两份流量；直连失败（地址过期、CDN 拒绝跨源请求、
-// 混合内容被拦）才退回面板代理，代理会向平台续签地址后重试。
-// 失败按媒体维度记住，避免每次重渲染都重新试一遍。
-const directBroken = ref(new Set())
+// 图片加载按「尽量不让字节经过 bot」的顺序逐级退化：
+//   0. 直连日志里记录的 CDN 地址（地址还在有效期内，面板零请求）
+//   1. 直连面板续签后的地址（面板只做一次 302，图片仍由浏览器向 CDN 取）
+//   2. 面板媒体代理（最后兜底：代理续签并转发字节）
+// 每一级失败才进入下一级；失败级别按媒体维度记住，避免重复试。
+const stages = ref({}) // 媒体键 -> 已确定失败的最大级别
 
 // QQ 的媒体地址带 rkey 鉴权参数、约 2 小时过期：消息太旧时直连必然失败，
-// 不如直接走代理（代理会续签），省掉一次无谓的探测请求。没有 rkey 的地址
-// （如部分 gchat.qpic.cn 直链）不会过期，照常直连。
+// 直接从续签开始，省掉一次无谓的探测请求。没有 rkey 的地址（如部分
+// gchat.qpic.cn 直链）不会过期，照常直连。
 const rkeyTTL = 100 * 60 * 1000
 function looksExpired(m) {
   if (!/rkey=/i.test(m.url || '')) return false
@@ -267,18 +268,34 @@ function looksExpired(m) {
   return Number.isFinite(t) && Date.now() - t > rkeyTTL
 }
 
-function preferDirect(m) {
-  if (!auth.mediaDirect || looksExpired(m)) return false
-  return canDirectMsgMedia(m.url) && !directBroken.value.has(mediaKey(m))
+// 初始级别：能直连就直连；日志地址已过期就直接走续签（需要日志 ID 才能续签）
+function baseStage(m) {
+  if (!auth.mediaDirect || !canDirectMsgMedia(m.url)) return 2
+  if (!looksExpired(m)) return 0
+  return msgMediaLinkUrl(refFor(m)) ? 1 : 2
 }
+
+function stageOf(m) {
+  const v = stages.value[mediaKey(m)]
+  return v === undefined ? baseStage(m) : v
+}
+
 function imageSrc(m) {
-  return preferDirect(m) ? m.url : mediaUrl(m.url, '', false, refFor(m))
+  const stage = stageOf(m)
+  if (stage === 0) return m.url
+  if (stage === 1) {
+    const link = msgMediaLinkUrl(refFor(m))
+    if (link) return link
+  }
+  return mediaUrl(m.url, '', false, refFor(m))
 }
+
 function onImageError(m) {
-  if (preferDirect(m)) {
-    const next = new Set(directBroken.value)
-    next.add(mediaKey(m))
-    directBroken.value = next
+  const stage = stageOf(m)
+  if (stage < 2) {
+    // 直连失败先试续签直链；续签也不可用（或续签后的地址仍失败）再走代理
+    const next = stage === 0 ? (msgMediaLinkUrl(refFor(m)) ? 1 : 2) : 2
+    stages.value = { ...stages.value, [mediaKey(m)]: next }
     return
   }
   markFailed(m)
@@ -312,13 +329,16 @@ function markFailed(m) {
   failed.value = next
   emit('media-load')
 }
-// 重试：清掉失败标记并递增 attempt，媒体地址带上新参数以绕过浏览器缓存，
-// 面板代理会同时重新向平台申请可用地址。
+// 重试：清掉失败标记、回到初始级别并递增 attempt，媒体地址带上新参数以绕过
+// 浏览器缓存，面板会重新向平台申请可用地址。
 function retry(m) {
   const key = mediaKey(m)
   const next = new Set(failed.value)
   next.delete(key)
   failed.value = next
+  const nextStages = { ...stages.value }
+  delete nextStages[key]
+  stages.value = nextStages
   attempts.value = { ...attempts.value, [key]: (attempts.value[key] || 0) + 1 }
 }
 

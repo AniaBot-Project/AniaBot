@@ -335,6 +335,7 @@ func (s *Server) routes() {
 	s.mux.Handle("DELETE /api/msglogs", s.requireAuth(http.HandlerFunc(s.handleMsgLogDelete)))
 	s.mux.Handle("GET /api/msglogs/sessions", s.requireAuth(http.HandlerFunc(s.handleMsgLogSessions)))
 	s.mux.Handle("GET /api/msglogs/media", s.requireAuth(http.HandlerFunc(s.handleMsgLogMedia)))
+	s.mux.Handle("GET /api/msglogs/media/link", s.requireAuth(http.HandlerFunc(s.handleMsgLogMediaLink)))
 	s.mux.Handle("GET /api/querylogs", s.requireAuth(http.HandlerFunc(s.handleQueryLogs)))
 	s.mux.Handle("GET /api/querylogs/export", s.requireAuth(http.HandlerFunc(s.handleQueryLogsExport)))
 	s.mux.Handle("DELETE /api/querylogs", s.requireAuth(http.HandlerFunc(s.handleQueryLogsClear)))
@@ -1179,6 +1180,40 @@ func (s *Server) handleMsgLogMedia(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, io.LimitReader(resp.Body, maxMsgLogMediaBytes))
+}
+
+// handleMsgLogMediaLink 为过期媒体续签一个直链并用 302 交给浏览器：
+// 图片字节由浏览器直接向平台 CDN 取，面板只承担一次很小的重定向请求，
+// 不再「下载再上传」中转图片，回看历史消息时也不会占用服务器带宽。
+//
+// 只接受日志引用（entry+index），目标地址仍按媒体代理的规则校验（仅 http(s)、
+// 拒绝本机 / 私网），避免把内网地址交给浏览器；关闭「消息图片直连」时不可用。
+func (s *Server) handleMsgLogMediaLink(w http.ResponseWriter, r *http.Request) {
+	if !s.mediaDirect() {
+		writeError(w, http.StatusForbidden, "消息图片直连已关闭，请走媒体代理")
+		return
+	}
+	entryID, index, hasRef, refErr := parseMsgLogMediaRef(r.URL.Query())
+	if refErr != "" {
+		writeError(w, http.StatusBadRequest, refErr)
+		return
+	}
+	if !hasRef {
+		writeError(w, http.StatusBadRequest, "缺少 entry 参数")
+		return
+	}
+	fresh, ok := s.msgLogMediaURL(entryID, index)
+	if !ok {
+		writeError(w, http.StatusNotFound, "媒体地址已失效，且无法从平台重新获取")
+		return
+	}
+	if _, status, errMsg := parseMsgLogMediaURL(fresh); errMsg != "" {
+		writeError(w, status, errMsg)
+		return
+	}
+	// 续签地址本身有有效期：重定向不能缓存，否则之后会一直跳到过期地址
+	w.Header().Set("Cache-Control", "no-store")
+	http.Redirect(w, r, fresh, http.StatusFound)
 }
 
 // msgLogMediaURL 向插件申请媒体续期地址；未提供续期能力时返回 false。

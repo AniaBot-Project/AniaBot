@@ -98,6 +98,17 @@ export function canDirectMsgMedia(url) {
   return true
 }
 
+// 过期媒体的续签直链：面板 302 到平台刚签发的 CDN 地址，图片由浏览器直接
+// 下载，面板只承担这次重定向。ref 为 { entry, index, attempt }。
+export function msgMediaLinkUrl(ref) {
+  if (!ref || !ref.entry) return ''
+  const q = new URLSearchParams()
+  q.set('entry', String(ref.entry))
+  if (ref.index !== undefined && ref.index !== null) q.set('index', String(ref.index))
+  if (ref.attempt) q.set('t', String(ref.attempt))
+  return `/api/msglogs/media/link?${q.toString()}`
+}
+
 export const api = {
   async checkLogin() {
     try {
