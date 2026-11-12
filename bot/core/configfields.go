@@ -16,6 +16,7 @@ var frameworkConfigFields = []pluginconfig.Field{
 	// Web 面板
 	{Key: "bot.admin_panel.enable", Label: "启用面板", Type: "bool", Group: "Web 面板", Help: "是否启用 Web 控制面板；关闭后可用环境变量 ANIA_BOT_ADMIN_PANEL_ENABLE=true 覆盖重新开启", Default: true},
 	{Key: "bot.admin_panel.listen", Label: "监听地址", Type: "string", Group: "Web 面板", Help: "如 127.0.0.1:7700；改为 0.0.0.0:7700 可局域网访问（面板有密码保护）", Default: "127.0.0.1:7700"},
+	{Key: "bot.admin_panel.media_direct", Label: "消息图片直连", Type: "bool", Group: "Web 面板", Help: "消息日志里的图片优先由浏览器直连平台 CDN，失败时自动回退面板代理（省服务器带宽）；关闭后全部经面板代理转发。改动后刷新面板生效", Default: true},
 
 	// 缓存存储
 	{Key: "bot.store.cache.driver", Label: "缓存驱动", Type: "select", Options: []string{"memory", "redis"}, Group: "缓存存储", Help: "memory（进程内内存，重启清空）或 redis（重启日志不丢失，建议使用）", Default: "memory"},

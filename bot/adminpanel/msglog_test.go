@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jeanhua/AniaBot/bot/component/msglog"
+	"github.com/jeanhua/AniaBot/bot/core/configstore"
 )
 
 // roundTripFunc 让测试把任意公网域名重定向到本地 httptest 服务。
@@ -440,5 +441,40 @@ func TestSanitizeMediaName(t *testing.T) {
 	}
 	if got := mediaFallbackName("周报.文档"); got != "media" {
 		t.Errorf("非 ASCII 后缀应回退为 media, got %q", got)
+	}
+}
+
+// TestHandleMeMediaDirect 面板把「图片直连 CDN」开关下发给前端：未配置时默认
+// 开启，配置关闭后前端应全部走媒体代理。
+func TestHandleMeMediaDirect(t *testing.T) {
+	store := configstore.New(newFakePersistent(), nil)
+	s := &Server{opt: Options{Config: store, Logger: slog.Default()}}
+
+	read := func() bool {
+		rec := httptest.NewRecorder()
+		s.handleMe(rec, httptest.NewRequest("GET", "/api/me", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var out struct {
+			MediaDirect *bool `json:"media_direct"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("解析响应失败: %v", err)
+		}
+		if out.MediaDirect == nil {
+			t.Fatalf("响应缺少 media_direct: %s", rec.Body.String())
+		}
+		return *out.MediaDirect
+	}
+
+	if !read() {
+		t.Fatal("未配置时应默认开启直连")
+	}
+	if err := store.Set("bot.admin_panel.media_direct", false); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+	if read() {
+		t.Fatal("配置关闭后应下发布尔 false")
 	}
 }

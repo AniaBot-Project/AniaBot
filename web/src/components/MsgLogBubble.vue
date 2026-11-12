@@ -85,11 +85,12 @@
           >
             <img
               v-if="!isFailed(m)"
-              :src="mediaUrl(m.url, '', false, refFor(m))"
+              :src="imageSrc(m)"
               :alt="m.name || '图片'"
               loading="lazy"
+              referrerpolicy="no-referrer"
               @load="$emit('media-load')"
-              @error="markFailed(m)"
+              @error="onImageError(m)"
             />
             <span v-else class="img-broken">
               <Icon name="Image" :size="20" />
@@ -167,7 +168,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { Icon } from 'animal-island-vue'
-import { msgMediaUrl } from '../api.js'
+import { auth, canDirectMsgMedia, msgMediaUrl } from '../api.js'
 import { avatarGradient, avatarInitials, qqUserAvatarUrl } from '../utils/avatar.js'
 import {
   friendlyPreview,
@@ -250,6 +251,39 @@ function refFor(m) {
   return { entry: props.log.id, index, attempt: attempts.value[mediaKey(m)] || 0 }
 }
 
+// 图片优先直连平台 CDN：由浏览器直接向 CDN 取图，不再经过 bot 中转，省掉
+// 服务器「下载 + 再上传」的两份流量；直连失败（地址过期、CDN 拒绝跨源请求、
+// 混合内容被拦）才退回面板代理，代理会向平台续签地址后重试。
+// 失败按媒体维度记住，避免每次重渲染都重新试一遍。
+const directBroken = ref(new Set())
+
+// QQ 的媒体地址带 rkey 鉴权参数、约 2 小时过期：消息太旧时直连必然失败，
+// 不如直接走代理（代理会续签），省掉一次无谓的探测请求。没有 rkey 的地址
+// （如部分 gchat.qpic.cn 直链）不会过期，照常直连。
+const rkeyTTL = 100 * 60 * 1000
+function looksExpired(m) {
+  if (!/rkey=/i.test(m.url || '')) return false
+  const t = new Date(props.log.time).getTime()
+  return Number.isFinite(t) && Date.now() - t > rkeyTTL
+}
+
+function preferDirect(m) {
+  if (!auth.mediaDirect || looksExpired(m)) return false
+  return canDirectMsgMedia(m.url) && !directBroken.value.has(mediaKey(m))
+}
+function imageSrc(m) {
+  return preferDirect(m) ? m.url : mediaUrl(m.url, '', false, refFor(m))
+}
+function onImageError(m) {
+  if (preferDirect(m)) {
+    const next = new Set(directBroken.value)
+    next.add(mediaKey(m))
+    directBroken.value = next
+    return
+  }
+  markFailed(m)
+}
+
 // 文本块与引用块共用一份媒体计数：文本里的 [图片] / [文件:…] 占位会被实际媒体吃掉。
 const blocks = computed(() => {
   const counts = {
@@ -292,7 +326,7 @@ function openImage(index) {
   const m = images.value[index]
   if (!m) return
   emit('preview', {
-    items: images.value.map((item) => ({ media: item, ref: refFor(item) })),
+    items: images.value.map((item) => ({ media: item, ref: refFor(item), src: imageSrc(item) })),
     index,
   })
 }

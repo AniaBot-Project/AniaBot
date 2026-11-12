@@ -523,7 +523,24 @@ func (s *Server) handleMe(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":             true,
 		"setup_required": s.opt.Config.SetupPending(),
+		// 前端据此决定消息日志里的图片是否先由浏览器直连平台 CDN
+		"media_direct": s.mediaDirect(),
 	})
+}
+
+// mediaDirect 读取「消息日志图片优先由浏览器直连平台 CDN」开关。
+// 未配置时默认开启：直连失败前端会自动回退到媒体代理，代理兜底续签，
+// 不影响最终能否看到图片。
+func (s *Server) mediaDirect() bool {
+	if s.opt.Config == nil {
+		return true
+	}
+	if v, ok := s.opt.Config.Get("bot.admin_panel.media_direct"); ok {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+	}
+	return true
 }
 
 // handleSetupComplete 标记首次设置向导完成（或跳过）。

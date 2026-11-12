@@ -262,8 +262,9 @@
         <div v-if="lightboxCurrent" class="lightbox" @click.self="closePreview">
           <figure class="lightbox-figure">
             <img
-              :src="msgMediaUrl(lightboxCurrent.media.url, '', false, lightboxCurrent.ref)"
+              :src="lightboxCurrent.src || msgMediaUrl(lightboxCurrent.media.url, '', false, lightboxCurrent.ref)"
               :alt="lightboxCurrent.media.name || '图片'"
+              referrerpolicy="no-referrer"
             />
             <figcaption class="lightbox-bar">
               <span class="lightbox-name">{{ lightboxCurrent.media.name || '图片' }}</span>
@@ -271,7 +272,7 @@
                 {{ lightbox.index + 1 }} / {{ lightbox.items.length }}
               </span>
               <a
-                :href="msgMediaUrl(lightboxCurrent.media.url, '', false, lightboxCurrent.ref)"
+                :href="lightboxCurrent.src || msgMediaUrl(lightboxCurrent.media.url, '', false, lightboxCurrent.ref)"
                 target="_blank"
                 rel="noopener noreferrer"
               >打开原图</a>

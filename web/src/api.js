@@ -5,6 +5,8 @@ export const auth = reactive({
   checked: false,
   setupRequired: false,
   notice: '',
+  // 消息日志图片优先由浏览器直连平台 CDN（服务端下发，默认开启）
+  mediaDirect: true,
 })
 
 async function request(path, options = {}) {
@@ -84,12 +86,25 @@ export function msgMediaUrl(url, name = '', download = false, ref = null) {
   return `/api/msglogs/media?${q.toString()}`
 }
 
+// 消息图片能否让浏览器直连平台 CDN：只接受 http(s)，且面板是 HTTPS 时只能用
+// https 地址（否则会被浏览器当作混合内容拦掉）。data: / blob: 由调用方直接
+// 使用，不需要经过这里。
+export function canDirectMsgMedia(url) {
+  if (!url || /^(?:data|blob):/i.test(url)) return false
+  if (!/^https?:\/\//i.test(url)) return false
+  if (typeof location !== 'undefined' && location.protocol === 'https:' && !/^https:/i.test(url)) {
+    return false
+  }
+  return true
+}
+
 export const api = {
   async checkLogin() {
     try {
       const me = await request('/api/me')
       auth.loggedIn = true
       auth.setupRequired = me.setup_required === true
+      auth.mediaDirect = me.media_direct !== false
     } catch {
       auth.loggedIn = false
     } finally {
@@ -103,6 +118,7 @@ export const api = {
     try {
       const me = await request('/api/me')
       auth.setupRequired = me.setup_required === true
+      auth.mediaDirect = me.media_direct !== false
     } catch { /* 忽略 */ }
   },
   completeSetup: () => request('/api/setup/complete', { method: 'POST' }),
