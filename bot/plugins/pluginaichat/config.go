@@ -164,7 +164,9 @@ type clockConfig struct {
 //
 // 节奏参数（冷场阈值、最小间隔、每日上限、有效期、观察窗口、冷却、
 // 连续无人理次数）不在面板逐项暴露，统一由「活跃度」滑条换算
-// （见 proactivelevel.go）；免打扰时段、执行超时与现场消息条数单独配置。
+// （见 proactivelevel.go）；免打扰时段、执行超时与现场消息条数作为普通配置项
+// 暴露，与总开关 / 活跃度 / 白名单同处「AI 对话 · 主动互动」一个板块
+// （不另设「高级」子分组——面板只支持两级分组，多一级会拆出独立板块）。
 //
 // 总开关默认关闭；开启后还需按会话启用——面板白名单（g:群ID / f:用户ID）
 // 或管理员在会话中发送 /proactive on。
@@ -176,8 +178,8 @@ type proactiveConfig struct {
 	Scopes []string `cfg:"scopes" label:"启用主动互动的会话" group:"AI 对话 · 主动互动" help:"每行一个，格式 g:群ID 或 f:用户ID（与长期记忆/知识库的 scope 一致，如 g:qq:123456）；管理员在会话内发送 /proactive on|off 会直接改写这里（群聊需先 @ 机器人），面板即时可见"`
 
 	QuietHours         string `cfg:"quiet_hours" label:"免打扰时段" group:"AI 对话 · 主动互动" default:"23:00-08:00" help:"该时段内不主动发言（支持跨午夜，如 23:00-08:00），留空表示不限制；落在时段内的意图顺延到时段结束，若已超过有效期则作废"`
-	TimeoutSec         int    `cfg:"timeout_sec" label:"单次执行超时(秒)" group:"AI 对话 · 主动互动 · 高级" default:"120" help:"单次主动发言的生成超时"`
-	MaxContextMessages int    `cfg:"max_context_messages" label:"现场消息条数" group:"AI 对话 · 主动互动 · 高级" default:"30" help:"每个启用会话保留的最近消息条数，作为主动开口时的现场参考"`
+	TimeoutSec         int    `cfg:"timeout_sec" label:"单次执行超时(秒)" group:"AI 对话 · 主动互动" default:"120" help:"单次主动发言的生成超时"`
+	MaxContextMessages int    `cfg:"max_context_messages" label:"现场消息条数" group:"AI 对话 · 主动互动" default:"30" help:"每个启用会话保留的最近消息条数，作为主动开口时的现场参考"`
 }
 
 // promptCacheConfig 上游 prompt 缓存配置：仅 anthropic 格式需要显式声明

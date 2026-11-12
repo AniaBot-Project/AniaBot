@@ -78,13 +78,19 @@ func TestProactiveActivitySliderSchema(t *testing.T) {
 			t.Errorf("节奏参数 %s 应已并入活跃度滑条", key)
 		}
 	}
-	// 免打扰与高级项保留
-	for _, key := range []string{"quiet_hours", "timeout_sec", "max_context_messages"} {
-		if _, ok := byKey["plugin.ai_chat_bot.proactive."+key]; !ok {
+	// 免打扰与「高级」两项保留，且主动互动的全部字段落在同一个面板板块：
+	// 面板只支持两级分组，此前的「主动互动 · 高级」会被拆成独立板块，已合并。
+	const wantGroup = "AI 对话 · 主动互动"
+	for _, key := range []string{
+		"enable", "activity", "scopes", "quiet_hours", "timeout_sec", "max_context_messages",
+	} {
+		field, ok := byKey["plugin.ai_chat_bot.proactive."+key]
+		if !ok {
 			t.Errorf("配置项 %s 不应被移除", key)
+			continue
 		}
-	}
-	if got := byKey["plugin.ai_chat_bot.proactive.timeout_sec"].Group; !strings.Contains(got, "高级") {
-		t.Errorf("超时项应归入高级分组, got %q", got)
+		if field.Group != wantGroup {
+			t.Errorf("配置项 %s 分组 = %q, 期望 %q（应与其它主动互动配置同处一个板块）", key, field.Group, wantGroup)
+		}
 	}
 }
