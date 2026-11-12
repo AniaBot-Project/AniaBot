@@ -1,6 +1,6 @@
 <template>
   <!-- 通知事件：聊天软件里居中展示的系统提示 -->
-  <div v-if="isNotice" class="msg-notice-wrap">
+  <div v-if="isNotice" class="msg-notice-wrap" @contextmenu="onContextMenu">
     <div class="msg-notice">
       <span class="notice-mark" />
       <span v-if="context" class="notice-context">{{ context }}</span>
@@ -10,7 +10,7 @@
     </div>
   </div>
 
-  <div v-else class="msg-row" :class="{ 'is-continued': !showAvatar }">
+  <div v-else class="msg-row" :class="{ 'is-continued': !showAvatar }" @contextmenu="onContextMenu">
     <div v-if="showAvatar" class="msg-avatar" :style="avatarStyle" :title="displayName">
       <img
         v-if="avatarSrc && !avatarBroken"
@@ -186,7 +186,14 @@ const props = defineProps({
   // 全部消息视图里混排多个会话：用一枚小标签标出发言所属会话
   context: { type: String, default: '' },
 })
-const emit = defineEmits(['preview', 'media-load'])
+const emit = defineEmits(['preview', 'media-load', 'contextmenu'])
+
+// 右键菜单（复制 / 删除消息记录）由父组件统一渲染：这里只把事件与当前日志
+// 交上去，并阻止浏览器自带的右键菜单。
+function onContextMenu(e) {
+  e.preventDefault()
+  emit('contextmenu', { event: e, log: props.log })
+}
 
 const isNotice = computed(() => props.log.type === 'notice')
 const clock = computed(() => fmtClock(props.log.time))

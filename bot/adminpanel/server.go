@@ -122,6 +122,15 @@ type MsgLogMediaSource interface {
 	MsgLogMediaURL(entryID uint64, index int) (string, bool)
 }
 
+// MsgLogDeleteSource 可选接口：面板可删除单条消息日志（「消息日志」页右键
+// 「删除消息」）。删除只影响面板留存的记录，不会撤回平台上的原消息。
+// 未实现时面板的删除入口不可用（接口返回 404）。
+type MsgLogDeleteSource interface {
+	// MsgLogDelete 删除一条日志，返回是否实际删除
+	// （日志不存在 / 已被容量淘汰 / 已删除时返回 false）。
+	MsgLogDelete(id uint64) bool
+}
+
 // SkillSource 可选接口：插件实现后，面板可对其 AI skill 做列表 / 上传 / 删除
 // （当前由 AI 对话插件实现）。上传/删除后插件负责热重载 skill 注册表。
 // 内置 skill 由插件侧拒绝删除，面板按 SkillInfo.Builtin 隐藏删除入口。
@@ -233,6 +242,7 @@ type Options struct {
 	MsgLogSessions    func() []msglog.Session                                                  // 消息日志的会话摘要（可为 nil）
 	MsgLogSessionPage func(session string, limit int, beforeID, afterID uint64) []msglog.Entry // 按会话分页（可为 nil）
 	MsgLogMedia       func(entryID uint64, index int) (string, bool)                           // 媒体地址续期（可为 nil）
+	MsgLogDelete      func(id uint64) bool                                                     // 删除单条消息日志（可为 nil）
 	Skills            SkillSource                                                              // AI skill 管理（可为 nil）
 	Memories          MemorySource                                                             // AI 长期记忆管理（可为 nil）
 	Knowledge         KnowledgeBaseSource                                                      // AI 知识库管理（可为 nil）
@@ -312,6 +322,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/tasklogs/export", s.requireAuth(http.HandlerFunc(s.handleTaskLogsExport)))
 	s.mux.Handle("DELETE /api/tasklogs", s.requireAuth(http.HandlerFunc(s.handleTaskLogsClear)))
 	s.mux.Handle("GET /api/msglogs", s.requireAuth(http.HandlerFunc(s.handleMsgLogs)))
+	s.mux.Handle("DELETE /api/msglogs", s.requireAuth(http.HandlerFunc(s.handleMsgLogDelete)))
 	s.mux.Handle("GET /api/msglogs/sessions", s.requireAuth(http.HandlerFunc(s.handleMsgLogSessions)))
 	s.mux.Handle("GET /api/msglogs/media", s.requireAuth(http.HandlerFunc(s.handleMsgLogMedia)))
 	s.mux.Handle("GET /api/querylogs", s.requireAuth(http.HandlerFunc(s.handleQueryLogs)))
@@ -971,6 +982,32 @@ func (s *Server) handleMsgLogSessions(w http.ResponseWriter, r *http.Request) {
 		items = []msglog.Session{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// handleMsgLogDelete 删除单条消息日志（面板「消息日志」页右键「删除消息」）。
+// 查询参数：id（要删除的日志 ID）。只删面板留存的记录，不撤回平台原消息。
+// 响应：{"ok": true, "id": 123}。
+func (s *Server) handleMsgLogDelete(w http.ResponseWriter, r *http.Request) {
+	if s.opt.MsgLogDelete == nil {
+		writeError(w, http.StatusNotFound, "删除消息日志未启用")
+		return
+	}
+	id, errMsg := parseLogID(r.URL.Query().Get("id"), "id")
+	if errMsg != "" {
+		writeError(w, http.StatusBadRequest, errMsg)
+		return
+	}
+	if id == 0 {
+		writeError(w, http.StatusBadRequest, "缺少要删除的消息日志 ID")
+		return
+	}
+	if !s.opt.MsgLogDelete(id) {
+		writeError(w, http.StatusNotFound, "该消息记录已不存在")
+		return
+	}
+	s.opt.Logger.Info("消息日志已通过 Web 面板删除", "id", id)
+	oplog.Record(oplog.CategorySystem, "msg_log_delete", fmt.Sprintf("面板删除消息日志 #%d", id))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id})
 }
 
 // maxMsgLogMediaBytes 面板媒体代理允许的最大响应体积（64MB）。

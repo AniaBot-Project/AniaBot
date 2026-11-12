@@ -229,6 +229,7 @@
                 :context="row.context"
                 @preview="openPreview"
                 @media-load="onMediaLoad"
+                @contextmenu="openContextMenu"
               />
             </template>
           </div>
@@ -245,7 +246,7 @@
         <span class="foot-sep">·</span>
         <span>最后更新 {{ lastUpdatedText }}</span>
         <span class="foot-sep foot-sep-hint">|</span>
-        <span class="foot-hint">消息日志只读，回复请前往聊天平台</span>
+        <span class="foot-hint">右键消息可复制或删除，回复请前往聊天平台</span>
         <span class="foot-actions">
           <button type="button" @click="jumpToLatest">回到最新</button>
         </span>
@@ -296,13 +297,35 @@
         </div>
       </Transition>
     </Teleport>
+
+    <!-- 消息右键菜单：复制文本 / 删除消息记录 -->
+    <Teleport to="body">
+      <div
+        v-if="contextMenu"
+        class="ctx-menu"
+        :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+        @contextmenu.prevent
+        @mousedown.stop
+      >
+        <div class="ctx-hint">{{ contextMenuLabel }}</div>
+        <button type="button" class="ctx-item" @click="copyLogText(contextMenu.log)">
+          <Icon name="Copy" :size="13" />
+          复制文本
+        </button>
+        <button type="button" class="ctx-item danger" @click="deleteLog(contextMenu.log)">
+          <Icon name="Trash" :size="13" />
+          删除消息
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { Icon, Input, Switch } from 'animal-island-vue'
+import { Icon, Input, Notification, Switch } from 'animal-island-vue'
 import { api, msgMediaUrl } from '../api.js'
+import { confirmAction } from '../ui/confirm'
 import { avatarGradient, avatarInitials, sessionAvatarKey, sessionAvatarUrl } from '../utils/avatar.js'
 import { friendlyPreview, shortId } from '../utils/messageText.js'
 import MsgLogBubble from '../components/MsgLogBubble.vue'
@@ -930,10 +953,116 @@ function stepPreview(step) {
   lightbox.value = { ...lightbox.value, index: (lightbox.value.index + step + len) % len }
 }
 function onKeydown(e) {
+  if (e.key === 'Escape' && contextMenu.value) {
+    closeContextMenu()
+    return
+  }
   if (!lightbox.value) return
   if (e.key === 'Escape') closePreview()
   else if (e.key === 'ArrowLeft') stepPreview(-1)
   else if (e.key === 'ArrowRight') stepPreview(1)
+}
+
+/* ---------------- 右键菜单：复制 / 删除消息记录 ---------------- */
+
+const contextMenu = ref(null) // { x, y, log }
+const contextMenuLabel = computed(() => {
+  const log = contextMenu.value?.log
+  if (!log) return ''
+  if (log.type === 'notice') return log.title || '通知'
+  return log.nickname || shortId(log.user_id) || '消息'
+})
+
+// 在光标处弹出；靠近视口右 / 下边缘时向内收，避免菜单被裁掉
+function openContextMenu({ event, log }) {
+  if (!log || !log.id) return
+  const width = 176
+  const height = 124
+  const x = Math.min(event.clientX, window.innerWidth - width - 8)
+  const y = Math.min(event.clientY, window.innerHeight - height - 8)
+  contextMenu.value = { x: Math.max(8, x), y: Math.max(8, y), log }
+}
+
+function closeContextMenu() {
+  contextMenu.value = null
+}
+
+// 点击空白处 / 滚动 / 缩放窗口时收起菜单（菜单自身的 mousedown 已 stop）
+function onDocMouseDown() {
+  if (contextMenu.value) closeContextMenu()
+}
+
+async function copyLogText(log) {
+  closeContextMenu()
+  const text = [log?.title, log?.text].filter(Boolean).join(' · ').trim()
+  if (!text) {
+    Notification.warning({ message: '这条消息没有可复制的文本' })
+    return
+  }
+  if (await writeClipboard(text)) {
+    Notification.success({ message: '已复制消息文本' })
+  } else {
+    Notification.error({ message: '复制失败，请手动选中文本复制' })
+  }
+}
+
+// 优先用异步剪贴板（https / localhost）；失败时退回临时 textarea 方案
+async function writeClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch { /* 非安全上下文或权限被拒：走兜底方案 */ }
+  try {
+    const el = document.createElement('textarea')
+    el.value = text
+    el.setAttribute('readonly', '')
+    el.style.position = 'fixed'
+    el.style.top = '-1000px'
+    el.style.opacity = '0'
+    document.body.appendChild(el)
+    el.select()
+    const ok = document.execCommand('copy')
+    el.remove()
+    return ok
+  } catch {
+    return false
+  }
+}
+
+// 删除一条消息记录：只影响面板留存的日志，不会撤回平台上的原消息
+async function deleteLog(log) {
+  closeContextMenu()
+  if (!log || !log.id) return
+  const who = log.type === 'notice'
+    ? (log.title || '通知')
+    : (log.nickname || shortId(log.user_id) || '未知用户')
+  const preview = friendlyPreview(log.text, 60)
+  const ok = await confirmAction({
+    title: '删除消息记录',
+    message: `确定删除这条消息记录吗？\n${who}${preview ? '：' + preview : ''}\n\n只会删除面板本地的日志，平台上的消息不受影响，删除后不可恢复。`,
+    confirmText: '删除',
+  })
+  if (!ok) return
+  try {
+    await api.deleteMsgLog(log.id)
+  } catch (e) {
+    Notification.error({ message: e.message || '删除失败' })
+    return
+  }
+  removeLogLocally(log.id)
+  Notification.success({ message: '已删除消息记录' })
+  // 会话摘要（条数 / 最后一条预览）由后端重建，顺带处理「会话已空」的回落
+  await loadSessions()
+}
+
+// 本地先摘掉这条日志，避免等下一轮轮询才消失
+function removeLogLocally(id) {
+  allLogs.value = allLogs.value.filter((x) => x.id !== id)
+  for (const store of Object.values(sessionStore)) {
+    if (!store?.items?.length) continue
+    const next = store.items.filter((x) => x.id !== id)
+    if (next.length !== store.items.length) store.items = next
+  }
 }
 
 /* ---------------- 生命周期 ---------------- */
@@ -983,12 +1112,18 @@ onMounted(async () => {
   timer = setInterval(refreshTick, 3000)
   document.addEventListener('visibilitychange', onVisible)
   document.addEventListener('keydown', onKeydown)
+  document.addEventListener('mousedown', onDocMouseDown)
+  window.addEventListener('scroll', closeContextMenu, true)
+  window.addEventListener('resize', closeContextMenu)
 })
 
 onUnmounted(() => {
   clearInterval(timer)
   document.removeEventListener('visibilitychange', onVisible)
   document.removeEventListener('keydown', onKeydown)
+  document.removeEventListener('mousedown', onDocMouseDown)
+  window.removeEventListener('scroll', closeContextMenu, true)
+  window.removeEventListener('resize', closeContextMenu)
   document.body.style.overflow = ''
 })
 </script>
@@ -1619,6 +1754,60 @@ onUnmounted(() => {
 }
 .lightbox-nav.next {
   right: 18px;
+}
+
+/* ================= 消息右键菜单 ================= */
+.ctx-menu {
+  position: fixed;
+  z-index: 130;
+  min-width: 168px;
+  padding: 5px;
+  border-radius: 14px;
+  border: 2px solid var(--line-strong);
+  background: var(--surface);
+  box-shadow: 0 16px 36px -16px rgb(70 48 20 / 0.45), 0 3px 0 0 rgb(224 210 182 / 0.7);
+  animation: ctx-in 0.12s ease-out;
+}
+@keyframes ctx-in {
+  from { opacity: 0; transform: translateY(-3px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.ctx-hint {
+  max-width: 200px;
+  padding: 3px 9px 5px;
+  margin-bottom: 3px;
+  border-bottom: 1.5px dashed var(--line);
+  color: var(--ink-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink-body);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.ctx-item:hover {
+  background: var(--surface-2);
+}
+.ctx-item.danger {
+  color: var(--danger);
+}
+.ctx-item.danger:hover {
+  background: rgb(215 87 87 / 0.1);
 }
 
 /* ================= 响应式 ================= */

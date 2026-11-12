@@ -111,6 +111,51 @@ func TestMsgLogSessionsRoute(t *testing.T) {
 	}
 }
 
+// TestMsgLogDeleteRoute 右键删除单条消息日志：ID 透传给数据源，未启用 /
+// 缺参 / 非法参数 / 记录不存在各自返回合适的错误码。
+func TestMsgLogDeleteRoute(t *testing.T) {
+	var gotID uint64
+	s := &Server{opt: Options{
+		Logger: slog.Default(),
+		MsgLogDelete: func(id uint64) bool {
+			gotID = id
+			return id == 9
+		},
+	}}
+	rec := httptest.NewRecorder()
+	s.handleMsgLogDelete(rec, httptest.NewRequest("DELETE", "/api/msglogs?id=9", nil))
+	if rec.Code != http.StatusOK || gotID != 9 {
+		t.Fatalf("status = %d, id = %d, body = %s", rec.Code, gotID, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Fatalf("响应缺少 ok: %s", rec.Body.String())
+	}
+
+	// 记录不存在（数据源返回 false）→ 404
+	rec = httptest.NewRecorder()
+	s.handleMsgLogDelete(rec, httptest.NewRequest("DELETE", "/api/msglogs?id=8", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("记录不存在应返回 404, got %d", rec.Code)
+	}
+
+	// 缺少 id / 非法 id → 400
+	for _, query := range []string{"", "?id=abc", "?id=0"} {
+		rec = httptest.NewRecorder()
+		s.handleMsgLogDelete(rec, httptest.NewRequest("DELETE", "/api/msglogs"+query, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("query %q 应返回 400, got %d", query, rec.Code)
+		}
+	}
+
+	// 数据源未提供删除能力 → 404
+	empty := &Server{opt: Options{Logger: slog.Default()}}
+	rec = httptest.NewRecorder()
+	empty.handleMsgLogDelete(rec, httptest.NewRequest("DELETE", "/api/msglogs?id=9", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("未启用删除应返回 404, got %d", rec.Code)
+	}
+}
+
 // TestWritePagedLogsNil typed nil 切片也应序列化为空数组，避免前端拿到 null。
 func TestWritePagedLogsNil(t *testing.T) {
 	rec := httptest.NewRecorder()

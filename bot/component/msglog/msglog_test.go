@@ -1,11 +1,12 @@
 package msglog_test
 
 import (
+	"log/slog"
+	"strconv"
 	"testing"
 
 	"github.com/jeanhua/AniaBot/bot/component/msglog"
 	"github.com/jeanhua/AniaBot/bot/core"
-	"log/slog"
 )
 
 func newStore() *core.AniaMemoryStorage {
@@ -277,5 +278,172 @@ func TestRestartWithSameStore(t *testing.T) {
 	}
 	if entries[0].ID != 2 || entries[1].ID != 1 {
 		t.Fatalf("重启后 ID 未续接: %+v", entries)
+	}
+}
+
+// TestDelete 删除单条日志：读取接口不再返回它，但 ID ↔ 列表偏移的映射保持
+// 不变（其余日志的 ID、顺序与分页游标都不受影响）。
+func TestDelete(t *testing.T) {
+	r := msglog.New(newStore(), 0)
+	for _, text := range []string{"a", "b", "c", "d", "e"} {
+		r.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", UserId: "qq:9", Text: text})
+	}
+
+	if !r.Delete(3) {
+		t.Fatal("Delete(3) 应成功")
+	}
+	if r.Delete(3) {
+		t.Fatal("重复删除应返回 false")
+	}
+	for _, id := range []uint64{0, 99} {
+		if r.Delete(id) {
+			t.Fatalf("Delete(%d) 不应成功", id)
+		}
+	}
+	if _, ok := r.Get(3); ok {
+		t.Fatal("已删除的日志不应能按 ID 取回")
+	}
+	if e, ok := r.Get(2); !ok || e.Text != "b" {
+		t.Fatalf("Get(2) = %+v, %v", e, ok)
+	}
+
+	entries := r.Recent(0)
+	if len(entries) != 4 {
+		t.Fatalf("删除后应剩 4 条，实际 %d: %+v", len(entries), entries)
+	}
+	want := []uint64{5, 4, 2, 1}
+	for i, e := range entries {
+		if e.ID != want[i] {
+			t.Fatalf("删除后 ID 顺序错误: %+v", entries)
+		}
+	}
+
+	// 分页游标按 ID 换算偏移，删除不应让更旧的日志整体错位
+	if p := r.Page(2, 0); len(p) != 2 || p[0].ID != 5 || p[1].ID != 4 {
+		t.Fatalf("第一页错误: %+v", p)
+	}
+	if p := r.Page(2, 4); len(p) != 2 || p[0].ID != 2 || p[1].ID != 1 {
+		t.Fatalf("第二页应跳过已删除的 3: %+v", p)
+	}
+	if p := r.Page(2, 2); len(p) != 1 || p[0].ID != 1 {
+		t.Fatalf("第三页错误: %+v", p)
+	}
+}
+
+// TestDeletePageFillsGap 删除留下的空缺由更旧的日志补齐：面板按 limit+1 判断
+// 是否还有下一页，条数不足会被误判成「没有更早的消息」。
+func TestDeletePageFillsGap(t *testing.T) {
+	r := msglog.New(newStore(), 20)
+	for _, text := range []string{"a", "b", "c", "d", "e", "f"} {
+		r.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", Text: text})
+	}
+	if !r.Delete(4) {
+		t.Fatal("Delete(4) 失败")
+	}
+	p := r.Page(3, 0)
+	if len(p) != 3 || p[0].ID != 6 || p[1].ID != 5 || p[2].ID != 3 {
+		t.Fatalf("分页未跳过墓碑: %+v", p)
+	}
+}
+
+// TestDeleteLargeGap 成片删除（墓碑超过一个扫描批次）时仍能凑满一页，
+// 并正确判断后面没有更早的日志。
+func TestDeleteLargeGap(t *testing.T) {
+	r := msglog.New(newStore(), 0)
+	for i := 1; i <= 100; i++ {
+		r.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", Text: strconv.Itoa(i)})
+	}
+	// 只保留 50~59，其余全部删除：前面有 40 个连续墓碑
+	for id := uint64(1); id <= 100; id++ {
+		if id >= 50 && id <= 59 {
+			continue
+		}
+		if !r.Delete(id) {
+			t.Fatalf("Delete(%d) 失败", id)
+		}
+	}
+	p := r.Page(10, 0)
+	if len(p) != 10 || p[0].ID != 59 || p[9].ID != 50 {
+		t.Fatalf("跨批扫描错误: %+v", p)
+	}
+	if p := r.Page(11, 0); len(p) != 10 {
+		t.Fatalf("后面已无日志时不应多返回条目: %+v", p)
+	}
+	if p := r.Page(5, 55); len(p) != 5 || p[0].ID != 54 {
+		t.Fatalf("游标落在墓碑上应继续向前凑满一页: %+v", p)
+	}
+}
+
+// TestDeleteUpdatesSessions 删除会影响会话摘要与条数：最新一条被删后摘要回退
+// 到前一条；整个会话的日志都被删后会话从侧栏消失。
+func TestDeleteUpdatesSessions(t *testing.T) {
+	r := msglog.New(newStore(), 0)
+	r.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", UserId: "qq:10", Nickname: "小明", Text: "第一条"})
+	r.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", UserId: "qq:11", Nickname: "阿白", Text: "第二条"})
+	r.Add(msglog.Entry{Type: msglog.TypeFriend, UserId: "qq:20", Nickname: "小红", Text: "私聊"})
+
+	_ = r.Sessions() // 先建立索引，验证删除后会重建而不是留着旧摘要
+	if !r.Delete(2) {
+		t.Fatal("Delete(2) 失败")
+	}
+	sessions := r.Sessions()
+	if len(sessions) != 2 {
+		t.Fatalf("会话数 = %d, want 2: %+v", len(sessions), sessions)
+	}
+	var group *msglog.Session
+	for i := range sessions {
+		if sessions[i].Key == "g:qq:1" {
+			group = &sessions[i]
+		}
+	}
+	if group == nil {
+		t.Fatalf("群会话丢失: %+v", sessions)
+	}
+	if group.Count != 1 || group.LastID != 1 || group.LastText != "第一条" || group.Name != "小明" {
+		t.Fatalf("删除最新一条后会话摘要未回退: %+v", *group)
+	}
+
+	// 群会话的最后一条也删掉后，会话不应再出现在侧栏
+	if !r.Delete(1) {
+		t.Fatal("Delete(1) 失败")
+	}
+	sessions = r.Sessions()
+	if len(sessions) != 1 || sessions[0].Key != "f:qq:20" {
+		t.Fatalf("空会话应消失: %+v", sessions)
+	}
+	if p := r.PageSession("g:qq:1", 10, 0, 0); len(p) != 0 {
+		t.Fatalf("已清空的会话分页应为空: %+v", p)
+	}
+}
+
+// TestDeletePersistsAcrossRestart 墓碑写入存储：redis 驱动下重启（新 Recorder）
+// 后已删除的日志不应重新出现，会话索引重建时同样跳过它们。
+func TestDeletePersistsAcrossRestart(t *testing.T) {
+	store := newStore()
+	r1 := msglog.New(store, 0)
+	r1.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", UserId: "qq:9", Text: "一"})
+	r1.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", UserId: "qq:9", Text: "二"})
+	r1.Add(msglog.Entry{Type: msglog.TypeFriend, UserId: "qq:2", Text: "私聊"})
+	if !r1.Delete(2) {
+		t.Fatal("Delete(2) 失败")
+	}
+
+	r2 := msglog.New(store, 0)
+	entries := r2.Recent(0)
+	if len(entries) != 2 || entries[0].Text != "私聊" || entries[1].Text != "一" {
+		t.Fatalf("重启后已删除的日志重新出现: %+v", entries)
+	}
+	for _, s := range r2.Sessions() {
+		if s.Key == "g:qq:1" && (s.Count != 1 || s.LastID != 1 || s.LastText != "一") {
+			t.Fatalf("重启后会话索引未跳过墓碑: %+v", s)
+		}
+	}
+	// 重启后 ID 计数器续接，仍可继续删除
+	r2.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", Text: "三"})
+	if !r2.Delete(4) {
+		t.Fatal("重启后删除失败")
+	}
+	if e, ok := r2.Get(3); !ok || e.Text != "私聊" {
+		t.Fatalf("重启后 Get(3) = %+v, %v", e, ok)
 	}
 }

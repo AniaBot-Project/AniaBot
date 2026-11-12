@@ -62,6 +62,9 @@ const (
 	systemSessionKey = "n:system" // 系统通知会话键
 	// lastTextMaxRunes 会话预览文本的截断长度：侧栏只展示一行，无需传输全文。
 	lastTextMaxRunes = 100
+	// minPageBatch 分页扫描的最小批量：日志被删除后成为墓碑，仍需占一个列表
+	// 槽位，逐条读取会让「翻一页」变成多次存储往返。
+	minPageBatch = 32
 )
 
 // Media 消息中的媒体 / 文件，供面板在聊天气泡内联展示图片、提供文件下载。
@@ -92,6 +95,11 @@ type Entry struct {
 	Text      string    `json:"text"`                 // 消息内容 / 通知描述
 	Media     []Media   `json:"media,omitempty"`      // 消息内的图片 / 文件（按出现顺序）
 	MessageId string    `json:"message_id,omitempty"` // 平台消息 ID（媒体地址过期时用于重新拉取消息）
+
+	// Deleted 已删除标记：面板删除单条日志时不移除列表元素（分页游标按
+	// 「偏移 = seq - ID」换算，移除会让之后所有日志整体错位），而是把该位置
+	// 覆盖成墓碑条目，所有读取接口统一过滤。墓碑随容量淘汰自然清理。
+	Deleted bool `json:"deleted,omitempty"`
 }
 
 // SessionKey 返回日志所属的会话键，面板用它把消息归类到群聊 / 私聊 / 系统通知：
@@ -214,7 +222,11 @@ func (r *Recorder) Add(e Entry) {
 }
 
 // indexLocked 把一条日志并入会话索引；调用方需持有 r.mu。
+// 已删除的墓碑条目不进索引（重建索引时会整体跳过它们）。
 func (r *Recorder) indexLocked(e Entry) {
+	if e.Deleted {
+		return
+	}
 	key := e.SessionKey()
 	st := r.sessions[key]
 	if st == nil {
@@ -324,19 +336,50 @@ func (r *Recorder) Sessions() []Session {
 }
 
 // Recent 返回最近 limit 条日志（新在前）。limit<=0 时返回全部。
+// 已删除的日志不返回，缺口由更旧的日志补齐。
 func (r *Recorder) Recent(limit int) []Entry {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if limit <= 0 || limit > int(r.max) {
 		limit = int(r.max)
 	}
-	items, ok := r.store.LRange(context.Background(), entriesKey, 0, int64(limit)-1)
-	if !ok {
-		return nil
+	return r.pageLocked(0, limit)
+}
+
+// Delete 删除一条日志，返回是否实际删除（ID 不存在或已被删除时返回 false）。
+//
+// 删除只影响面板的留存日志，不会撤回平台上的原消息。实现上用墓碑覆盖原条目
+// 而不是移除元素：分页游标按「偏移 = seq - ID」换算，移除会让之后所有日志的
+// 偏移整体错位；墓碑仍占列表槽位，读取时统一过滤，并随容量淘汰自然清理。
+func (r *Recorder) Delete(id uint64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if id == 0 || id > r.seq {
+		return false
 	}
-	return decodeEntries(items)
+	ctx := context.Background()
+	offset := int64(r.seq - id)
+	item, ok := r.store.LIndex(ctx, entriesKey, offset)
+	if !ok {
+		return false
+	}
+	entries := decodeEntries([]any{item})
+	if len(entries) == 0 || entries[0].ID != id || entries[0].Deleted {
+		// 偏移与 ID 不一致（存储被外部改写）或已删除：不做二次覆盖
+		return false
+	}
+	if !r.store.LSet(ctx, entriesKey, offset, Entry{ID: id, Deleted: true}) {
+		return false
+	}
+	// 会话索引的条数与最新摘要都会受影响：置为待重建，下次查询时按存储重扫
+	// （墓碑被跳过）。删除是低频的人工操作，重建代价可以接受。
+	r.sessionsRead = false
+	return true
 }
 
 // Get 按日志 ID 取回单条日志，供面板按需重新解析媒体地址（媒体 URL 过期时
-// 需要拿到原消息 ID / 文件 ID）。日志已被容量淘汰或 ID 不存在时返回 false。
+// 需要拿到原消息 ID / 文件 ID）。日志已被容量淘汰、已被删除或 ID 不存在时
+// 返回 false。
 func (r *Recorder) Get(id uint64) (Entry, bool) {
 	if id == 0 {
 		return Entry{}, false
@@ -352,7 +395,7 @@ func (r *Recorder) Get(id uint64) (Entry, bool) {
 		return Entry{}, false
 	}
 	entries := decodeEntries(items)
-	if len(entries) == 0 || entries[0].ID != id {
+	if len(entries) == 0 || entries[0].ID != id || entries[0].Deleted {
 		// 列表偏移与 seq 不一致（存储被裁剪 / 外部写入）时不返回错误数据
 		return Entry{}, false
 	}
@@ -361,6 +404,7 @@ func (r *Recorder) Get(id uint64) (Entry, bool) {
 
 // Page 返回一页日志（新在前），供面板滚动分页使用：beforeID>0 时仅返回
 // ID 小于它的更旧日志，否则从最新开始。limit<=0 时取容量上限。
+// 已删除的日志不返回，缺口由更旧的日志补齐。
 //
 // 列表按新在前排列且 ID 连续自增，索引 i 处的条目 ID 为 seq-i，
 // 因此可直接把游标换算为列表偏移，无需全量扫描。
@@ -376,11 +420,42 @@ func (r *Recorder) Page(limit int, beforeID uint64) []Entry {
 	if beforeID > 0 && beforeID <= r.seq {
 		start = int64(r.seq - beforeID + 1)
 	}
-	items, ok := r.store.LRange(context.Background(), entriesKey, start, start+int64(limit)-1)
-	if !ok {
-		return nil
+	return r.pageLocked(start, limit)
+}
+
+// pageLocked 从列表偏移 start 起按「新 → 旧」扫描，跳过已删除的墓碑条目，
+// 收集最多 limit 条有效日志；调用方需持有 r.mu（偏移由 seq 换算）。
+func (r *Recorder) pageLocked(start int64, limit int) []Entry {
+	if start < 0 {
+		start = 0
 	}
-	return decodeEntries(items)
+	out := make([]Entry, 0, limit)
+	ctx := context.Background()
+	offset := start
+	for len(out) < limit {
+		batch := int64(limit - len(out))
+		if batch < minPageBatch {
+			batch = minPageBatch
+		}
+		items, ok := r.store.LRange(ctx, entriesKey, offset, offset+batch-1)
+		if !ok || len(items) == 0 {
+			break
+		}
+		for _, e := range decodeEntries(items) {
+			if e.Deleted {
+				continue
+			}
+			out = append(out, e)
+			if len(out) == limit {
+				break
+			}
+		}
+		if int64(len(items)) < batch {
+			break // 已读到列表末尾
+		}
+		offset += int64(len(items))
+	}
+	return out
 }
 
 // PageSession 返回指定会话的一页日志（新在前）：
@@ -441,7 +516,14 @@ func (r *Recorder) fetchByIDs(seq uint64, ids []uint64) []Entry {
 		end := seq - ids[j-1]
 		items, ok := r.store.LRange(ctx, entriesKey, int64(start), int64(end))
 		if ok {
-			out = append(out, decodeEntries(items)...)
+			// 索引理论上不含墓碑，这里仍按存储实际内容过滤一次（索引重建前
+			// 删掉的条目可能还留在快照里）
+			for _, e := range decodeEntries(items) {
+				if e.Deleted {
+					continue
+				}
+				out = append(out, e)
+			}
 		}
 		i = j
 	}

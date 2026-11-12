@@ -92,6 +92,15 @@ func (p *LogPlugin) MsgLogSessionPage(session string, limit int, beforeID, after
 	return p.recorder.PageSession(session, limit, beforeID, afterID)
 }
 
+// MsgLogDelete 删除面板里的一条消息日志（实现 adminpanel.MsgLogDeleteSource），
+// 供「消息日志」页右键删除单条记录。只删本地留存，不影响平台上的原消息。
+func (p *LogPlugin) MsgLogDelete(id uint64) bool {
+	if p.recorder == nil {
+		return false
+	}
+	return p.recorder.Delete(id)
+}
+
 // add 记录一条消息日志；recorder 未初始化（Start 之前）时忽略。
 func (p *LogPlugin) add(e msglog.Entry) {
 	if p.recorder == nil {

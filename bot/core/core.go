@@ -515,6 +515,7 @@ func (ania *AniaBot) startAdminPanel() {
 	var msgLogSessionsFn func() []msglog.Session
 	var msgLogSessionFn func(session string, limit int, beforeID, afterID uint64) []msglog.Entry
 	var msgLogMediaFn func(entryID uint64, index int) (string, bool)
+	var msgLogDeleteFn func(id uint64) bool
 	var skillSrc adminpanel.SkillSource
 	var memorySrc adminpanel.MemorySource
 	var kbSrc adminpanel.KnowledgeBaseSource
@@ -541,6 +542,9 @@ func (ania *AniaBot) startAdminPanel() {
 		}
 		if src, ok := p.(adminpanel.MsgLogMediaSource); ok {
 			msgLogMediaFn = src.MsgLogMediaURL
+		}
+		if src, ok := p.(adminpanel.MsgLogDeleteSource); ok {
+			msgLogDeleteFn = src.MsgLogDelete
 		}
 		if src, ok := p.(adminpanel.SkillSource); ok {
 			skillSrc = src
@@ -634,6 +638,7 @@ func (ania *AniaBot) startAdminPanel() {
 		MsgLogSessions:    msgLogSessionsFn,
 		MsgLogSessionPage: msgLogSessionFn,
 		MsgLogMedia:       msgLogMediaFn,
+		MsgLogDelete:      msgLogDeleteFn,
 		Skills:            skillSrc,
 		Memories:          memorySrc,
 		Knowledge:         kbSrc,
