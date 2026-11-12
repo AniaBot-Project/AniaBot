@@ -43,7 +43,7 @@ for _, p := range ania.plugins {
 
 | 面板页面 | 接口 | 内置提供者 |
 | --- | --- | --- |
-| 消息日志 | `adminpanel.MsgLogSource` + `adminpanel.MsgLogSessionSource` + `adminpanel.MsgLogDeleteSource`（均后两项可选） | 日志打印插件（`pluginlog`） |
+| 消息日志 | `adminpanel.MsgLogSource` + `adminpanel.MsgLogSessionSource` + 删除类的 `adminpanel.MsgLogDeleteSource` / `adminpanel.MsgLogSessionDeleteSource`（后三项可选） | 日志打印插件（`pluginlog`） |
 | 任务日志 | `adminpanel.TaskLogSource` | AI 对话插件（clock） |
 | 定时任务 | `adminpanel.ClockTaskSource` | AI 对话插件（clock） |
 | 技能管理 | `adminpanel.SkillSource` + `adminpanel.SkillToggleSource`（可选） | AI 对话插件 |
@@ -81,6 +81,12 @@ type MsgLogMediaSource interface {
 type MsgLogDeleteSource interface {
     // 返回是否实际删除（日志不存在 / 已被容量淘汰 / 已删除时为 false）
     MsgLogDelete(id uint64) bool
+}
+
+// 可选：删除整个会话的日志（面板右键会话「删除会话记录」）。未实现时该入口不可用。
+type MsgLogSessionDeleteSource interface {
+    // 删除会话 session（g:/f:/n:system）的全部日志，返回删除条数（无记录时为 0）
+    MsgLogDeleteSession(session string) int
 }
 ```
 
@@ -288,7 +294,7 @@ func main() {
 
 - **方法缺一不可**：`adminpanel.XxxSource` 是完整接口，实现时必须实现全部方法（不需要的能力返回空值/错误即可）
 - **nil 安全**：面板会在数据源为 nil 时返回空数据并正常渲染，插件内部初始化失败时返回 nil 即可，不要 panic
-- **即时生效**：`MemorySource` / `SkillSource` / `KnowledgeBaseSource` / `TeamSource` / `QuotaSource` 的改动由插件自己落盘，**无需重启**；`TaskLogSource` / `MsgLogSource` / `QueryLogSource` 是查询接口，同样实时反映插件当前数据；`MsgLogDeleteSource` 由面板提交后立即生效，插件负责自行持久化删除结果（用 `msglog.Recorder` 的 `Delete` 即可）
+- **即时生效**：`MemorySource` / `SkillSource` / `KnowledgeBaseSource` / `TeamSource` / `QuotaSource` 的改动由插件自己落盘，**无需重启**；`TaskLogSource` / `MsgLogSource` / `QueryLogSource` 是查询接口，同样实时反映插件当前数据；`MsgLogDeleteSource` / `MsgLogSessionDeleteSource` 由面板提交后立即生效，插件负责自行持久化删除结果（用 `msglog.Recorder` 的 `Delete` / `DeleteSession` 即可）
 - **数据量控制**：分页类接口遵循「新在前 + `before` 游标」约定，返回条数不要超过 `limit`；记录型组件（`msglog` / `tasklog` / `querylog`）内部已实现容量淘汰，直接复用即可
 - **与 `bot.QQ` 同款惯例**：这是「可选接口 + 类型断言」能力的又一应用，探测不到就优雅降级（页面空数据），框架与面板代码零改动
 

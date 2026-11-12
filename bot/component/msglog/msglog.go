@@ -359,22 +359,67 @@ func (r *Recorder) Delete(id uint64) bool {
 	}
 	ctx := context.Background()
 	offset := int64(r.seq - id)
+	// 先读回该位置校验 ID：偏移对不上（存储被外部改写）时宁可不删，也不能误删别条
 	item, ok := r.store.LIndex(ctx, entriesKey, offset)
 	if !ok {
 		return false
 	}
 	entries := decodeEntries([]any{item})
 	if len(entries) == 0 || entries[0].ID != id || entries[0].Deleted {
-		// 偏移与 ID 不一致（存储被外部改写）或已删除：不做二次覆盖
 		return false
 	}
-	if !r.store.LSet(ctx, entriesKey, offset, Entry{ID: id, Deleted: true}) {
+	if !r.store.LSet(ctx, entriesKey, offset, tombstoneEntry(id)) {
 		return false
 	}
-	// 会话索引的条数与最新摘要都会受影响：置为待重建，下次查询时按存储重扫
-	// （墓碑被跳过）。删除是低频的人工操作，重建代价可以接受。
-	r.sessionsRead = false
+	r.invalidateSessionsLocked()
 	return true
+}
+
+// DeleteSession 删除一个会话（g:/f:/n:system）的全部日志，返回删除条数。
+//
+// 与 Delete 一样用墓碑覆盖，保持 ID ↔ 列表偏移的映射不变；会话被清空后从
+// 面板侧栏消失，之后该会话收到的新消息仍会正常记录。
+func (r *Recorder) DeleteSession(session string) int {
+	if session == "" {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ensureSessionsLocked()
+	st := r.sessions[session]
+	if st == nil || len(st.ids) == 0 {
+		return 0
+	}
+	// 索引里的 ID 都落在容量窗口内，偏移可直接由 seq 换算；成百上千条逐条读回
+	// 校验会产生同样数量的存储往返，这里只在越界时跳过（LSet 自己也会拒绝）。
+	ctx := context.Background()
+	ids := append([]uint64(nil), st.ids...)
+	removed := 0
+	for _, id := range ids {
+		if id == 0 || id > r.seq {
+			continue
+		}
+		if r.store.LSet(ctx, entriesKey, int64(r.seq-id), tombstoneEntry(id)) {
+			removed++
+		}
+	}
+	if removed == 0 {
+		return 0
+	}
+	r.invalidateSessionsLocked()
+	return removed
+}
+
+// invalidateSessionsLocked 标记会话索引待重建：条数 / 最新摘要都可能因删除
+// 而变化，下次查询时按存储重扫（墓碑被跳过）。删除是低频的人工操作，
+// 重建代价可以接受。
+func (r *Recorder) invalidateSessionsLocked() {
+	r.sessionsRead = false
+}
+
+// tombstoneEntry 已删除日志的占位条目：只保留 ID，其余字段留空。
+func tombstoneEntry(id uint64) Entry {
+	return Entry{ID: id, Deleted: true}
 }
 
 // Get 按日志 ID 取回单条日志，供面板按需重新解析媒体地址（媒体 URL 过期时

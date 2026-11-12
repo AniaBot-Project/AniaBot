@@ -516,6 +516,7 @@ func (ania *AniaBot) startAdminPanel() {
 	var msgLogSessionFn func(session string, limit int, beforeID, afterID uint64) []msglog.Entry
 	var msgLogMediaFn func(entryID uint64, index int) (string, bool)
 	var msgLogDeleteFn func(id uint64) bool
+	var msgLogSessionDeleteFn func(session string) int
 	var skillSrc adminpanel.SkillSource
 	var memorySrc adminpanel.MemorySource
 	var kbSrc adminpanel.KnowledgeBaseSource
@@ -545,6 +546,9 @@ func (ania *AniaBot) startAdminPanel() {
 		}
 		if src, ok := p.(adminpanel.MsgLogDeleteSource); ok {
 			msgLogDeleteFn = src.MsgLogDelete
+		}
+		if src, ok := p.(adminpanel.MsgLogSessionDeleteSource); ok {
+			msgLogSessionDeleteFn = src.MsgLogDeleteSession
 		}
 		if src, ok := p.(adminpanel.SkillSource); ok {
 			skillSrc = src
@@ -629,28 +633,29 @@ func (ania *AniaBot) startAdminPanel() {
 			}
 			return strings.Join(parts, " ")
 		},
-		AdapterStatuses:   ania.AdapterStatuses,
-		TaskLogs:          taskLogFn,
-		TaskLogsStats:     taskLogStatsFn,
-		TaskLogsClear:     taskLogClearFn,
-		Clocks:            clockSrc,
-		MsgLogs:           msgLogFn,
-		MsgLogSessions:    msgLogSessionsFn,
-		MsgLogSessionPage: msgLogSessionFn,
-		MsgLogMedia:       msgLogMediaFn,
-		MsgLogDelete:      msgLogDeleteFn,
-		Skills:            skillSrc,
-		Memories:          memorySrc,
-		Knowledge:         kbSrc,
-		Teams:             teamSrc,
-		Quota:             quotaSrc,
-		QueryLogs:         queryLogFn,
-		QueryLogsStats:    queryLogStatsFn,
-		QueryLogsClear:    queryLogClearFn,
-		ConsoleLogs:       consollog.Page,
-		QRLogins:          qrLogins,
-		Marketplace:       marketplace.New(ania.configStore, Logger().WithGroup("Marketplace"), marketplace.WithUnloader(ania)),
-		Logger:            Logger().WithGroup("AdminPanel"),
+		AdapterStatuses:     ania.AdapterStatuses,
+		TaskLogs:            taskLogFn,
+		TaskLogsStats:       taskLogStatsFn,
+		TaskLogsClear:       taskLogClearFn,
+		Clocks:              clockSrc,
+		MsgLogs:             msgLogFn,
+		MsgLogSessions:      msgLogSessionsFn,
+		MsgLogSessionPage:   msgLogSessionFn,
+		MsgLogMedia:         msgLogMediaFn,
+		MsgLogDelete:        msgLogDeleteFn,
+		MsgLogDeleteSession: msgLogSessionDeleteFn,
+		Skills:              skillSrc,
+		Memories:            memorySrc,
+		Knowledge:           kbSrc,
+		Teams:               teamSrc,
+		Quota:               quotaSrc,
+		QueryLogs:           queryLogFn,
+		QueryLogsStats:      queryLogStatsFn,
+		QueryLogsClear:      queryLogClearFn,
+		ConsoleLogs:         consollog.Page,
+		QRLogins:            qrLogins,
+		Marketplace:         marketplace.New(ania.configStore, Logger().WithGroup("Marketplace"), marketplace.WithUnloader(ania)),
+		Logger:              Logger().WithGroup("AdminPanel"),
 	})
 	go srv.Run()
 }

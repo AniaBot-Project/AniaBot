@@ -101,6 +101,15 @@ func (p *LogPlugin) MsgLogDelete(id uint64) bool {
 	return p.recorder.Delete(id)
 }
 
+// MsgLogDeleteSession 删除某个会话的全部日志（实现
+// adminpanel.MsgLogSessionDeleteSource），供面板右键会话「删除会话记录」。
+func (p *LogPlugin) MsgLogDeleteSession(session string) int {
+	if p.recorder == nil {
+		return 0
+	}
+	return p.recorder.DeleteSession(session)
+}
+
 // add 记录一条消息日志；recorder 未初始化（Start 之前）时忽略。
 func (p *LogPlugin) add(e msglog.Entry) {
 	if p.recorder == nil {

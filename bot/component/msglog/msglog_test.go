@@ -416,6 +416,62 @@ func TestDeleteUpdatesSessions(t *testing.T) {
 	}
 }
 
+// TestDeleteSession 整会话删除：只删目标会话的记录，其余会话不受影响；清空后
+// 会话从侧栏消失，但之后同一会话的新消息仍会正常记录。
+func TestDeleteSession(t *testing.T) {
+	store := newStore()
+	r := msglog.New(store, 0)
+	// 群 1、群 2 交错发言（ID 1~6），再加一条私聊（ID 7）
+	for i := 0; i < 6; i++ {
+		group := "qq:1"
+		if i%2 == 1 {
+			group = "qq:2"
+		}
+		r.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: group, UserId: "qq:9", Text: "m" + strconv.Itoa(i)})
+	}
+	r.Add(msglog.Entry{Type: msglog.TypeFriend, UserId: "qq:2", Text: "私聊"})
+
+	_ = r.Sessions() // 先建立索引，验证删除后会按存储重建
+	if removed := r.DeleteSession("g:qq:1"); removed != 3 {
+		t.Fatalf("删除条数 = %d, want 3", removed)
+	}
+	for _, e := range r.Recent(0) {
+		if e.GroupId == "qq:1" {
+			t.Fatalf("群 1 的日志未删除: %+v", e)
+		}
+	}
+	if p := r.PageSession("g:qq:1", 10, 0, 0); len(p) != 0 {
+		t.Fatalf("已清空的会话不应再有分页: %+v", p)
+	}
+	if sessions := r.Sessions(); len(sessions) != 2 {
+		t.Fatalf("会话数 = %d, want 2（群 1 已清空应消失）: %+v", len(sessions), sessions)
+	}
+	// 墓碑不会打乱 ID ↔ 偏移：最新三条仍是 7 / 6 / 4（5 属于已删除的群 1）
+	if p := r.Page(3, 0); len(p) != 3 || p[0].ID != 7 || p[2].ID != 4 {
+		t.Fatalf("删除后分页错误: %+v", p)
+	}
+	// 重复删除 / 未知会话返回 0
+	if n := r.DeleteSession("g:qq:1"); n != 0 {
+		t.Fatalf("重复删除应返回 0, got %d", n)
+	}
+	if n := r.DeleteSession("g:qq:404"); n != 0 {
+		t.Fatalf("未知会话应返回 0, got %d", n)
+	}
+	if n := r.DeleteSession(""); n != 0 {
+		t.Fatalf("空会话键应返回 0, got %d", n)
+	}
+
+	// 重启（新 Recorder 读同一存储）后删除状态保持，新消息重新进入该会话
+	r2 := msglog.New(store, 0)
+	if sessions := r2.Sessions(); len(sessions) != 2 {
+		t.Fatalf("重启后会话数 = %d, want 2: %+v", len(sessions), sessions)
+	}
+	r2.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", UserId: "qq:9", Text: "新消息"})
+	if p := r2.PageSession("g:qq:1", 10, 0, 0); len(p) != 1 || p[0].Text != "新消息" {
+		t.Fatalf("新消息应重新进入该会话: %+v", p)
+	}
+}
+
 // TestDeletePersistsAcrossRestart 墓碑写入存储：redis 驱动下重启（新 Recorder）
 // 后已删除的日志不应重新出现，会话索引重建时同样跳过它们。
 func TestDeletePersistsAcrossRestart(t *testing.T) {

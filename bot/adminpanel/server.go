@@ -122,13 +122,22 @@ type MsgLogMediaSource interface {
 	MsgLogMediaURL(entryID uint64, index int) (string, bool)
 }
 
-// MsgLogDeleteSource 可选接口：面板可删除单条消息日志（「消息日志」页右键
-// 「删除消息」）。删除只影响面板留存的记录，不会撤回平台上的原消息。
+// MsgLogDeleteSource 可选接口：面板可删除消息日志（「消息日志」页右键删除）。
+// 删除只影响面板留存的记录，不会撤回平台上的原消息。
 // 未实现时面板的删除入口不可用（接口返回 404）。
 type MsgLogDeleteSource interface {
 	// MsgLogDelete 删除一条日志，返回是否实际删除
 	// （日志不存在 / 已被容量淘汰 / 已删除时返回 false）。
 	MsgLogDelete(id uint64) bool
+}
+
+// MsgLogSessionDeleteSource 可选接口：面板可删除某个会话（群聊 / 私聊 / 系统
+// 通知）的全部日志记录（「消息日志」页右键会话「删除会话记录」）。
+// 未实现时该入口不可用（接口返回 404）。
+type MsgLogSessionDeleteSource interface {
+	// MsgLogDeleteSession 删除会话 session 的全部日志，返回删除条数
+	// （会话不存在或已无记录时返回 0）。
+	MsgLogDeleteSession(session string) int
 }
 
 // SkillSource 可选接口：插件实现后，面板可对其 AI skill 做列表 / 上传 / 删除
@@ -226,35 +235,36 @@ type KnowledgeBaseSource interface {
 
 // Options 面板依赖。
 type Options struct {
-	Listen            string                                                                   // 监听地址，如 127.0.0.1:7700
-	Config            *configstore.Store                                                       // 配置中心
-	Persistent        storage.PersistentStorage                                                // 根持久化存储（__admin 命名空间存密码哈希）
-	Bot               BotInfo                                                                  // 运行信息来源
-	Contacts          []ContactSource                                                          // 各平台通讯录（群/好友列表）能力来源，可为空
-	Adapter           func() string                                                            // 适配器连接状态描述
-	AdapterDetail     func() string                                                            // 适配器状态详情（最近错误/重试次数，可为 nil）
-	AdapterStatuses   func() []AdapterStatus                                                   // 各平台适配器状态列表（可为 nil）
-	TaskLogs          func(f tasklog.Filter) []tasklog.Entry                                   // AI 定时任务执行日志（可为 nil）
-	TaskLogsStats     func(f tasklog.Filter) []tasklog.StatRow                                 // 定时任务日志的轻量统计行（可为 nil）
-	TaskLogsClear     func(f tasklog.Filter) int                                               // 清除定时任务执行日志（可为 nil）
-	Clocks            ClockTaskSource                                                          // AI 定时任务列表与启停（可为 nil）
-	MsgLogs           func(limit int, beforeID uint64) []msglog.Entry                          // 消息日志（群/好友/通知，可为 nil）
-	MsgLogSessions    func() []msglog.Session                                                  // 消息日志的会话摘要（可为 nil）
-	MsgLogSessionPage func(session string, limit int, beforeID, afterID uint64) []msglog.Entry // 按会话分页（可为 nil）
-	MsgLogMedia       func(entryID uint64, index int) (string, bool)                           // 媒体地址续期（可为 nil）
-	MsgLogDelete      func(id uint64) bool                                                     // 删除单条消息日志（可为 nil）
-	Skills            SkillSource                                                              // AI skill 管理（可为 nil）
-	Memories          MemorySource                                                             // AI 长期记忆管理（可为 nil）
-	Knowledge         KnowledgeBaseSource                                                      // AI 知识库管理（可为 nil）
-	Teams             TeamSource                                                               // Agent 团队管理（可为 nil）
-	Quota             QuotaSource                                                              // 每日 Token 配额管理（可为 nil）
-	Marketplace       *marketplace.Service                                                     // 插件市场服务（可为 nil）
-	QueryLogs         func(f querylog.Filter) []querylog.Entry                                 // AI Query 日志（可为 nil）
-	QueryLogsStats    func(f querylog.Filter) []querylog.StatRow                               // Query 日志的轻量统计行（可为 nil）
-	QueryLogsClear    func(f querylog.Filter) int                                              // 清除 AI Query 日志（可为 nil）
-	ConsoleLogs       func(limit int, beforeID uint64) []consollog.Entry                       // 控制台日志（slog + log 输出，可为 nil）
-	QRLogins          []QRLoginChannel                                                         // 支持扫码登录的平台适配器（如微信；可为 nil）
-	Logger            *slog.Logger
+	Listen              string                                                                   // 监听地址，如 127.0.0.1:7700
+	Config              *configstore.Store                                                       // 配置中心
+	Persistent          storage.PersistentStorage                                                // 根持久化存储（__admin 命名空间存密码哈希）
+	Bot                 BotInfo                                                                  // 运行信息来源
+	Contacts            []ContactSource                                                          // 各平台通讯录（群/好友列表）能力来源，可为空
+	Adapter             func() string                                                            // 适配器连接状态描述
+	AdapterDetail       func() string                                                            // 适配器状态详情（最近错误/重试次数，可为 nil）
+	AdapterStatuses     func() []AdapterStatus                                                   // 各平台适配器状态列表（可为 nil）
+	TaskLogs            func(f tasklog.Filter) []tasklog.Entry                                   // AI 定时任务执行日志（可为 nil）
+	TaskLogsStats       func(f tasklog.Filter) []tasklog.StatRow                                 // 定时任务日志的轻量统计行（可为 nil）
+	TaskLogsClear       func(f tasklog.Filter) int                                               // 清除定时任务执行日志（可为 nil）
+	Clocks              ClockTaskSource                                                          // AI 定时任务列表与启停（可为 nil）
+	MsgLogs             func(limit int, beforeID uint64) []msglog.Entry                          // 消息日志（群/好友/通知，可为 nil）
+	MsgLogSessions      func() []msglog.Session                                                  // 消息日志的会话摘要（可为 nil）
+	MsgLogSessionPage   func(session string, limit int, beforeID, afterID uint64) []msglog.Entry // 按会话分页（可为 nil）
+	MsgLogMedia         func(entryID uint64, index int) (string, bool)                           // 媒体地址续期（可为 nil）
+	MsgLogDelete        func(id uint64) bool                                                     // 删除单条消息日志（可为 nil）
+	MsgLogDeleteSession func(session string) int                                                 // 删除整个会话的消息日志（可为 nil）
+	Skills              SkillSource                                                              // AI skill 管理（可为 nil）
+	Memories            MemorySource                                                             // AI 长期记忆管理（可为 nil）
+	Knowledge           KnowledgeBaseSource                                                      // AI 知识库管理（可为 nil）
+	Teams               TeamSource                                                               // Agent 团队管理（可为 nil）
+	Quota               QuotaSource                                                              // 每日 Token 配额管理（可为 nil）
+	Marketplace         *marketplace.Service                                                     // 插件市场服务（可为 nil）
+	QueryLogs           func(f querylog.Filter) []querylog.Entry                                 // AI Query 日志（可为 nil）
+	QueryLogsStats      func(f querylog.Filter) []querylog.StatRow                               // Query 日志的轻量统计行（可为 nil）
+	QueryLogsClear      func(f querylog.Filter) int                                              // 清除 AI Query 日志（可为 nil）
+	ConsoleLogs         func(limit int, beforeID uint64) []consollog.Entry                       // 控制台日志（slog + log 输出，可为 nil）
+	QRLogins            []QRLoginChannel                                                         // 支持扫码登录的平台适配器（如微信；可为 nil）
+	Logger              *slog.Logger
 }
 
 // Server 面板 HTTP 服务。
@@ -984,10 +994,18 @@ func (s *Server) handleMsgLogSessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-// handleMsgLogDelete 删除单条消息日志（面板「消息日志」页右键「删除消息」）。
-// 查询参数：id（要删除的日志 ID）。只删面板留存的记录，不撤回平台原消息。
-// 响应：{"ok": true, "id": 123}。
+// handleMsgLogDelete 删除消息日志（面板「消息日志」页右键删除）。
+// 查询参数二选一：
+//   - session=g:qq:1 / f:qq:2 / n:system：删除整个会话的日志，
+//     响应 {"ok": true, "session": "...", "removed": N}
+//   - id=123：删除单条日志，响应 {"ok": true, "id": 123}
+//
+// 只删面板留存的记录，不撤回平台原消息。
 func (s *Server) handleMsgLogDelete(w http.ResponseWriter, r *http.Request) {
+	if session := strings.TrimSpace(r.URL.Query().Get("session")); session != "" {
+		s.handleMsgLogSessionDelete(w, session)
+		return
+	}
 	if s.opt.MsgLogDelete == nil {
 		writeError(w, http.StatusNotFound, "删除消息日志未启用")
 		return
@@ -1008,6 +1026,31 @@ func (s *Server) handleMsgLogDelete(w http.ResponseWriter, r *http.Request) {
 	s.opt.Logger.Info("消息日志已通过 Web 面板删除", "id", id)
 	oplog.Record(oplog.CategorySystem, "msg_log_delete", fmt.Sprintf("面板删除消息日志 #%d", id))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id})
+}
+
+// maxMsgLogSessionKeyLen 会话键的长度上限（g:/f: + 平台 ID，n:system），
+// 挡住明显异常的入参。
+const maxMsgLogSessionKeyLen = 128
+
+// handleMsgLogSessionDelete 删除一个会话的全部消息日志。
+func (s *Server) handleMsgLogSessionDelete(w http.ResponseWriter, session string) {
+	if s.opt.MsgLogDeleteSession == nil {
+		writeError(w, http.StatusNotFound, "删除消息日志未启用")
+		return
+	}
+	if len(session) > maxMsgLogSessionKeyLen {
+		writeError(w, http.StatusBadRequest, "会话 ID 过长")
+		return
+	}
+	removed := s.opt.MsgLogDeleteSession(session)
+	if removed <= 0 {
+		writeError(w, http.StatusNotFound, "该会话没有可删除的消息记录")
+		return
+	}
+	s.opt.Logger.Info("消息会话日志已通过 Web 面板删除", "session", session, "removed", removed)
+	oplog.Record(oplog.CategorySystem, "msg_log_session_delete",
+		fmt.Sprintf("面板删除消息会话 %s 的 %d 条记录", session, removed))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "session": session, "removed": removed})
 }
 
 // maxMsgLogMediaBytes 面板媒体代理允许的最大响应体积（64MB）。

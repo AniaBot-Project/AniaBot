@@ -183,6 +183,8 @@ export const api = {
   getMsgLogSessions: () => request('/api/msglogs/sessions'),
   // 删除单条消息日志（面板右键「删除消息」）：只删面板留存记录，不撤回平台原消息
   deleteMsgLog: (id) => request(`/api/msglogs${qs({ id })}`, { method: 'DELETE' }),
+  // 删除整个会话的消息日志（面板右键会话「删除会话记录」），返回 { ok, session, removed }
+  deleteMsgLogSession: (session) => request(`/api/msglogs${qs({ session })}`, { method: 'DELETE' }),
   // 定时任务执行日志分页查询：{ target_type, target_id, task_id, status, start, end, keyword, limit, before }（均可选）
   getTaskLogs: (params = {}) => request(`/api/tasklogs${qs(params)}`),
   // 按当前筛选条件导出定时任务执行日志（JSON 文件下载）

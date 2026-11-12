@@ -156,6 +156,53 @@ func TestMsgLogDeleteRoute(t *testing.T) {
 	}
 }
 
+// TestMsgLogSessionDeleteRoute 右键会话删除：session 透传给数据源并返回删除
+// 条数；会话不存在 / 未启用返回 404，超长会话键返回 400。
+func TestMsgLogSessionDeleteRoute(t *testing.T) {
+	var gotSession string
+	s := &Server{opt: Options{
+		Logger: slog.Default(),
+		MsgLogDeleteSession: func(session string) int {
+			gotSession = session
+			if session == "g:qq:1" {
+				return 3
+			}
+			return 0
+		},
+	}}
+	rec := httptest.NewRecorder()
+	s.handleMsgLogDelete(rec, httptest.NewRequest("DELETE", "/api/msglogs?session=g:qq:1", nil))
+	if rec.Code != http.StatusOK || gotSession != "g:qq:1" {
+		t.Fatalf("status = %d, session = %q, body = %s", rec.Code, gotSession, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"removed":3`) {
+		t.Fatalf("响应缺少删除条数: %s", rec.Body.String())
+	}
+
+	// 会话没有可删记录 → 404
+	rec = httptest.NewRecorder()
+	s.handleMsgLogDelete(rec, httptest.NewRequest("DELETE", "/api/msglogs?session=g:qq:404", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("会话无记录应返回 404, got %d", rec.Code)
+	}
+
+	// 会话键过长 → 400
+	rec = httptest.NewRecorder()
+	long := "g:" + strings.Repeat("9", 200)
+	s.handleMsgLogDelete(rec, httptest.NewRequest("DELETE", "/api/msglogs?session="+url.QueryEscape(long), nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("超长会话键应返回 400, got %d", rec.Code)
+	}
+
+	// 数据源未提供会话删除能力 → 404
+	empty := &Server{opt: Options{Logger: slog.Default()}}
+	rec = httptest.NewRecorder()
+	empty.handleMsgLogDelete(rec, httptest.NewRequest("DELETE", "/api/msglogs?session=g:qq:1", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("未启用会话删除应返回 404, got %d", rec.Code)
+	}
+}
+
 // TestWritePagedLogsNil typed nil 切片也应序列化为空数组，避免前端拿到 null。
 func TestWritePagedLogsNil(t *testing.T) {
 	rec := httptest.NewRecorder()

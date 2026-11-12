@@ -41,6 +41,7 @@
               class="conv-item"
               :class="{ active: activeKey === s.key }"
               @click="selectSession(s.key)"
+              @contextmenu.prevent="openSessionMenu($event, s)"
             >
               <div class="conv-avatar" :style="avatarGradient(sessionAvatarKey(s))">
                 <img
@@ -80,6 +81,7 @@
               class="conv-item"
               :class="{ active: activeKey === s.key }"
               @click="selectSession(s.key)"
+              @contextmenu.prevent="openSessionMenu($event, s)"
             >
               <div class="conv-avatar" :style="avatarGradient(sessionAvatarKey(s))">
                 <img
@@ -119,6 +121,7 @@
               class="conv-item"
               :class="{ active: activeKey === s.key }"
               @click="selectSession(s.key)"
+              @contextmenu.prevent="openSessionMenu($event, s)"
             >
               <div class="conv-avatar system-avatar" :style="avatarGradient('system')">
                 <Icon name="Bell" :size="17" />
@@ -246,7 +249,7 @@
         <span class="foot-sep">·</span>
         <span>最后更新 {{ lastUpdatedText }}</span>
         <span class="foot-sep foot-sep-hint">|</span>
-        <span class="foot-hint">右键消息可复制或删除，回复请前往聊天平台</span>
+        <span class="foot-hint">右键会话可删除记录，右键消息可复制或删除</span>
         <span class="foot-actions">
           <button type="button" @click="jumpToLatest">回到最新</button>
         </span>
@@ -298,7 +301,7 @@
       </Transition>
     </Teleport>
 
-    <!-- 消息右键菜单：复制文本 / 删除消息记录 -->
+    <!-- 右键菜单：消息（复制 / 删除单条）与会话（复制会话 ID / 删除整个会话） -->
     <Teleport to="body">
       <div
         v-if="contextMenu"
@@ -308,14 +311,26 @@
         @mousedown.stop
       >
         <div class="ctx-hint">{{ contextMenuLabel }}</div>
-        <button type="button" class="ctx-item" @click="copyLogText(contextMenu.log)">
-          <Icon name="Copy" :size="13" />
-          复制文本
-        </button>
-        <button type="button" class="ctx-item danger" @click="deleteLog(contextMenu.log)">
-          <Icon name="Trash" :size="13" />
-          删除消息
-        </button>
+        <template v-if="contextMenu.type === 'session'">
+          <button type="button" class="ctx-item" @click="copySessionId(contextMenu.session)">
+            <Icon name="Copy" :size="13" />
+            复制会话 ID
+          </button>
+          <button type="button" class="ctx-item danger" @click="deleteSession(contextMenu.session)">
+            <Icon name="Trash" :size="13" />
+            删除会话记录
+          </button>
+        </template>
+        <template v-else>
+          <button type="button" class="ctx-item" @click="copyLogText(contextMenu.log)">
+            <Icon name="Copy" :size="13" />
+            复制文本
+          </button>
+          <button type="button" class="ctx-item danger" @click="deleteLog(contextMenu.log)">
+            <Icon name="Trash" :size="13" />
+            删除消息
+          </button>
+        </template>
       </div>
     </Teleport>
   </div>
@@ -668,8 +683,10 @@ async function loadSessions() {
 }
 
 async function loadAll({ initial = false } = {}) {
+  const gen = refreshGen
   try {
     const page = await api.getMsgLogs({ limit: PAGE })
+    if (gen !== refreshGen) return // 期间删过消息：旧响应会把已删的条目写回来
     const items = page.items || []
     if (initial || !allLogs.value.length) {
       allLogs.value = keepLatest(items)
@@ -699,9 +716,11 @@ function ensureStore(key) {
 async function loadSession(key) {
   const store = ensureStore(key)
   if (store.loading) return
+  const gen = refreshGen
   store.loading = true
   try {
     const page = await api.getMsgLogs({ session: key, limit: PAGE })
+    if (gen !== refreshGen) return // 期间删过消息：丢弃过期响应
     store.items = keepLatest(page.items || [])
     store.hasMore = !!page.has_more
     store.loaded = true
@@ -713,6 +732,7 @@ async function loadSession(key) {
 
 async function loadOlder() {
   if (loadingMore.value) return
+  const gen = refreshGen
   if (isAll.value) {
     if (!hasMoreAll.value || !allLogs.value.length) return
     loadingMore.value = true
@@ -721,6 +741,7 @@ async function loadOlder() {
     try {
       const oldest = allLogs.value[allLogs.value.length - 1].id
       const page = await api.getMsgLogs({ limit: PAGE, before: oldest })
+      if (gen !== refreshGen) return // 期间删过消息：丢弃过期响应
       const items = (page.items || []).filter((x) => x.id < oldest)
       hasMoreAll.value = !!page.has_more && items.length > 0
       if (items.length) {
@@ -744,6 +765,7 @@ async function loadOlder() {
   try {
     const oldest = store.items[store.items.length - 1].id
     const page = await api.getMsgLogs({ session: key, limit: PAGE, before: oldest })
+    if (gen !== refreshGen) return // 期间删过消息：丢弃过期响应
     const items = (page.items || []).filter((x) => x.id < oldest)
     store.hasMore = !!page.has_more && items.length > 0
     if (items.length) {
@@ -759,7 +781,12 @@ async function loadOlder() {
 
 /* ---------------- 实时刷新 ---------------- */
 
+// refreshGen 数据代次：删除会就地改动列表，在途的刷新 / 翻页响应基于删除前的
+// 数据，写回列表会让已删除的记录重新出现，因此代次变化后一律丢弃旧响应。
+let refreshGen = 0
+
 async function refreshAll() {
+  const gen = refreshGen
   const latest = allLogs.value[0]?.id || 0
   const stick = atBottom()
   let fresh = []
@@ -775,7 +802,7 @@ async function refreshAll() {
     cursor = items[items.length - 1].id
     if (cursor <= latest + 1) break
   }
-  if (!fresh.length) return
+  if (!fresh.length || gen !== refreshGen) return
   allLogs.value = keepLatest([...fresh, ...allLogs.value])
   if (!isAll.value) return // 请求期间已切到会话视图：只更新缓存，不改动当前视图的滚动
   await afterIncoming(fresh.length, stick)
@@ -784,9 +811,11 @@ async function refreshAll() {
 async function refreshSession(key) {
   const store = sessionStore[key]
   if (!store || !store.loaded || store.loading) return
+  const gen = refreshGen
   const latest = store.items[0]?.id || 0
   const stick = atBottom()
   const page = await api.getMsgLogs({ session: key, limit: PAGE, ...(latest ? { after: latest } : {}) })
+  if (gen !== refreshGen) return // 期间删过消息：丢弃过期响应
   const items = (page.items || []).filter((x) => x.id > latest)
   if (!items.length) return
   // 一次来了超过一页的新消息：直接重载最新一页，避免中间出现空洞
@@ -963,24 +992,35 @@ function onKeydown(e) {
   else if (e.key === 'ArrowRight') stepPreview(1)
 }
 
-/* ---------------- 右键菜单：复制 / 删除消息记录 ---------------- */
+/* ---------------- 右键菜单：消息 / 会话 ---------------- */
 
-const contextMenu = ref(null) // { x, y, log }
+const contextMenu = ref(null) // { x, y, type: 'message' | 'session', log?, session? }
 const contextMenuLabel = computed(() => {
-  const log = contextMenu.value?.log
+  const menu = contextMenu.value
+  if (!menu) return ''
+  if (menu.type === 'session') return sessionName(menu.session)
+  const log = menu.log
   if (!log) return ''
   if (log.type === 'notice') return log.title || '通知'
   return log.nickname || shortId(log.user_id) || '消息'
 })
 
 // 在光标处弹出；靠近视口右 / 下边缘时向内收，避免菜单被裁掉
-function openContextMenu({ event, log }) {
-  if (!log || !log.id) return
+function menuPosition(event, height = 124) {
   const width = 176
-  const height = 124
   const x = Math.min(event.clientX, window.innerWidth - width - 8)
   const y = Math.min(event.clientY, window.innerHeight - height - 8)
-  contextMenu.value = { x: Math.max(8, x), y: Math.max(8, y), log }
+  return { x: Math.max(8, x), y: Math.max(8, y) }
+}
+
+function openContextMenu({ event, log }) {
+  if (!log || !log.id) return
+  contextMenu.value = { ...menuPosition(event), type: 'message', log }
+}
+
+function openSessionMenu(event, session) {
+  if (!session?.key) return
+  contextMenu.value = { ...menuPosition(event), type: 'session', session }
 }
 
 function closeContextMenu() {
@@ -1003,6 +1043,18 @@ async function copyLogText(log) {
     Notification.success({ message: '已复制消息文本' })
   } else {
     Notification.error({ message: '复制失败，请手动选中文本复制' })
+  }
+}
+
+// 群号 / QQ 号对排查问题最有用；系统通知没有 ID 时退回会话键
+async function copySessionId(session) {
+  closeContextMenu()
+  const text = String(session?.group_id || session?.user_id || session?.key || '')
+  if (!text) return
+  if (await writeClipboard(text)) {
+    Notification.success({ message: '已复制会话 ID' })
+  } else {
+    Notification.error({ message: '复制失败，请手动选中复制' })
   }
 }
 
@@ -1049,10 +1101,50 @@ async function deleteLog(log) {
     Notification.error({ message: e.message || '删除失败' })
     return
   }
+  refreshGen += 1 // 丢弃删除前的在途刷新响应
   removeLogLocally(log.id)
   Notification.success({ message: '已删除消息记录' })
   // 会话摘要（条数 / 最后一条预览）由后端重建，顺带处理「会话已空」的回落
   await loadSessions()
+}
+
+// 删除整个会话的消息记录：会话从侧栏消失，平台上的消息不受影响
+async function deleteSession(session) {
+  closeContextMenu()
+  if (!session?.key) return
+  const name = sessionName(session)
+  const count = Number(session.count) || 0
+  const ok = await confirmAction({
+    title: '删除会话记录',
+    message: `确定删除「${name}」的全部消息记录吗？${count ? `共 ${count} 条，` : ''}删除后不可恢复。\n\n只会删除面板本地的日志，平台上的消息不受影响。`,
+    confirmText: '删除会话记录',
+  })
+  if (!ok) return
+  let removed = 0
+  try {
+    const res = await api.deleteMsgLogSession(session.key)
+    removed = Number(res.removed) || 0
+  } catch (e) {
+    Notification.error({ message: e.message || '删除失败' })
+    return
+  }
+  refreshGen += 1 // 丢弃删除前的在途刷新响应
+  removeSessionLocally(session.key)
+  const wasActive = activeKey.value === session.key
+  pendingNew.value = 0
+  Notification.success({ message: `已删除 ${removed} 条消息记录` })
+  // 会话列表由后端重建：清空后的会话会从侧栏消失（当前会话若被删空则回落到「全部消息」）
+  await loadSessions()
+  await nextTick()
+  if (wasActive && activeKey.value === session.key) {
+    // 删除期间该会话又收到了新消息（后端仍返回它）：重新拉一页
+    await loadSession(session.key)
+  }
+  if (isAll.value) {
+    await loadAll()
+    scrollToBottom()
+    maybeFill()
+  }
 }
 
 // 本地先摘掉这条日志，避免等下一轮轮询才消失
@@ -1063,6 +1155,12 @@ function removeLogLocally(id) {
     const next = store.items.filter((x) => x.id !== id)
     if (next.length !== store.items.length) store.items = next
   }
+}
+
+// 本地先清掉整个会话：「全部消息」流水里该会话的记录与按会话缓存一起移除
+function removeSessionLocally(key) {
+  allLogs.value = allLogs.value.filter((x) => logSessionKey(x) !== key)
+  delete sessionStore[key]
 }
 
 /* ---------------- 生命周期 ---------------- */
