@@ -40,3 +40,39 @@ export function sessionAvatarKey(session) {
   if (session.kind === 'friend') return 'f:' + (session.user_id || session.key)
   return session.key || 'system'
 }
+
+// QQ 平台 ID：NapCat 为 qq:<QQ号>，Luckylilia 为 lil:<QQ号>。
+// 其他平台（飞书 fs:、Telegram tg:、QQ 官方 qo:……）没有公开头像地址，
+// 返回空串，由调用方回退到渐变首字头像。
+function qqNumber(id) {
+  const s = String(id || '').trim()
+  const m = /^(?:qq|lil):(\d+)$/.exec(s)
+  if (m) return m[1]
+  // 旧版日志里的裸数字 QQ ID（其他平台 ID 都带平台前缀）
+  return /^\d{5,12}$/.test(s) ? s : ''
+}
+
+// QQ 用户头像地址（s 为尺寸：0/40/100/140/640，0 与 40 都是小图）。
+export function qqUserAvatarUrl(id, size = 0) {
+  const qq = qqNumber(id)
+  return qq ? `https://q1.qlogo.cn/g?b=qq&nk=${qq}&s=${size}` : ''
+}
+
+// QQ 群头像地址。
+export function qqGroupAvatarUrl(id, size = 0) {
+  const qq = qqNumber(id)
+  return qq ? `https://p.qlogo.cn/gh/${qq}/${qq}/${size}` : ''
+}
+
+// 会话头像地址：群聊用群头像，私聊用用户头像；不支持的平台返回空串。
+// 默认取 100px（列表里显示 40px，高一档在高分屏下更清晰）。
+export function sessionAvatarUrl(session, size = 100) {
+  if (!session) return ''
+  if (session.kind === 'group') {
+    return qqGroupAvatarUrl(session.group_id || session.key.replace(/^g:/, ''), size)
+  }
+  if (session.kind === 'friend') {
+    return qqUserAvatarUrl(session.user_id || session.key.replace(/^f:/, ''), size)
+  }
+  return ''
+}

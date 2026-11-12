@@ -64,6 +64,17 @@ type QQExt interface {
 	GetPrivateFileURL(userId message.QID, fileId string) (string, bool)
 }
 
+// MediaRefresherExt 适配器侧媒体地址续期能力，可选接口。
+// 与插件侧外观接口 bot.MediaRefresher 对应：QQ（NapCat / Luckylilia）的
+// 图片、文件、语音地址带 rkey 等时效性鉴权参数，过期后由适配器向平台
+// 重新申请，core 按 ID 前缀路由后转发调用。
+type MediaRefresherExt interface {
+	// RefreshMediaURL 重新获取媒体地址：kind 取 message.SegmentImage /
+	// SegmentRecord / SegmentVideo / SegmentFile，fileId 为平台文件 ID；
+	// groupId / userId 用于定位会话，可为空。平台不支持该类型时返回 false。
+	RefreshMediaURL(kind, fileId, groupId, userId string) (string, bool)
+}
+
 type MessageHandler func(message.Message)
 type GroupUploadHandler func(message.GroupUploadNotice)
 type GroupAdminHandler func(message.GroupAdminNotice)

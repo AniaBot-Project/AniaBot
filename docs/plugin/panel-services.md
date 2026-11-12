@@ -70,11 +70,19 @@ type MsgLogSessionSource interface {
     // 指定会话的一页日志（新在前）：beforeID>0 取更旧分页；afterID>0 取轮询增量
     MsgLogSessionPage(session string, limit int, beforeID, afterID uint64) []msglog.Entry
 }
+
+// 可选：为过期媒体地址续期。QQ 等平台的图片 / 文件地址带有时效性鉴权参数，
+// 过期后由面板媒体代理在转发失败时调用本接口重新申请一次。
+type MsgLogMediaSource interface {
+    MsgLogMediaURL(entryID uint64, index int) (string, bool)
+}
 ```
 
-`msglog.Entry` 字段：`ID uint64`、`Time`、`Type`、`GroupId`、`UserId`、`Nickname`、`Title`、`Text`、`Media`。`Media` 描述消息内的图片 / 文件（`Kind`、`URL`、`Name`、`Size`、`FileId`），`URL` 只应填浏览器可访问的 http(s) 地址——`data:` / `base64:` 内联负载体积可达 MB 级，写进日志会让缓存存储迅速膨胀，面板会把它们当作不可展示的占位。
+`msglog.Entry` 字段：`ID uint64`、`Time`、`Type`、`GroupId`、`UserId`、`Nickname`、`Title`、`Text`、`Media`、`MessageId`。`Media` 描述消息内的图片 / 文件（`Kind`、`URL`、`Name`、`Size`、`FileId`），`URL` 只应填浏览器可访问的 http(s) 地址——`data:` / `base64:` 内联负载体积可达 MB 级，写进日志会让缓存存储迅速膨胀，面板会把它们当作不可展示的占位。
 
-会话键由 `Entry.SessionKey()` 统一生成：群消息 / 群通知为 `g:<群ID>`，好友消息 / 好友通知为 `f:<用户ID>`，其余通知为 `n:system`。推荐直接用 `bot/component/msglog` 的 `Recorder`：它按上述规则维护会话索引（首次查询时从存储重建，之后随 `Add` 增量更新），并自动对预览文本做截断。图片 / 文件下载由面板的媒体代理 `/api/msglogs/media?url=…` 完成（管理员登录态访问、拒绝本机 / 私网地址），插件只需填好 `Media.URL`。
+会话键由 `Entry.SessionKey()` 统一生成：群消息 / 群通知为 `g:<群ID>`，好友消息 / 好友通知为 `f:<用户ID>`，其余通知为 `n:system`。推荐直接用 `bot/component/msglog` 的 `Recorder`：它按上述规则维护会话索引（首次查询时从存储重建，之后随 `Add` 增量更新），并自动对预览文本做截断。图片 / 文件下载由面板的媒体代理 `/api/msglogs/media?url=…&entry=…&index=…` 完成（管理员登录态访问、拒绝本机 / 私网地址），插件只需填好 `Media.URL`。
+
+`Entry.MessageId` 与 `Media.FileId` 决定媒体地址能否续期：QQ 过期后按 `FileId` 调 `get_image` / `get_file` / `get_group_file_url` 重新签发，失败再按 `MessageId` 重新拉取原消息；两者都缺省时面板只能显示加载失败，因此尽量一并记录（`Recorder` 侧无需额外处理，插件填好条目字段即可）。
 
 ### TaskLogSource —— 任务日志页
 
@@ -209,7 +217,7 @@ func NewPlugin() *PollPlugin {
 }
 
 func (p *PollPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
-	// 记录器挂在缓存存储上；写入上限 0 = 不限制
+	// 记录器挂在缓存存储上；写入上限 0 = 使用默认上限（5000 条）
 	p.recorder = msglog.New(p.Storage, 0)
 	return nil
 }

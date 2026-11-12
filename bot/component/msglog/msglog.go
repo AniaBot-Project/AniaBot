@@ -56,7 +56,8 @@ const (
 const (
 	seqKey     = "msglog:seq"     // 自增 ID 计数器
 	entriesKey = "msglog:entries" // 日志列表（新在前，每条日志一个元素）
-	defaultMax = 20000
+	// defaultMax 默认保留条数；面板「消息日志」前端按同一上限裁剪列表，两边保持一致。
+	defaultMax = 5000
 
 	systemSessionKey = "n:system" // 系统通知会话键
 	// lastTextMaxRunes 会话预览文本的截断长度：侧栏只展示一行，无需传输全文。
@@ -67,25 +68,30 @@ const (
 // 只保留可被浏览器直接访问的 http(s) 地址：data:/base64: 内联负载体积可达
 // MB 级，复制进每条日志会让缓存存储（尤其 Redis）迅速膨胀，因此落盘时丢弃，
 // 由 Text 里的占位符提示「此处有媒体」。
+//
+// URL 往往带有时效性鉴权参数（QQ 的 rkey 约 2 小时过期），过期后面板会经
+// adminpanel 的媒体代理按 Entry.MessageId / 本结构体的 FileId 重新向平台
+// 申请地址（见 pluginlog.MsgLogMediaURL），因此这两个字段需要尽量保留。
 type Media struct {
 	Kind   string `json:"kind"`              // image / file / record / video
 	URL    string `json:"url,omitempty"`     // 远程地址（可能为空，表示暂无下载地址）
 	Name   string `json:"name,omitempty"`    // 文件名 / 语音视频标题
 	Size   int64  `json:"size,omitempty"`    // 文件大小（字节）
-	FileId string `json:"file_id,omitempty"` // 平台文件 ID（面板不直接使用，便于排查）
+	FileId string `json:"file_id,omitempty"` // 平台文件 ID（媒体地址过期时用于续期）
 }
 
 // Entry 一条消息日志
 type Entry struct {
-	ID       uint64    `json:"id"`
-	Time     time.Time `json:"time"`
-	Type     Type      `json:"type"`
-	GroupId  string    `json:"group_id,omitempty"` // 会话 ID（群消息 / 群通知）
-	UserId   string    `json:"user_id,omitempty"`  // 相关用户 ID
-	Nickname string    `json:"nickname,omitempty"` // 发送者昵称 / 群名片
-	Title    string    `json:"title,omitempty"`    // 通知标题（仅 notice 类型），如「群成员增加」
-	Text     string    `json:"text"`               // 消息内容 / 通知描述
-	Media    []Media   `json:"media,omitempty"`    // 消息内的图片 / 文件（按出现顺序）
+	ID        uint64    `json:"id"`
+	Time      time.Time `json:"time"`
+	Type      Type      `json:"type"`
+	GroupId   string    `json:"group_id,omitempty"`   // 会话 ID（群消息 / 群通知）
+	UserId    string    `json:"user_id,omitempty"`    // 相关用户 ID
+	Nickname  string    `json:"nickname,omitempty"`   // 发送者昵称 / 群名片
+	Title     string    `json:"title,omitempty"`      // 通知标题（仅 notice 类型），如「群成员增加」
+	Text      string    `json:"text"`                 // 消息内容 / 通知描述
+	Media     []Media   `json:"media,omitempty"`      // 消息内的图片 / 文件（按出现顺序）
+	MessageId string    `json:"message_id,omitempty"` // 平台消息 ID（媒体地址过期时用于重新拉取消息）
 }
 
 // SessionKey 返回日志所属的会话键，面板用它把消息归类到群聊 / 私聊 / 系统通知：
@@ -327,6 +333,30 @@ func (r *Recorder) Recent(limit int) []Entry {
 		return nil
 	}
 	return decodeEntries(items)
+}
+
+// Get 按日志 ID 取回单条日志，供面板按需重新解析媒体地址（媒体 URL 过期时
+// 需要拿到原消息 ID / 文件 ID）。日志已被容量淘汰或 ID 不存在时返回 false。
+func (r *Recorder) Get(id uint64) (Entry, bool) {
+	if id == 0 {
+		return Entry{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if id > r.seq {
+		return Entry{}, false
+	}
+	offset := int64(r.seq - id)
+	items, ok := r.store.LRange(context.Background(), entriesKey, offset, offset)
+	if !ok || len(items) == 0 {
+		return Entry{}, false
+	}
+	entries := decodeEntries(items)
+	if len(entries) == 0 || entries[0].ID != id {
+		// 列表偏移与 seq 不一致（存储被裁剪 / 外部写入）时不返回错误数据
+		return Entry{}, false
+	}
+	return entries[0], true
 }
 
 // Page 返回一页日志（新在前），供面板滚动分页使用：beforeID>0 时仅返回

@@ -14,6 +14,7 @@
 package adminpanel
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -109,6 +110,16 @@ type MsgLogSessionSource interface {
 	// MsgLogSessionPage 返回指定会话的一页日志（新在前）：
 	// beforeID>0 仅返回更旧日志；afterID>0 仅返回更新的日志（轮询增量）
 	MsgLogSessionPage(session string, limit int, beforeID, afterID uint64) []msglog.Entry
+}
+
+// MsgLogMediaSource 可选接口：为消息日志里的过期媒体地址续期。
+// QQ 等平台的图片 / 文件地址带 rkey 等时效性鉴权参数，过期后浏览器访问
+// 只会拿到 4xx；面板媒体代理在转发失败时调用本接口向平台重新申请地址。
+// 未实现时媒体加载失败直接报错（与旧版行为一致）。
+type MsgLogMediaSource interface {
+	// MsgLogMediaURL 重新解析 entryID 对应日志里第 index 个媒体的可访问地址
+	// （index 为 Entry.Media 下标）。取不到可用地址时返回 false。
+	MsgLogMediaURL(entryID uint64, index int) (string, bool)
 }
 
 // SkillSource 可选接口：插件实现后，面板可对其 AI skill 做列表 / 上传 / 删除
@@ -221,6 +232,7 @@ type Options struct {
 	MsgLogs           func(limit int, beforeID uint64) []msglog.Entry                          // 消息日志（群/好友/通知，可为 nil）
 	MsgLogSessions    func() []msglog.Session                                                  // 消息日志的会话摘要（可为 nil）
 	MsgLogSessionPage func(session string, limit int, beforeID, afterID uint64) []msglog.Entry // 按会话分页（可为 nil）
+	MsgLogMedia       func(entryID uint64, index int) (string, bool)                           // 媒体地址续期（可为 nil）
 	Skills            SkillSource                                                              // AI skill 管理（可为 nil）
 	Memories          MemorySource                                                             // AI 长期记忆管理（可为 nil）
 	Knowledge         KnowledgeBaseSource                                                      // AI 知识库管理（可为 nil）
@@ -981,39 +993,56 @@ var msgLogMediaClient = &http.Client{
 
 // handleMsgLogMedia 代理平台媒体地址（QQ/微信等 CDN 的图片与文件），
 // 解决浏览器直连时的防盗链 / CORS / 混合内容问题，并提供附件下载：
-//   - url      必填，http(s) 地址
+//   - url      可选，http(s) 地址；为空时要求同时给出 entry+index（直接向平台申请）
+//   - entry    可选，消息日志 ID（媒体地址过期时用于重新申请）
+//   - index    可选，媒体在日志中的下标（默认 0）
 //   - name     可选，下载时的文件名
 //   - download 为 1 时以附件形式返回（Content-Disposition: attachment）
+//
+// 平台媒体地址（QQ 的 rkey 等）会过期：旧地址转发失败且给了 entry+index 时，
+// 先通过 MsgLogMediaSource 续期再重试一次，面板回看历史消息仍能看到图片。
 //
 // 面板是管理员专用页面，此接口仍只允许 http(s)，并拒绝直连本机 / 私网 IP，
 // 避免被当成内网探测代理。
 func (s *Server) handleMsgLogMedia(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	u, err := url.Parse(strings.TrimSpace(q.Get("url")))
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		writeError(w, http.StatusBadRequest, "url 参数必须是 http(s) 地址")
-		return
-	}
-	if !msgLogMediaHostAllowed(u.Hostname()) {
-		writeError(w, http.StatusForbidden, "不允许代理本机或内网地址")
+	entryID, index, hasRef, refErr := parseMsgLogMediaRef(q)
+	if refErr != "" {
+		writeError(w, http.StatusBadRequest, refErr)
 		return
 	}
 
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, u.String(), nil)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "无效的媒体地址")
+	rawURL := strings.TrimSpace(q.Get("url"))
+	u, status, errMsg := parseMsgLogMediaURL(rawURL)
+	// 记录时就没拿到直链（或前端只给了日志引用）：直接向平台申请一次
+	if u == nil && hasRef && rawURL == "" {
+		if fresh, ok := s.msgLogMediaURL(entryID, index); ok {
+			rawURL = fresh
+			u, status, errMsg = parseMsgLogMediaURL(rawURL)
+		}
+	}
+	if u == nil {
+		if hasRef && rawURL == "" {
+			writeError(w, http.StatusNotFound, "媒体地址已失效，且无法从平台重新获取")
+			return
+		}
+		writeError(w, status, errMsg)
 		return
 	}
-	// 部分 CDN 对无 UA / 无 Referer 的请求直接 403；UA 带浏览器前缀，Referer 用同源地址
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; AniaBot-Panel)")
-	req.Header.Set("Referer", u.Scheme+"://"+u.Host+"/")
-	req.Header.Set("Accept", "*/*")
 
-	client := msgLogMediaClient
-	if s.mediaHTTP != nil {
-		client = s.mediaHTTP
+	resp, err := s.fetchMsgLogMedia(r.Context(), u)
+	// 旧地址失效（rkey 过期、一次性下载链接已被使用）：续期后重试一次。
+	// 浏览器已取消（切走页面 / 图片滚出视口）时不再打扰协议端。
+	if err != nil && hasRef && r.Context().Err() == nil {
+		if fresh, ok := s.msgLogMediaURL(entryID, index); ok && fresh != rawURL {
+			if fu, _, _ := parseMsgLogMediaURL(fresh); fu != nil {
+				if resp2, err2 := s.fetchMsgLogMedia(r.Context(), fu); err2 == nil {
+					resp = resp2
+					err = nil
+				}
+			}
+		}
 	}
-	resp, err := client.Do(req)
 	if err != nil {
 		if r.Context().Err() == nil {
 			writeError(w, http.StatusBadGateway, "获取媒体失败: "+err.Error())
@@ -1021,14 +1050,6 @@ func (s *Server) handleMsgLogMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("获取媒体失败: 上游返回 HTTP %d", resp.StatusCode))
-		return
-	}
-	if resp.ContentLength > maxMsgLogMediaBytes {
-		writeError(w, http.StatusBadGateway, "媒体文件过大（超过 64MB）")
-		return
-	}
 
 	name := sanitizeMediaName(q.Get("name"))
 	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
@@ -1061,6 +1082,78 @@ func (s *Server) handleMsgLogMedia(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, io.LimitReader(resp.Body, maxMsgLogMediaBytes))
+}
+
+// msgLogMediaURL 向插件申请媒体续期地址；未提供续期能力时返回 false。
+func (s *Server) msgLogMediaURL(entryID uint64, index int) (string, bool) {
+	if s.opt.MsgLogMedia == nil {
+		return "", false
+	}
+	return s.opt.MsgLogMedia(entryID, index)
+}
+
+// parseMsgLogMediaRef 解析媒体请求里的日志引用（entry / index）。
+// 未提供 entry 时 has 为 false；格式非法时返回错误提示（面板退化为不支持续期）。
+func parseMsgLogMediaRef(q url.Values) (entryID uint64, index int, has bool, errMsg string) {
+	rawEntry := strings.TrimSpace(q.Get("entry"))
+	if rawEntry == "" {
+		return 0, 0, false, ""
+	}
+	entryID, err := strconv.ParseUint(rawEntry, 10, 64)
+	if err != nil || entryID == 0 {
+		return 0, 0, false, "entry 参数格式错误（应为日志 ID）"
+	}
+	if rawIndex := strings.TrimSpace(q.Get("index")); rawIndex != "" {
+		n, err := strconv.Atoi(rawIndex)
+		if err != nil || n < 0 {
+			return 0, 0, false, "index 参数格式错误（应为非负整数）"
+		}
+		index = n
+	}
+	return entryID, index, true, ""
+}
+
+// parseMsgLogMediaURL 校验并解析媒体地址：只允许 http(s)，拒绝本机 / 私网。
+// 校验失败时返回对应的 HTTP 状态码与错误提示。
+func parseMsgLogMediaURL(raw string) (u *url.URL, status int, errMsg string) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, http.StatusBadRequest, "url 参数必须是 http(s) 地址"
+	}
+	if !msgLogMediaHostAllowed(u.Hostname()) {
+		return nil, http.StatusForbidden, "不允许代理本机或内网地址"
+	}
+	return u, 0, ""
+}
+
+// fetchMsgLogMedia 抓取媒体：只接受 2xx 且体积在上限内的响应。
+func (s *Server) fetchMsgLogMedia(ctx context.Context, u *url.URL) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, errors.New("无效的媒体地址")
+	}
+	// 部分 CDN 对无 UA / 无 Referer 的请求直接 403；UA 带浏览器前缀，Referer 用同源地址
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; AniaBot-Panel)")
+	req.Header.Set("Referer", u.Scheme+"://"+u.Host+"/")
+	req.Header.Set("Accept", "*/*")
+
+	client := msgLogMediaClient
+	if s.mediaHTTP != nil {
+		client = s.mediaHTTP
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		resp.Body.Close()
+		return nil, fmt.Errorf("上游返回 HTTP %d", resp.StatusCode)
+	}
+	if resp.ContentLength > maxMsgLogMediaBytes {
+		resp.Body.Close()
+		return nil, errors.New("媒体文件过大（超过 64MB）")
+	}
+	return resp, nil
 }
 
 // parseLogID 解析日志游标（十进制日志 ID）；空串视为未提供（返回 0）。

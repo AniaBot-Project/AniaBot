@@ -135,6 +135,21 @@ type GroupUserInfo struct {
 }
 ```
 
+## 媒体地址续期（bot.MediaRefresher，可选接口）
+
+QQ 等平台的图片 / 文件地址带有时效性鉴权参数（如 rkey，约 2 小时过期），过期后直连只会拿到 4xx。平台支持时，事件回调里的 `bot.Bot` 可断言为 `bot.MediaRefresher`，按平台文件 ID 重新申请一个可用地址：
+
+```go
+if mr, ok := b.(bot.MediaRefresher); ok {
+    // kind 取 message.SegmentImage / SegmentRecord / SegmentVideo / SegmentFile
+    if url, ok := mr.RefreshMediaURL(message.SegmentImage, fileId, msg.GroupId.String(), ""); ok {
+        // 用新地址下载 / 展示
+    }
+}
+```
+
+`groupId` / `userId` 用于定位会话（群文件、私聊文件续期需要），没有会话信息时传空串。core 自身也实现该接口：后台路径（没有事件来源）调用时按 `groupId` / `userId` 的 ID 前缀路由到对应适配器；平台不支持时返回 `("", false)`，插件应退化为「链接已失效」提示。
+
 ## 群聊合并转发（bot.GroupForwardSender，可选接口）
 
 合并转发同样是 QQ 专属能力，但单独成接口 `bot.GroupForwardSender`：事件回调里断言成功表示当前平台支持；**后台路径**（没有事件来源，如定时任务、面板触发的推送）持有的 core 也能断言成功——调用时按目标群 ID 前缀路由到对应适配器。适配器不支持（非 QQ 平台）时返回 `("", false)`，插件应退化为逐条发送：

@@ -514,6 +514,7 @@ func (ania *AniaBot) startAdminPanel() {
 	var msgLogFn func(limit int, beforeID uint64) []msglog.Entry
 	var msgLogSessionsFn func() []msglog.Session
 	var msgLogSessionFn func(session string, limit int, beforeID, afterID uint64) []msglog.Entry
+	var msgLogMediaFn func(entryID uint64, index int) (string, bool)
 	var skillSrc adminpanel.SkillSource
 	var memorySrc adminpanel.MemorySource
 	var kbSrc adminpanel.KnowledgeBaseSource
@@ -537,6 +538,9 @@ func (ania *AniaBot) startAdminPanel() {
 		if src, ok := p.(adminpanel.MsgLogSessionSource); ok {
 			msgLogSessionsFn = src.MsgLogSessions
 			msgLogSessionFn = src.MsgLogSessionPage
+		}
+		if src, ok := p.(adminpanel.MsgLogMediaSource); ok {
+			msgLogMediaFn = src.MsgLogMediaURL
 		}
 		if src, ok := p.(adminpanel.SkillSource); ok {
 			skillSrc = src
@@ -629,6 +633,7 @@ func (ania *AniaBot) startAdminPanel() {
 		MsgLogs:           msgLogFn,
 		MsgLogSessions:    msgLogSessionsFn,
 		MsgLogSessionPage: msgLogSessionFn,
+		MsgLogMedia:       msgLogMediaFn,
 		Skills:            skillSrc,
 		Memories:          memorySrc,
 		Knowledge:         kbSrc,
@@ -880,6 +885,27 @@ func (ania *AniaBot) GetMsgDetail(msgId message.QID) (*message.Message, bool) {
 		return nil, false
 	}
 	return a.GetMsgDetail(msgId)
+}
+
+// RefreshMediaURL 实现 bot.MediaRefresher：媒体地址过期后按会话 ID 前缀
+// 路由到对应适配器，由适配器向平台重新申请地址（QQ 的 rkey 续期等）。
+// 群消息用 groupId 路由，私聊用 userId；两者都为空时无法定位协议端。
+func (ania *AniaBot) RefreshMediaURL(kind, fileId, groupId, userId string) (string, bool) {
+	var a adapter.Adapter
+	if groupId != "" {
+		a = ania.route(message.QID(groupId))
+	}
+	if a == nil && userId != "" {
+		a = ania.route(message.QID(userId))
+	}
+	if a == nil {
+		return "", false
+	}
+	mr, ok := a.(adapter.MediaRefresherExt)
+	if !ok {
+		return "", false
+	}
+	return mr.RefreshMediaURL(kind, fileId, groupId, userId)
 }
 
 // GetGroupDetail 获取群聊详情（按群 ID 前缀路由到对应平台适配器）。

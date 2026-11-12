@@ -12,7 +12,16 @@
 
   <div v-else class="msg-row" :class="{ 'is-continued': !showAvatar }">
     <div v-if="showAvatar" class="msg-avatar" :style="avatarStyle" :title="displayName">
-      {{ initials }}
+      <img
+        v-if="avatarSrc && !avatarBroken"
+        class="msg-avatar-img"
+        :src="avatarSrc"
+        alt=""
+        loading="lazy"
+        referrerpolicy="no-referrer"
+        @error="avatarBroken = true"
+      />
+      <template v-else>{{ initials }}</template>
     </div>
     <div v-else class="msg-avatar-gap" />
 
@@ -64,28 +73,28 @@
           </details>
         </template>
 
-        <!-- 图片：点击放大，加载失败时可尝试打开原图 -->
+        <!-- 图片：点击放大；加载失败时点击重试（面板会先向平台续期过期地址） -->
         <div v-if="images.length" class="msg-images" :class="imageLayout">
           <button
             v-for="(m, i) in images"
             :key="'img' + i"
             type="button"
             class="msg-img"
-            :title="failed.has(m.url) ? '加载失败，点击尝试打开原图' : '点击查看大图'"
-            @click="openImage(i)"
+            :title="isFailed(m) ? '加载失败，点击重试' : '点击查看大图'"
+            @click="isFailed(m) ? retry(m) : openImage(i)"
           >
             <img
-              v-if="!failed.has(m.url)"
-              :src="mediaUrl(m.url)"
+              v-if="!isFailed(m)"
+              :src="mediaUrl(m.url, '', false, refFor(m))"
               :alt="m.name || '图片'"
               loading="lazy"
               @load="$emit('media-load')"
-              @error="markFailed(m.url)"
+              @error="markFailed(m)"
             />
             <span v-else class="img-broken">
               <Icon name="Image" :size="20" />
-              <span>图片加载失败</span>
-              <small>点击尝试打开原图</small>
+              <span>图片已失效</span>
+              <small>点击重试</small>
             </span>
           </button>
         </div>
@@ -99,18 +108,29 @@
               <span class="file-meta">
                 {{ sizeText(f.size) || '大小未知' }}
                 <template v-if="f.url"> · 可下载</template>
+                <template v-else-if="f.file_id && log.id"> · 可获取链接</template>
                 <template v-else> · 暂无下载地址</template>
               </span>
             </span>
             <a
               v-if="f.url"
               class="file-dl"
-              :href="mediaUrl(f.url, f.name, true)"
+              :href="mediaUrl(f.url, f.name, true, refFor(f))"
               :download="f.name"
               @click.stop
             >
               <Icon name="Download" :size="13" />
               下载
+            </a>
+            <a
+              v-else-if="f.file_id && log.id"
+              class="file-dl"
+              :href="mediaUrl('', f.name, true, refFor(f))"
+              :download="f.name"
+              @click.stop
+            >
+              <Icon name="Download" :size="13" />
+              获取链接
             </a>
             <span v-else class="file-dl is-disabled">无链接</span>
           </div>
@@ -121,17 +141,23 @@
           <div v-for="(m, i) in records" :key="'rec' + i" class="av-card">
             <span class="av-ico"><Icon name="Mic" :size="15" /></span>
             <span class="av-label">语音消息</span>
-            <a v-if="m.url" class="av-action" :href="mediaUrl(m.url, m.name)" target="_blank" rel="noopener noreferrer">播放</a>
+            <a v-if="m.url" class="av-action" :href="mediaUrl(m.url, m.name, false, refFor(m))" target="_blank" rel="noopener noreferrer">播放</a>
             <span v-else class="av-action is-disabled">无链接</span>
           </div>
-          <video
-            v-for="(m, i) in videos"
-            :key="'vid' + i"
-            class="msg-video"
-            :src="mediaUrl(m.url)"
-            controls
-            preload="metadata"
-          />
+          <template v-for="(m, i) in videos" :key="'vid' + i">
+            <video
+              v-if="!isFailed(m)"
+              class="msg-video"
+              :src="mediaUrl(m.url, '', false, refFor(m))"
+              controls
+              preload="metadata"
+              @error="markFailed(m)"
+            />
+            <div v-else class="av-card">
+              <span class="av-label">视频加载失败</span>
+              <button type="button" class="av-retry" @click="retry(m)">重试</button>
+            </div>
+          </template>
         </div>
       </div>
     </div>
@@ -139,10 +165,10 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Icon } from 'animal-island-vue'
 import { msgMediaUrl } from '../api.js'
-import { avatarGradient, avatarInitials } from '../utils/avatar.js'
+import { avatarGradient, avatarInitials, qqUserAvatarUrl } from '../utils/avatar.js'
 import {
   friendlyPreview,
   parseForwardNodes,
@@ -186,6 +212,36 @@ const displayName = computed(() => {
 const userId = computed(() => (props.log.user_id ? shortId(props.log.user_id) : ''))
 const initials = computed(() => avatarInitials(displayName.value))
 const avatarStyle = computed(() => avatarGradient(props.log.user_id || displayName.value))
+// QQ 消息显示真实头像；其他平台 / 取不到 QQ 号时回退渐变首字，加载失败同样回退
+const avatarSrc = computed(() => qqUserAvatarUrl(props.log.user_id, 100))
+const avatarBroken = ref(false)
+watch(() => props.log.user_id, () => {
+  avatarBroken.value = false
+})
+
+// 媒体在日志里的真实下标：给面板媒体代理带上日志 ID + 下标，旧地址失效时
+// （QQ 的 rkey 过期）代理会先向平台续期再重试。
+const mediaIndex = computed(() => {
+  const map = new Map()
+  const list = Array.isArray(props.log.media) ? props.log.media : []
+  list.forEach((m, i) => {
+    if (m) map.set(m, i)
+  })
+  return map
+})
+const attempts = ref({})
+
+function mediaKey(m) {
+  const index = mediaIndex.value.get(m)
+  if (index === undefined) return m.url || ''
+  return `${props.log.id || 0}:${index}`
+}
+
+function refFor(m) {
+  const index = mediaIndex.value.get(m)
+  if (index === undefined || !props.log.id) return null
+  return { entry: props.log.id, index, attempt: attempts.value[mediaKey(m)] || 0 }
+}
 
 // 文本块与引用块共用一份媒体计数：文本里的 [图片] / [文件:…] 占位会被实际媒体吃掉。
 const blocks = computed(() => {
@@ -206,25 +262,36 @@ const blocks = computed(() => {
 })
 
 const failed = ref(new Set())
-function markFailed(url) {
+function isFailed(m) {
+  return failed.value.has(mediaKey(m))
+}
+function markFailed(m) {
   const next = new Set(failed.value)
-  next.add(url)
+  next.add(mediaKey(m))
   failed.value = next
   emit('media-load')
+}
+// 重试：清掉失败标记并递增 attempt，媒体地址带上新参数以绕过浏览器缓存，
+// 面板代理会同时重新向平台申请可用地址。
+function retry(m) {
+  const key = mediaKey(m)
+  const next = new Set(failed.value)
+  next.delete(key)
+  failed.value = next
+  attempts.value = { ...attempts.value, [key]: (attempts.value[key] || 0) + 1 }
 }
 
 function openImage(index) {
   const m = images.value[index]
   if (!m) return
-  if (failed.value.has(m.url)) {
-    window.open(m.url, '_blank', 'noopener,noreferrer')
-    return
-  }
-  emit('preview', { media: m, list: images.value, index })
+  emit('preview', {
+    items: images.value.map((item) => ({ media: item, ref: refFor(item) })),
+    index,
+  })
 }
 
-function mediaUrl(url, name, download = false) {
-  return msgMediaUrl(url, name, download)
+function mediaUrl(url, name = '', download = false, ref = null) {
+  return msgMediaUrl(url, name, download, ref)
 }
 
 function fmtClock(value) {
@@ -346,6 +413,15 @@ function fileBadge(name) {
   text-shadow: 0 1px 2px rgb(94 68 35 / 0.28);
   box-shadow: 0 2px 0 0 rgb(94 68 35 / 0.16), inset 0 1px 0 rgb(255 255 255 / 0.35);
   user-select: none;
+  overflow: hidden;
+}
+/* QQ 真实头像：填满圆角块，加载失败时组件回退到渐变首字 */
+.msg-avatar-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
 }
 .msg-avatar-gap {
   width: 38px;
@@ -725,6 +801,20 @@ function fileBadge(name) {
 .av-action.is-disabled {
   color: var(--ink-muted);
   font-weight: 600;
+}
+.av-retry {
+  margin-left: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.av-retry:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .msg-video {
   max-width: min(320px, 100%);

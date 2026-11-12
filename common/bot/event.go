@@ -101,6 +101,18 @@ type Interactive interface {
 	SupportsKeyboard() bool
 }
 
+// MediaRefresher 媒体地址续期能力，可选接口（与 bot.QQ 同模式）。
+// QQ 等平台的图片 / 文件 / 语音地址带有时效性鉴权参数（如 rkey），过期后
+// 浏览器与模型都无法再访问；实现方按平台文件 ID 重新申请一个可用地址。
+// 面板「消息日志」的媒体代理在旧地址失效时用它自动续期。
+type MediaRefresher interface {
+	// RefreshMediaURL 重新获取媒体地址：kind 取 message.SegmentImage /
+	// SegmentRecord / SegmentVideo / SegmentFile，fileId 为平台文件 ID；
+	// groupId / userId 用于定位会话（群文件、私聊文件续期需要），可为空。
+	// 平台不支持该类型或文件 ID 无效时返回 false。
+	RefreshMediaURL(kind, fileId, groupId, userId string) (string, bool)
+}
+
 // QQ QQ（NapCat/OneBot v11）平台专属能力，可选接口。
 // 事件来源为 QQ 适配器时，事件回调收到的 bot.Bot 可断言为 bot.QQ。
 type QQ interface {

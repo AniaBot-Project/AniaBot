@@ -63,13 +63,24 @@ async function download(path, fallbackName) {  const resp = await fetch(path, { 
 // 消息日志媒体的访问地址：
 // - http(s) 走面板代理（/api/msglogs/media），避免 CDN 防盗链 / CORS / 混合内容
 //   问题，并支持附件下载；
+// - ref 为 { entry, index, attempt }：带上日志 ID 与媒体下标后，代理在原地址
+//   失效（QQ 的 rkey 约 2 小时过期）时会先向平台续期再重试；url 为空时直接
+//   向平台申请（用于记录时就没拿到直链的文件）；attempt 用于重试时绕过浏览器
+//   对失败地址的缓存；
 // - data: / blob: 直接交给浏览器。
-export function msgMediaUrl(url, name = '', download = false) {
-  if (!url) return ''
-  if (/^(?:data|blob):/i.test(url)) return url
-  const q = new URLSearchParams({ url })
+export function msgMediaUrl(url, name = '', download = false, ref = null) {
+  const hasRef = !!(ref && ref.entry)
+  if (!url && !hasRef) return ''
+  if (url && /^(?:data|blob):/i.test(url)) return url
+  const q = new URLSearchParams()
+  if (url) q.set('url', url)
   if (name) q.set('name', name)
   if (download) q.set('download', '1')
+  if (hasRef) {
+    q.set('entry', String(ref.entry))
+    if (ref.index !== undefined && ref.index !== null) q.set('index', String(ref.index))
+    if (ref.attempt) q.set('t', String(ref.attempt))
+  }
   return `/api/msglogs/media?${q.toString()}`
 }
 

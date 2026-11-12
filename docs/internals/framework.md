@@ -443,7 +443,7 @@ type StreamHandle interface {
 - **认证**：首次启动生成 10 位随机密码打印到控制台（仅显示一次，登录后可修改）；密码存 `__admin` 命名空间，格式 `salt:hash`（16 字节随机 salt + SHA-256，hex 编码），校验用 `crypto/subtle.ConstantTimeCompare` 常数时间比较防计时侧信道
 - **会话**：登录签发 32 字节随机 token（HttpOnly Cookie，24h 过期），内存 + 持久化存储**双写**——Bot 重启后旧会话仍有效；剩余有效期 < 12h 自动续期（滑动过期，活跃用户不被踢下线）；**修改密码吊销全部会话**（把可疑登录踢下线）；忘记密码可用命令行 `ResetPanelPassword` 覆盖哈希，并同样清空全部会话
 - **登录防爆破**（`loginguard.go`）：按来源 IP 计数，10 分钟窗口内失败 5 次锁定 10 分钟，每次失败前固定延迟 500ms 拖慢在线爆破；仅当对端是回环地址时才信任 `X-Forwarded-For` / `X-Real-IP`（本机反代场景），否则外部伪造头部无法绕过锁定
-- **插件能力发现**：面板通过 `adminpanel.XxxSource` 可选接口发现插件能力——`TaskLogSource`（任务日志）、`ClockTaskSource`（定时任务增删改查/启停）、`MsgLogSource` + `MsgLogSessionSource`（消息日志、按群聊/私聊/系统通知分会话与滚动分页）、`SkillSource`（skill 上传/删除/热重载）、`MemorySource`、`KnowledgeBaseSource`（含 URL 导入）、`TeamSource`、`QuotaSource`（用量查看/清零）、`QueryLogSource`。插件实现即出现在面板，无需面板代码改动
+- **插件能力发现**：面板通过 `adminpanel.XxxSource` 可选接口发现插件能力——`TaskLogSource`（任务日志）、`ClockTaskSource`（定时任务增删改查/启停）、`MsgLogSource` + `MsgLogSessionSource`（消息日志、按群聊/私聊/系统通知分会话与滚动分页）、`MsgLogMediaSource`（媒体地址过期后续期）、`SkillSource`（skill 上传/删除/热重载）、`MemorySource`、`KnowledgeBaseSource`（含 URL 导入）、`TeamSource`、`QuotaSource`（用量查看/清零）、`QueryLogSource`。插件实现即出现在面板，无需面板代码改动
 - **操作日志**（`bot/component/oplog`）：包级单例记录面板与 AI 工具的管理操作（登录、配置修改、定时任务/记忆/Skill/团队管理、AI 改配置、重启更新等），SQL 后端走 `ania_op_log` 行级存储（过滤条件下推 WHERE、容量淘汰走范围删除），KV 后端走 `e:<序号>` 逐条记录，ID 均为 base36 自增序号，两种后端一致；默认保留最近 500 条
 
 ## 进程自重启（sysrestart）

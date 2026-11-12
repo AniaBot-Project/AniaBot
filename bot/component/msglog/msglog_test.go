@@ -99,6 +99,28 @@ func TestPageWithEviction(t *testing.T) {
 	}
 }
 
+// TestGet 按 ID 取单条日志（面板媒体地址续期依赖它拿到原消息 ID / 文件 ID）；
+// 已淘汰的 ID 与不存在的 ID 都应返回 false，避免拿到错位的别条日志。
+func TestGet(t *testing.T) {
+	r := msglog.New(newStore(), 3)
+	for _, text := range []string{"a", "b", "c", "d", "e"} {
+		r.Add(msglog.Entry{Type: msglog.TypeGroup, Text: text, MessageId: "qq:" + text})
+	}
+
+	e, ok := r.Get(5)
+	if !ok || e.Text != "e" || e.MessageId != "qq:e" {
+		t.Fatalf("Get(5) = %+v, %v", e, ok)
+	}
+	if e, ok := r.Get(3); !ok || e.Text != "c" {
+		t.Fatalf("Get(3) = %+v, %v", e, ok)
+	}
+	for _, id := range []uint64{0, 1, 2, 99} {
+		if _, ok := r.Get(id); ok {
+			t.Fatalf("Get(%d) 不应命中", id)
+		}
+	}
+}
+
 func TestSessionKey(t *testing.T) {
 	cases := []struct {
 		name string

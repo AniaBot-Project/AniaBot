@@ -3,6 +3,7 @@ package pluginlog
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/jeanhua/AniaBot/bot/component/msglog"
 	"github.com/jeanhua/AniaBot/bot/utils"
@@ -17,6 +18,15 @@ import (
 type LogPlugin struct {
 	plugin.Meta
 	recorder *msglog.Recorder
+
+	// bot 是 Awake 注入的 core 级 bot 外观：面板媒体地址过期时用它按 ID 前缀
+	// 路由到来源适配器重新申请（见 MsgLogMediaURL）。
+	botMu sync.RWMutex
+	bot   bot.Bot
+
+	// mediaURLs 续期后的媒体地址短缓存（日志 ID + 媒体序号 → 地址）
+	mediaMu   sync.Mutex
+	mediaURLs map[mediaURLKey]mediaURLValue
 }
 
 func NewPlugin() *LogPlugin {
@@ -42,6 +52,16 @@ func (p *LogPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	}
 	p.Storage.SetString(ctx, "last_start_time", utils.GetFormattedTime())
 	p.Logger.Info("日志打印插件初始化完成", "lastStartTime", lastStartTime)
+	return nil
+}
+
+// Awake 保存 core 级 bot 外观：面板「消息日志」的媒体地址过期后，需要按
+// 日志里的会话 ID / 消息 ID 前缀路由到对应适配器重新申请地址。
+// 未收到 Awake（如设置向导未完成）时续期不可用，面板按加载失败展示。
+func (p *LogPlugin) Awake(ctx context.Context, b bot.Bot) error {
+	p.botMu.Lock()
+	p.bot = b
+	p.botMu.Unlock()
 	return nil
 }
 
@@ -100,12 +120,13 @@ func (p *LogPlugin) OnGroupMsg(ctx context.Context, b bot.Bot, cmd command.Comma
 	text := msg.FriendlyText(false, opts...)
 	p.Logger.Info("[收<-群]: "+text, "groupId", msg.GroupId, "userId", msg.Sender.UserId)
 	p.add(msglog.Entry{
-		Type:     msglog.TypeGroup,
-		GroupId:  msg.GroupId.String(),
-		UserId:   msg.Sender.UserId.String(),
-		Nickname: senderName(msg),
-		Text:     text,
-		Media:    extractMedia(msg.Message),
+		Type:      msglog.TypeGroup,
+		GroupId:   msg.GroupId.String(),
+		UserId:    msg.Sender.UserId.String(),
+		Nickname:  senderName(msg),
+		Text:      text,
+		Media:     extractMedia(msg.Message),
+		MessageId: msg.MessageId.String(),
 	})
 	return true, nil
 }
@@ -123,11 +144,12 @@ func (p *LogPlugin) OnFriendMsg(ctx context.Context, b bot.Bot, cmd command.Comm
 	media := extractMedia(msg.Message)
 	resolvePrivateFileURLs(b, msg.Sender.UserId, media)
 	p.add(msglog.Entry{
-		Type:     msglog.TypeFriend,
-		UserId:   msg.Sender.UserId.String(),
-		Nickname: msg.Sender.Nickname,
-		Text:     text,
-		Media:    media,
+		Type:      msglog.TypeFriend,
+		UserId:    msg.Sender.UserId.String(),
+		Nickname:  msg.Sender.Nickname,
+		Text:      text,
+		Media:     media,
+		MessageId: msg.MessageId.String(),
 	})
 	return true, nil
 }

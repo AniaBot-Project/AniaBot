@@ -43,7 +43,16 @@
               @click="selectSession(s.key)"
             >
               <div class="conv-avatar" :style="avatarGradient(sessionAvatarKey(s))">
-                {{ avatarInitials(sessionName(s)) }}
+                <img
+                  v-if="sessionAvatarUrl(s) && !avatarBroken[s.key]"
+                  class="conv-avatar-img"
+                  :src="sessionAvatarUrl(s)"
+                  alt=""
+                  loading="lazy"
+                  referrerpolicy="no-referrer"
+                  @error="markAvatarBroken(s)"
+                />
+                <template v-else>{{ avatarInitials(sessionName(s)) }}</template>
                 <i v-if="isUnread(s)" class="unread-dot" />
               </div>
               <div class="conv-main">
@@ -73,7 +82,16 @@
               @click="selectSession(s.key)"
             >
               <div class="conv-avatar" :style="avatarGradient(sessionAvatarKey(s))">
-                {{ avatarInitials(sessionName(s)) }}
+                <img
+                  v-if="sessionAvatarUrl(s) && !avatarBroken[s.key]"
+                  class="conv-avatar-img"
+                  :src="sessionAvatarUrl(s)"
+                  alt=""
+                  loading="lazy"
+                  referrerpolicy="no-referrer"
+                  @error="markAvatarBroken(s)"
+                />
+                <template v-else>{{ avatarInitials(sessionName(s)) }}</template>
                 <i v-if="isUnread(s)" class="unread-dot" />
               </div>
               <div class="conv-main">
@@ -140,7 +158,17 @@
         </button>
 
         <div v-if="isAll" class="head-avatar all-avatar"><Icon name="Chat" :size="19" /></div>
-        <div v-else class="head-avatar" :style="headAvatarStyle">{{ headInitials }}</div>
+        <div v-else class="head-avatar" :style="headAvatarStyle">
+          <img
+            v-if="headAvatarSrc && !avatarBroken[activeKey]"
+            class="head-avatar-img"
+            :src="headAvatarSrc"
+            alt=""
+            referrerpolicy="no-referrer"
+            @error="markAvatarBroken(activeSession)"
+          />
+          <template v-else>{{ headInitials }}</template>
+        </div>
 
         <div class="head-main">
           <div class="head-title">{{ headName }}</div>
@@ -179,7 +207,7 @@
           <div v-else-if="!rows.length" class="chat-empty">
             <span class="empty-ico"><Icon name="Chat" :size="30" /></span>
             <p>{{ isAll ? '暂无消息记录' : '这个会话还没有消息' }}</p>
-            <small v-if="isAll">日志保存在缓存存储中（memory 驱动重启后清空，Redis 驱动可持久化，最多保留最近 20000 条）</small>
+            <small v-if="isAll">日志保存在缓存存储中（memory 驱动重启后清空，Redis 驱动可持久化，最多保留最近 5000 条）</small>
             <small v-else>收到新消息后会自动出现在这里</small>
           </div>
 
@@ -227,21 +255,28 @@
     <!-- 图片预览 -->
     <Teleport to="body">
       <Transition name="fade">
-        <div v-if="lightbox" class="lightbox" @click.self="closePreview">
+        <div v-if="lightboxCurrent" class="lightbox" @click.self="closePreview">
           <figure class="lightbox-figure">
-            <img :src="msgMediaUrl(lightbox.media.url)" :alt="lightbox.media.name || '图片'" />
+            <img
+              :src="msgMediaUrl(lightboxCurrent.media.url, '', false, lightboxCurrent.ref)"
+              :alt="lightboxCurrent.media.name || '图片'"
+            />
             <figcaption class="lightbox-bar">
-              <span class="lightbox-name">{{ lightbox.media.name || '图片' }}</span>
-              <span class="lightbox-index" v-if="lightbox.list.length > 1">
-                {{ lightbox.index + 1 }} / {{ lightbox.list.length }}
+              <span class="lightbox-name">{{ lightboxCurrent.media.name || '图片' }}</span>
+              <span class="lightbox-index" v-if="lightbox.items.length > 1">
+                {{ lightbox.index + 1 }} / {{ lightbox.items.length }}
               </span>
-              <a :href="lightbox.media.url" target="_blank" rel="noopener noreferrer">打开原图</a>
-              <a :href="msgMediaUrl(lightbox.media.url, lightbox.media.name || 'image', true)">下载</a>
+              <a
+                :href="msgMediaUrl(lightboxCurrent.media.url, '', false, lightboxCurrent.ref)"
+                target="_blank"
+                rel="noopener noreferrer"
+              >打开原图</a>
+              <a :href="msgMediaUrl(lightboxCurrent.media.url, lightboxCurrent.media.name || 'image', true, lightboxCurrent.ref)">下载</a>
               <button type="button" @click="closePreview">关闭</button>
             </figcaption>
           </figure>
           <button
-            v-if="lightbox.list.length > 1"
+            v-if="lightbox.items.length > 1"
             type="button"
             class="lightbox-nav prev"
             title="上一张"
@@ -250,7 +285,7 @@
             ‹
           </button>
           <button
-            v-if="lightbox.list.length > 1"
+            v-if="lightbox.items.length > 1"
             type="button"
             class="lightbox-nav next"
             title="下一张"
@@ -268,11 +303,14 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { Icon, Input, Switch } from 'animal-island-vue'
 import { api, msgMediaUrl } from '../api.js'
-import { avatarGradient, avatarInitials, sessionAvatarKey } from '../utils/avatar.js'
+import { avatarGradient, avatarInitials, sessionAvatarKey, sessionAvatarUrl } from '../utils/avatar.js'
 import { friendlyPreview, shortId } from '../utils/messageText.js'
 import MsgLogBubble from '../components/MsgLogBubble.vue'
 
 const PAGE = 50
+// MAX_KEEP 前端最多保留的消息条数（与服务端留存上限一致）：面板常开时新消息会不断
+// 前插，不裁剪的话数组和 DOM 会一直增长到刷新页面为止。
+const MAX_KEEP = 5000
 const ACTIVE_KEY = 'aniabot.msglog.active'
 const SEEN_KEY = 'aniabot.msglog.seen'
 const SEED_KEY = 'aniabot.msglog.seeded'
@@ -298,7 +336,6 @@ const pendingNew = ref(0)
 const lastUpdated = ref(0)
 const listEl = ref(null)
 const mobileChat = ref(false)
-const lightbox = ref(null)
 const nameMap = ref({})
 const seen = reactive(readSeen())
 // 是否希望聊天视图保持贴底（用户主动上翻后关闭，图片加载撑高时不再强行回到底部）
@@ -390,6 +427,13 @@ const headAvatarStyle = computed(() => avatarGradient(sessionAvatarKey(activeSes
 const headInitials = computed(() =>
   activeSession.value?.kind === 'system' ? '通' : avatarInitials(headName.value),
 )
+// QQ 群 / 用户头像：其他平台或加载失败时回退渐变首字（按会话记录失败状态）
+const avatarBroken = ref({})
+function markAvatarBroken(s) {
+  if (!s) return
+  avatarBroken.value = { ...avatarBroken.value, [s.key]: true }
+}
+const headAvatarSrc = computed(() => sessionAvatarUrl(activeSession.value))
 
 const allTime = computed(() => {
   const s = sessions.value[0]
@@ -605,16 +649,21 @@ async function loadAll({ initial = false } = {}) {
     const page = await api.getMsgLogs({ limit: PAGE })
     const items = page.items || []
     if (initial || !allLogs.value.length) {
-      allLogs.value = items
+      allLogs.value = keepLatest(items)
       hasMoreAll.value = !!page.has_more
       return
     }
     const latest = allLogs.value[0]?.id || 0
     const fresh = items.filter((x) => x.id > latest)
-    if (fresh.length) allLogs.value = [...fresh, ...allLogs.value]
+    if (fresh.length) allLogs.value = keepLatest([...fresh, ...allLogs.value])
   } catch { /* 保持上一次数据 */ } finally {
     lastUpdated.value = Date.now()
   }
+}
+
+// keepLatest 只保留最新的 n 条（列表为新在前），丢弃已被服务端淘汰的旧条目。
+function keepLatest(list, n = MAX_KEEP) {
+  return list.length > n ? list.slice(0, n) : list
 }
 
 function ensureStore(key) {
@@ -630,7 +679,7 @@ async function loadSession(key) {
   store.loading = true
   try {
     const page = await api.getMsgLogs({ session: key, limit: PAGE })
-    store.items = page.items || []
+    store.items = keepLatest(page.items || [])
     store.hasMore = !!page.has_more
     store.loaded = true
     lastUpdated.value = Date.now()
@@ -704,7 +753,7 @@ async function refreshAll() {
     if (cursor <= latest + 1) break
   }
   if (!fresh.length) return
-  allLogs.value = [...fresh, ...allLogs.value]
+  allLogs.value = keepLatest([...fresh, ...allLogs.value])
   if (!isAll.value) return // 请求期间已切到会话视图：只更新缓存，不改动当前视图的滚动
   await afterIncoming(fresh.length, stick)
 }
@@ -723,7 +772,7 @@ async function refreshSession(key) {
     if (key === activeKey.value) await afterIncoming(PAGE, stick)
     return
   }
-  store.items = [...items, ...store.items]
+  store.items = keepLatest([...items, ...store.items])
   if (key !== activeKey.value) return
   await afterIncoming(items.length, stick)
 }
@@ -860,17 +909,25 @@ async function maybeFill() {
 
 /* ---------------- 图片预览 ---------------- */
 
+const lightbox = ref(null) // { items: [{ media, ref }], index }
+const lightboxCurrent = computed(() => {
+  const box = lightbox.value
+  if (!box || !box.items?.length) return null
+  return box.items[Math.min(box.index, box.items.length - 1)] || null
+})
+
 function openPreview(payload) {
-  lightbox.value = { media: payload.media, list: payload.list || [payload.media], index: payload.index || 0 }
+  const items = payload.items || []
+  if (!items.length) return
+  lightbox.value = { items, index: Math.min(payload.index || 0, items.length - 1) }
 }
 function closePreview() {
   lightbox.value = null
 }
 function stepPreview(step) {
   if (!lightbox.value) return
-  const list = lightbox.value.list
-  const index = (lightbox.value.index + step + list.length) % list.length
-  lightbox.value = { ...lightbox.value, index, media: list[index] }
+  const len = lightbox.value.items.length
+  lightbox.value = { ...lightbox.value, index: (lightbox.value.index + step + len) % len }
 }
 function onKeydown(e) {
   if (!lightbox.value) return
@@ -1043,6 +1100,15 @@ onUnmounted(() => {
 .head-avatar.all-avatar {
   background: linear-gradient(145deg, var(--accent-hover), var(--accent));
   color: #fff;
+}
+/* QQ 真实头像：填满圆角块；加载失败时模板回退到渐变首字 */
+.conv-avatar-img,
+.head-avatar-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
 }
 .conv-avatar.system-avatar {
   color: #fff;

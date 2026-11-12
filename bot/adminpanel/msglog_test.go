@@ -187,6 +187,149 @@ func TestMsgLogMediaReject(t *testing.T) {
 	}
 }
 
+// TestMsgLogMediaReferer 媒体代理带浏览器 UA 与同源 Referer（部分 CDN 会拒绝无来源请求）。
+func TestMsgLogMediaReferer(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Referer") != "http://media.example.com/" {
+			t.Errorf("Referer = %q", r.Header.Get("Referer"))
+		}
+		if r.Header.Get("User-Agent") == "" {
+			t.Errorf("缺少 User-Agent")
+		}
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer upstream.Close()
+	up, _ := url.Parse(upstream.URL)
+	s := &Server{opt: Options{Logger: slog.Default()}, mediaHTTP: &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			req.URL.Scheme = up.Scheme
+			req.URL.Host = up.Host
+			return http.DefaultTransport.RoundTrip(req)
+		}),
+	}}
+	rec := httptest.NewRecorder()
+	s.handleMsgLogMedia(rec, httptest.NewRequest("GET", "/api/msglogs/media?url="+url.QueryEscape("http://media.example.com/a.png"), nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestMsgLogMediaRefresh 旧地址失效（QQ 的 rkey 过期）时，凭 entry/index 续期
+// 后重试一次，用户仍能看到图片。
+func TestMsgLogMediaRefresh(t *testing.T) {
+	payload := []byte("fresh media")
+	fresh := "http://media.example.com/fresh.png"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/fresh.png" {
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(payload)
+			return
+		}
+		http.Error(w, "url expired", http.StatusForbidden)
+	}))
+	defer upstream.Close()
+	up, _ := url.Parse(upstream.URL)
+
+	var gotEntry uint64
+	var gotIndex int
+	calls := 0
+	s := &Server{
+		opt: Options{Logger: slog.Default(), MsgLogMedia: func(entryID uint64, index int) (string, bool) {
+			calls++
+			gotEntry, gotIndex = entryID, index
+			return fresh, true
+		}},
+		mediaHTTP: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			req.URL.Scheme = up.Scheme
+			req.URL.Host = up.Host
+			return http.DefaultTransport.RoundTrip(req)
+		})},
+	}
+	q := url.Values{
+		"url":   {"http://media.example.com/old.png?rkey=expired"},
+		"entry": {"7"},
+		"index": {"1"},
+	}
+	rec := httptest.NewRecorder()
+	s.handleMsgLogMedia(rec, httptest.NewRequest("GET", "/api/msglogs/media?"+q.Encode(), nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if body, _ := io.ReadAll(rec.Result().Body); string(body) != string(payload) {
+		t.Fatalf("续期后内容错误: %q", body)
+	}
+	if calls != 1 || gotEntry != 7 || gotIndex != 1 {
+		t.Fatalf("续期参数错误: calls=%d entry=%d index=%d", calls, gotEntry, gotIndex)
+	}
+}
+
+// TestMsgLogMediaResolveWithoutURL 日志里没有直链（记录时就拿不到地址）时，
+// 凭 entry/index 直接向平台申请，再代理返回。
+func TestMsgLogMediaResolveWithoutURL(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("media"))
+	}))
+	defer upstream.Close()
+	up, _ := url.Parse(upstream.URL)
+
+	s := &Server{
+		opt: Options{Logger: slog.Default(), MsgLogMedia: func(entryID uint64, index int) (string, bool) {
+			return "http://media.example.com/only-file-id.zip", true
+		}},
+		mediaHTTP: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			req.URL.Scheme = up.Scheme
+			req.URL.Host = up.Host
+			return http.DefaultTransport.RoundTrip(req)
+		})},
+	}
+	rec := httptest.NewRecorder()
+	s.handleMsgLogMedia(rec, httptest.NewRequest("GET", "/api/msglogs/media?entry=9&index=0&name=a.zip&download=1", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if cd := rec.Header().Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment;") {
+		t.Fatalf("下载响应头错误: %q", cd)
+	}
+}
+
+// TestMsgLogMediaRefreshUnavailable 没有续期能力时，旧地址失效按 502 返回；
+// entry/index 非法按 400 返回。
+func TestMsgLogMediaRefreshUnavailable(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "url expired", http.StatusForbidden)
+	}))
+	defer upstream.Close()
+	up, _ := url.Parse(upstream.URL)
+
+	s := &Server{opt: Options{Logger: slog.Default()}, mediaHTTP: &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			req.URL.Scheme = up.Scheme
+			req.URL.Host = up.Host
+			return http.DefaultTransport.RoundTrip(req)
+		}),
+	}}
+	rec := httptest.NewRecorder()
+	s.handleMsgLogMedia(rec, httptest.NewRequest("GET", "/api/msglogs/media?url="+url.QueryEscape("http://media.example.com/a.png")+"&entry=1&index=0", nil))
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("无续期能力时应返回 502, got %d", rec.Code)
+	}
+
+	for _, query := range []string{"entry=abc", "entry=1&index=-1", "entry=0"} {
+		rec = httptest.NewRecorder()
+		s.handleMsgLogMedia(rec, httptest.NewRequest("GET", "/api/msglogs/media?"+query, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", query, rec.Code)
+		}
+	}
+
+	// 既没有 url 也没有日志引用：保持旧的 400 提示
+	rec = httptest.NewRecorder()
+	s.handleMsgLogMedia(rec, httptest.NewRequest("GET", "/api/msglogs/media", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("缺少参数应返回 400, got %d", rec.Code)
+	}
+}
+
 // TestSanitizeMediaName 下载文件名清理。
 func TestSanitizeMediaName(t *testing.T) {
 	cases := map[string]string{

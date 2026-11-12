@@ -111,6 +111,14 @@ func (q *lilBot) GetNCrkey() ([]message.NCrkey, bool) {
 	return q.qq.GetNCrkey()
 }
 
+// RefreshMediaURL 实现 bot.MediaRefresher：把媒体地址续期能力透传给来源适配器。
+func (q *lilBot) RefreshMediaURL(kind, fileId, groupId, userId string) (string, bool) {
+	if mr, ok := q.qq.(adapter.MediaRefresherExt); ok {
+		return mr.RefreshMediaURL(kind, fileId, groupId, userId)
+	}
+	return "", false
+}
+
 // AITools 实现 aitool.Provider：向 AI 对话会话注入 QQ 平台专属工具
 // （AI 语音、戳一戳、群签到、群成员信息等，见 aitool.QQTools）。
 func (q *lilBot) AITools(ctx aitool.Context) []aitool.Tool {

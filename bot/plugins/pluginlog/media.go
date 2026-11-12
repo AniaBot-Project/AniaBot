@@ -26,14 +26,14 @@ func extractMedia(segs []message.OB11Segment) []msglog.Media {
 		switch seg.Type {
 		case message.SegmentImage:
 			if u := firstHTTPURL(seg.Data, "url", "file"); u != "" {
-				out = append(out, msglog.Media{Kind: msglog.MediaImage, URL: u})
+				out = append(out, msglog.Media{Kind: msglog.MediaImage, URL: u, FileId: segmentFileID(seg)})
 			}
 		case message.SegmentFile:
 			// 部分平台把图片作为 file 段发来（进站时未归一化为 image），
 			// 能判定为图片且拿到 http(s) 地址时按图片内联展示。
 			if img, ok := message.FileSegmentAsImage(seg); ok {
 				if u := firstHTTPURL(img, "url", "file"); u != "" {
-					out = append(out, msglog.Media{Kind: msglog.MediaImage, URL: u})
+					out = append(out, msglog.Media{Kind: msglog.MediaImage, URL: u, FileId: segmentFileID(seg)})
 					continue
 				}
 			}
@@ -42,15 +42,63 @@ func extractMedia(segs []message.OB11Segment) []msglog.Media {
 			}
 		case message.SegmentRecord:
 			if u := firstHTTPURL(seg.Data, "url", "file"); u != "" {
-				out = append(out, msglog.Media{Kind: msglog.MediaRecord, URL: u, Name: "语音"})
+				out = append(out, msglog.Media{Kind: msglog.MediaRecord, URL: u, Name: "语音", FileId: segmentFileID(seg)})
 			}
 		case message.SegmentVideo:
 			if u := firstHTTPURL(seg.Data, "url", "file"); u != "" {
-				out = append(out, msglog.Media{Kind: msglog.MediaVideo, URL: u, Name: "视频"})
+				out = append(out, msglog.Media{Kind: msglog.MediaVideo, URL: u, Name: "视频", FileId: segmentFileID(seg)})
 			}
 		}
 	}
 	return out
+}
+
+// segmentFileID 读取段数据里的平台文件 ID：QQ 的图片 / 语音 / 视频地址过期后
+// 需要用它向协议端重新申请地址（get_image / get_record / get_file）。
+func segmentFileID(seg message.OB11Segment) string {
+	s, _ := seg.Data["file_id"].(string)
+	return strings.TrimSpace(s)
+}
+
+// segmentKindOf 把消息日志的媒体类型映射为消息段类型（媒体地址续期接口按段
+// 类型区分平台接口）。
+func segmentKindOf(mediaKind string) string {
+	switch mediaKind {
+	case msglog.MediaImage:
+		return message.SegmentImage
+	case msglog.MediaRecord:
+		return message.SegmentRecord
+	case msglog.MediaVideo:
+		return message.SegmentVideo
+	case msglog.MediaFile:
+		return message.SegmentFile
+	}
+	return ""
+}
+
+// matchMediaURL 从重新拉取到的同一条消息里找出与旧媒体对应的地址：优先按
+// 文件 ID + 类型精确匹配（重新拉取后媒体顺序 / 数量可能变化），拿不到文件 ID
+// 时退回「同类型第 n 个」的位置匹配。
+func matchMediaURL(fresh []msglog.Media, old []msglog.Media, index int) string {
+	if index < 0 || index >= len(old) {
+		return ""
+	}
+	want := old[index]
+	if want.FileId != "" {
+		for _, m := range fresh {
+			if m.Kind == want.Kind && m.FileId == want.FileId && isHTTPURL(m.URL) {
+				return m.URL
+			}
+		}
+		return ""
+	}
+	if len(fresh) != len(old) {
+		return ""
+	}
+	if m := fresh[index]; m.Kind == want.Kind && isHTTPURL(m.URL) {
+		return m.URL
+	}
+	return ""
 }
 
 // fileMedia 解析 file 段：文件名优先 name，其次 file 源；大小读 file_size（

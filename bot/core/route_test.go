@@ -56,6 +56,51 @@ func TestRouteIDPrefix(t *testing.T) {
 	}
 }
 
+// mediaRefreshAdapter 支持媒体地址续期的假 QQ 适配器：记录最后一次调用参数。
+type mediaRefreshAdapter struct {
+	fakeAdapter
+	adapter.MediaRefresherExt
+	calls                         int
+	kind, fileID, groupID, userID string
+}
+
+func (m *mediaRefreshAdapter) RefreshMediaURL(kind, fileId, groupId, userId string) (string, bool) {
+	m.calls++
+	m.kind, m.fileID, m.groupID, m.userID = kind, fileId, groupId, userId
+	return "https://cdn.example.com/fresh?rkey=1", true
+}
+
+// TestRefreshMediaURLRouting 验证 core 的 bot.MediaRefresher 实现按会话 ID 前缀
+// 路由：群消息用群 ID，私聊用用户 ID；平台不支持续期时返回 false。
+func TestRefreshMediaURLRouting(t *testing.T) {
+	a := &AniaBot{}
+	qq := &mediaRefreshAdapter{fakeAdapter: fakeAdapter{name: "napcat", platform: "qq"}}
+	fs := &fakeAdapter{name: "feishu", platform: "feishu"}
+	a.adapters = []*adapterEntry{
+		{def: adapter.Definition{Name: "napcat", Platform: "qq", IDPrefix: message.QQIDPrefix}, adapter: qq},
+		{def: adapter.Definition{Name: "feishu", Platform: "feishu", IDPrefix: "fs:"}, adapter: fs},
+	}
+
+	got, ok := a.RefreshMediaURL(message.SegmentImage, "fid-1", "qq:123", "qq:456")
+	if !ok || got != "https://cdn.example.com/fresh?rkey=1" || qq.calls != 1 ||
+		qq.kind != message.SegmentImage || qq.fileID != "fid-1" || qq.groupID != "qq:123" {
+		t.Fatalf("群消息续期路由错误: %q ok=%v calls=%d params=%+v", got, ok, qq.calls, qq)
+	}
+
+	// 私聊：群 ID 为空时用用户 ID 路由
+	if _, ok := a.RefreshMediaURL(message.SegmentImage, "fid-2", "", "qq:456"); !ok || qq.calls != 2 {
+		t.Fatalf("私聊续期路由错误: ok=%v calls=%d", ok, qq.calls)
+	}
+
+	// 非 QQ 平台不具备该能力
+	if _, ok := a.RefreshMediaURL(message.SegmentImage, "fid-3", "fs:oc_1", ""); ok {
+		t.Fatal("飞书适配器不应支持媒体地址续期")
+	}
+	if _, ok := a.RefreshMediaURL(message.SegmentImage, "fid-4", "", ""); ok {
+		t.Fatal("缺少会话 ID 时不应成功")
+	}
+}
+
 // TestRouteEmptyAdapter 无适配器时路由返回 nil（发送接口优雅失败）。
 func TestRouteEmptyAdapter(t *testing.T) {
 	a := &AniaBot{}
