@@ -90,7 +90,7 @@
     <section class="space-y-3">
       <Card v-if="logs.length === 0" style="padding: 0">
         <div class="py-12 text-sm text-slate-400 text-center">
-          暂无符合条件的 Query 记录（@ 机器人或私聊触发 AI 回复、或主动互动发言后在此展示）
+          暂无符合条件的 Query 记录（@ 机器人、私聊或面板试聊触发 AI 回复、或主动互动发言后在此展示）
         </div>
       </Card>
 
@@ -111,7 +111,7 @@
               主动互动
             </Tag>
             <Tag variant="solid" size="small">
-              {{ log.chat_type === 'group' ? '群聊' : '私聊' }} · {{ log.target_id }}
+              {{ chatTypeText(log.chat_type) }} · {{ log.target_id }}
             </Tag>
             <Tag v-if="log.tool_calls?.length" variant="solid" size="small">
               {{ log.tool_calls_total || log.tool_calls.length }} 次工具调用
@@ -155,7 +155,7 @@
             主动互动
           </Tag>
           <Tag variant="solid" size="small">
-            {{ detail.chat_type === 'group' ? '群聊' : '私聊' }} · {{ detail.target_id }}
+            {{ chatTypeText(detail.chat_type) }} · {{ detail.target_id }}
           </Tag>
           <span class="text-[11px] text-slate-400 font-mono">{{ fmtTime(detail.time) }}</span>
           <Tooltip class="ml-auto" title="关闭" placement="bottom">
@@ -267,6 +267,7 @@ const typeTabs = [
   { value: '', label: '全部' },
   { value: 'group', label: '群聊' },
   { value: 'friend', label: '私聊' },
+  { value: 'panel', label: '试聊' },
 ]
 
 // 来源筛选：普通对话（含升级前的历史记录） / 主动互动
@@ -439,6 +440,11 @@ function elapsedMs(log) {
   const t = new Date(log.time).getTime()
   if (isNaN(t)) return log.duration_ms
   return Math.max(0, now.value - t)
+}
+
+// 会话类型展示：group 群聊 / friend 私聊 / panel 面板试聊
+function chatTypeText(t) {
+  return { group: '群聊', friend: '私聊', panel: '试聊' }[t] || t || '未知'
 }
 
 function statusText(s) {

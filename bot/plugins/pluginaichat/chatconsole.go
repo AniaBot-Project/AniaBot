@@ -28,10 +28,13 @@ import (
 //
 // 与平台会话的区别：
 //   - 回复只回显在面板中，不向任何平台发送消息（SendText / SendImage / SendFile
-//     全部改为写入转录）；
+//     全部改为写入转录）；AI 用 ||| 指定的多条消息同样在面板中拆成多条展示，
+//     与线上发送效果一致；
 //   - 没有人工审批环节：危险工具直接放行并在转录里留一条系统提示（面板操作者
 //     本身就是管理员，等价于「工具审批关闭」时的线上行为）；
-//   - 不写 Query 日志、不计入每日配额：试聊属于调试行为，不应污染生产统计与限流；
+//   - 照常写 Query 日志并计入 Token 统计，会话类型标记为 panel（面板可据此
+//     筛选、统计里也能单列「试聊」），但**不计入每日配额**：试聊是调试行为，
+//     不该占用线上会话的额度；
 //   - 会话各自持有独立的 ChatBot（上下文跨轮、跨重启延续），转录额外持久化到
 //     PersistentStorage，便于刷新页面或重启后继续看。
 //
@@ -465,9 +468,13 @@ func (m *chatConsoleManager) send(id, text string) error {
 func (m *chatConsoleManager) run(ctx context.Context, cancel context.CancelFunc, s *chatConsoleSession, input, raw string, asstSeq int64, timeout time.Duration) {
 	p := m.plugin
 	start := time.Now()
+	// rec 是本轮 Query 日志记录；持久化不支持 SQL 等情况下为 nil（只回显转录）
+	var rec *queryRecorder
 	defer func() {
 		if r := recover(); r != nil {
-			m.finish(s, asstSeq, "", aichat.TokenUsage{}, fmt.Errorf("内部错误: %v", r), timeout, start)
+			err := fmt.Errorf("内部错误: %v", r)
+			m.finish(s, asstSeq, "", aichat.TokenUsage{}, err, timeout, start)
+			p.finishConsoleQuery(rec, aichat.TokenUsage{}, "", "", err)
 			m.logger.Error("面板试聊执行异常", "session", s.info.ID, "panic", r)
 		}
 		cancel()
@@ -492,8 +499,27 @@ func (m *chatConsoleManager) run(ctx context.Context, cancel context.CancelFunc,
 	opts.OnStreamDelta = func(delta string) { m.onStreamDelta(s, asstSeq, delta) }
 	opts.OnStreamRoundEnd = func() { m.onStreamRoundEnd(s, asstSeq) }
 
+	// 工具调用同时进入转录（面板展示明细）与 Query 日志（落盘审计）：ChatBot 只
+	// 保留一个观察者，这里合并挂钩。试聊照常写入 Query 日志并计入 Token 统计，
+	// 会话类型标记为 panel，与线上群聊/私聊流量区分。
+	note := "面板试聊会话「" + s.info.Title + "」"
+	rec = p.beginConsoleQuery(chat, m.queryTarget(s), raw, func(info aichat.ToolCallInfo) {
+		m.onToolCall(s, info)
+	})
+
 	resp, usage, err := chat.Chat(ctx, input, m.callbacks(ctx, s, asstSeq), opts)
+	chat.SetToolObserver(nil)
 	m.finish(s, asstSeq, resp, usage, err, timeout, start)
+	p.finishConsoleQuery(rec, usage, resp, note, err)
+}
+
+// queryTarget 返回试聊 Query 日志里的目标标识：绑定真实会话时用其 ID（与线上
+// 日志对齐，便于按同一个群/好友检索），通用试聊没有目标，用会话标题代替。
+func (m *chatConsoleManager) queryTarget(s *chatConsoleSession) string {
+	if id := strings.TrimSpace(s.info.TargetID); id != "" {
+		return id
+	}
+	return s.info.Title
 }
 
 // ensureChat 返回会话的 ChatBot（首次调用时创建并回放历史）；系统提示词与场景
@@ -864,7 +890,21 @@ func (m *chatConsoleManager) finish(s *chatConsoleSession, seq int64, resp strin
 			final = "（AI 没有返回内容）"
 		}
 	}
-	msg.Text = chatConsoleTruncate(final, chatConsoleMaxMessageRunes)
+	// 与线上发送一致：AI 用 ||| 指定消息边界时拆成多条消息，面板同样拆成多个
+	// 气泡展示（流式阶段已把 ||| 显示为换行，这里换成真正的多条消息）；附件、
+	// 用量与耗时留在第一条上，后续片段各占一条 assistant 消息。
+	segments := replySegments(final)
+	msg.Text = chatConsoleTruncate(segments[0], chatConsoleMaxMessageRunes)
+	for _, seg := range segments[1:] {
+		s.msgs = append(s.msgs, plugininfo.ChatConsoleMessage{
+			Seq:    s.nextSeqLocked(),
+			Role:   plugininfo.ChatConsoleRoleAssistant,
+			Text:   chatConsoleTruncate(seg, chatConsoleMaxMessageRunes),
+			Status: plugininfo.ChatConsoleStatusOK,
+			Time:   time.Now(),
+		})
+	}
+	s.trimLocked()
 }
 
 // msgLocked 按 Seq 查找消息（要求 s.mu 已持有）。

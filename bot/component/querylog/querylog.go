@@ -41,6 +41,15 @@ const (
 	KindProactive = "proactive" // 主动互动（AI 自行发起的发言）
 )
 
+// 会话类型（Entry.ChatType）。group / friend 是线上平台的群聊 / 私聊会话；
+// panel 是面板「试聊室」里的调试对话——它复用同一套对话管线，同样计入 Token
+// 统计，但不属于任何线上会话，单独成类便于筛选与区分。
+const (
+	ChatTypeGroup  = "group"
+	ChatTypeFriend = "friend"
+	ChatTypePanel  = "panel"
+)
+
 // 用户输入、工具参数、工具结果、最终回复均由 AI 与工具生成，始终完整记录，
 // 不做长度截断（前端展示时对超长内容折叠）。Truncate 仅供其它展示场景复用。
 
@@ -73,8 +82,8 @@ type Entry struct {
 	ID               string           `json:"id"`
 	Time             time.Time        `json:"time"`
 	Kind             string           `json:"kind,omitempty"` // 空为普通对话，见 Kind* 常量
-	ChatType         string           `json:"chat_type"`      // group / friend
-	TargetID         string           `json:"target_id"`      // 目标会话 ID / 用户 ID
+	ChatType         string           `json:"chat_type"`      // group / friend / panel
+	TargetID         string           `json:"target_id"`      // 目标会话 ID / 用户 ID（试聊为绑定目标或其会话标题）
 	Senders          []string         `json:"senders,omitempty"`
 	Query            string           `json:"query"` // 合并后的用户输入（可能含排队消息）
 	Status           Status           `json:"status"`
@@ -256,7 +265,7 @@ func (l *Logger) Recent(limit int) []Entry {
 // Filter Query 日志的查询条件，零值字段不参与过滤。
 type Filter struct {
 	Kind     string    // chat / proactive（空不过滤；chat 同时命中未标记的历史记录）
-	ChatType string    // group / friend
+	ChatType string    // group / friend / panel
 	TargetID string    // 目标会话 ID / 用户 ID（精确匹配）
 	Sender   string    // 触发人 QQ（精确匹配，命中批次内任一发言者）
 	Start    time.Time // 起始时间（含），零值不限

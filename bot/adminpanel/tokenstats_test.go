@@ -215,6 +215,59 @@ func TestTokenStatsDetailProactiveSource(t *testing.T) {
 	}
 }
 
+// 面板试聊（chat_type=panel）按会话类型单列，但用量仍计入总量与目标排行。
+func TestTokenStatsDetailPanelChatType(t *testing.T) {
+	now := time.Now()
+	s := &Server{opt: Options{
+		QueryLogs: func(f querylog.Filter) []querylog.Entry {
+			return []querylog.Entry{
+				{Time: now, ChatType: querylog.ChatTypePanel, TargetID: "通用试聊", Status: querylog.StatusSuccess, TotalTokens: 300},
+				{Time: now, ChatType: querylog.ChatTypeGroup, TargetID: "100", Status: querylog.StatusSuccess, TotalTokens: 700},
+			}
+		},
+	}}
+	rec := httptest.NewRecorder()
+	s.handleTokenStatsDetail(rec, httptest.NewRequest("GET", "/api/tokenstats/detail", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	var got struct {
+		Summary struct {
+			TotalTokens int `json:"total_tokens"`
+		} `json:"summary"`
+		ByChatType map[string]struct {
+			Requests    int `json:"requests"`
+			TotalTokens int `json:"total_tokens"`
+		} `json:"by_chat_type"`
+		TopTargets []struct {
+			ChatType string `json:"chat_type"`
+			TargetID string `json:"target_id"`
+		} `json:"top_targets"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if got.ByChatType["panel"].TotalTokens != 300 || got.ByChatType["panel"].Requests != 1 {
+		t.Fatalf("by_chat_type.panel = %+v", got.ByChatType["panel"])
+	}
+	if got.ByChatType["group"].TotalTokens != 700 {
+		t.Fatalf("by_chat_type.group = %+v", got.ByChatType["group"])
+	}
+	if got.Summary.TotalTokens != 1000 {
+		t.Fatalf("总量应包含试聊用量: %+v", got.Summary)
+	}
+	seen := false
+	for _, tg := range got.TopTargets {
+		if tg.ChatType == querylog.ChatTypePanel && tg.TargetID == "通用试聊" {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Fatalf("目标排行缺少试聊记录: %+v", got.TopTargets)
+	}
+}
+
 // TestTokenStatsNoCap 全部留存统计不再截取最近 500+500 条：
 // 600 条 Query + 600 条任务日志应全部计入（1200 runs）。
 func TestTokenStatsNoCap(t *testing.T) {

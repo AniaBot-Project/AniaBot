@@ -206,7 +206,7 @@ type tokenDayDetail struct {
 // tokenTargetStat 按会话目标（目标会话 ID / 用户 ID）聚合的用量。
 type tokenTargetStat struct {
 	tokenStatAcc
-	ChatType string `json:"chat_type"` // group / friend
+	ChatType string `json:"chat_type"` // group / friend / panel
 	TargetID string `json:"target_id"`
 }
 
@@ -238,8 +238,8 @@ func summarize(a *tokenStatAcc) tokenStatSummary {
 }
 
 // handleTokenStatsDetail 返回更细粒度的 token 统计维度：按来源（对话 / 主动互动 /
-// 定时任务）、会话类型（群聊 / 私聊）、执行状态、消耗目标排行（Top 10）、24 小时分布与
-// 分来源的每日序列。数据源与 handleTokenStats 相同，覆盖**全部留存日志**
+// 定时任务）、会话类型（群聊 / 私聊 / 面板试聊）、执行状态、消耗目标排行（Top 10）、
+// 24 小时分布与分来源的每日序列。数据源与 handleTokenStats 相同，覆盖**全部留存日志**
 // （range=all 时即全部留存记录，不再截取最近 N 条）。
 // 支持查询参数 range 限定统计窗口：today / yesterday / 7d / 30d / month / all
 // （默认 all，即全部留存记录）/ custom（自定义，需配合 start / end=2006-01-02，
@@ -267,7 +267,7 @@ func (s *Server) handleTokenStatsDetail(w http.ResponseWriter, r *http.Request) 
 		buckets[ds] = &daily[len(daily)-1]
 	}
 
-	var summary, today, byQuery, byProactive, byTask, byGroup, byFriend tokenStatAcc
+	var summary, today, byQuery, byProactive, byTask, byGroup, byFriend, byPanel tokenStatAcc
 	// hourly 与 daily 同构（按来源拆分，Date 字段不用），供单天窗口时前端直接渲染当日小时序列
 	hourly := make([]tokenDayDetail, 24)
 	statusCount := map[string]int{}
@@ -301,10 +301,12 @@ func (s *Server) handleTokenStatsDetail(w http.ResponseWriter, r *http.Request) 
 			byQuery.add(prompt, completion, total, cached)
 		}
 		switch chatType {
-		case "group":
+		case querylog.ChatTypeGroup:
 			byGroup.add(prompt, completion, total, cached)
-		case "friend":
+		case querylog.ChatTypeFriend:
 			byFriend.add(prompt, completion, total, cached)
+		case querylog.ChatTypePanel:
+			byPanel.add(prompt, completion, total, cached)
 		}
 		hh := &hourly[lt.Hour()]
 		hh.Total.add(prompt, completion, total, cached)
@@ -357,6 +359,7 @@ func (s *Server) handleTokenStatsDetail(w http.ResponseWriter, r *http.Request) 
 	byTask.finish()
 	byGroup.finish()
 	byFriend.finish()
+	byPanel.finish()
 	for i := range hourly {
 		hourly[i].Query.finish()
 		hourly[i].Proactive.finish()
@@ -396,7 +399,7 @@ func (s *Server) handleTokenStatsDetail(w http.ResponseWriter, r *http.Request) 
 		"summary":        summarize(&summary),
 		"today":          summarize(&today),
 		"by_source":      map[string]tokenStatSummary{"query": summarize(&byQuery), "proactive": summarize(&byProactive), "task": summarize(&byTask)},
-		"by_chat_type":   map[string]tokenStatSummary{"group": summarize(&byGroup), "friend": summarize(&byFriend)},
+		"by_chat_type":   map[string]tokenStatSummary{"group": summarize(&byGroup), "friend": summarize(&byFriend), "panel": summarize(&byPanel)},
 		"by_status":      statusCount,
 		"top_targets":    ranked,
 		"hourly":         hourly,

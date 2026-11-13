@@ -194,6 +194,57 @@ func (p *AIChatPlugin) finishProactiveQuery(r *queryRecorder, usage aichat.Token
 	p.writeQueryResult(r, usage, aichat.TokenUsage{}, status, reply, note, errText)
 }
 
+// beginConsoleQuery 开始记录一次面板试聊 Query。试聊复用真实对话管线，因此同样
+// 写入 Query 日志并计入 Token 统计；只是会话类型固定为 panel，与线上群聊/私聊
+// 流量区分开。observe 是宿主自己的工具观察者（试聊转录要展示工具明细），与日志
+// 观察者合并挂在同一个 ChatBot 上（ChatBot 只保留一个观察者）。
+func (p *AIChatPlugin) beginConsoleQuery(chat *aichat.ChatBot, targetID, query string, observe func(aichat.ToolCallInfo)) *queryRecorder {
+	var rec *queryRecorder
+	if p.queryLogger != nil {
+		rec = &queryRecorder{start: time.Now()}
+		rec.entry = p.queryLogger.Record(querylog.Entry{
+			ChatType: querylog.ChatTypePanel,
+			TargetID: targetID,
+			Query:    query,
+			Status:   querylog.StatusRunning,
+		})
+	}
+	if chat != nil {
+		chat.SetToolObserver(func(info aichat.ToolCallInfo) {
+			if observe != nil {
+				observe(info)
+			}
+			if rec != nil {
+				p.onToolCall(rec, info)
+			}
+		})
+	}
+	return rec
+}
+
+// finishConsoleQuery 收尾一次面板试聊 Query：回填状态、耗时、token 用量、工具
+// 明细与最终回复。note 记试聊会话标题（面板据此辨认是哪次测试）。试聊会话不
+// 注册子代理 / 团队等会派生的工具，因此不需要并入会话级 extraUsage。
+func (p *AIChatPlugin) finishConsoleQuery(r *queryRecorder, usage aichat.TokenUsage, reply, note string, err error) {
+	if r == nil {
+		return
+	}
+	status := querylog.StatusSuccess
+	errText := ""
+	if err != nil {
+		errText = err.Error()
+		switch {
+		case errors.Is(err, context.Canceled):
+			status = querylog.StatusStopped
+		case errors.Is(err, context.DeadlineExceeded):
+			status = querylog.StatusTimeout
+		default:
+			status = querylog.StatusError
+		}
+	}
+	p.writeQueryResult(r, usage, aichat.TokenUsage{}, status, reply, note, errText)
+}
+
 // writeQueryResult 把一次 Query 的终态写回记录：状态、耗时、token 用量、
 // 工具调用明细与结果说明。普通 Query 与主动互动共用，保证两边字段回填一致。
 func (p *AIChatPlugin) writeQueryResult(r *queryRecorder, usage, extra aichat.TokenUsage, status querylog.Status, reply, note, errText string) {
