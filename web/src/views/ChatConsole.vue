@@ -225,10 +225,43 @@
 
     <!-- 新建会话弹窗 -->
     <Modal variant="default" v-model:open="showCreate" title="新建试聊会话" :typewriter="false" :show-footer="false" :width="480">
-      <form class="space-y-4" @submit.prevent="onCreate">
+      <form class="space-y-4 overflow-x-hidden" @submit.prevent="onCreate">
         <div>
           <label class="block text-xs text-slate-500 mb-1.5">对话目标</label>
-          <Select v-model="newTarget" :options="targetOptions" class="w-full" />
+          <!-- 自定义目标选择器：通讯录可能有几十上百个群/好友，组件库的下拉弹层在窄弹窗里
+               会被裁掉，这里用内联搜索 + 列表（不超出弹窗边界，也方便按名字检索） -->
+          <div class="target-picker" @keydown.enter.prevent>
+            <button type="button" class="target-current" @click="pickerOpen = !pickerOpen">
+              <span class="target-badge" :class="'kind-' + selectedTarget.kind">{{ kindGlyph(selectedTarget) }}</span>
+              <span class="target-current-name">{{ targetDisplay(selectedTarget) }}</span>
+              <span class="target-current-id">{{ selectedTarget.id || '无会话上下文' }}</span>
+              <span class="target-current-toggle">{{ pickerOpen ? '收起' : '更换' }}</span>
+            </button>
+
+            <div v-if="pickerOpen" class="target-panel">
+              <Input v-model="targetQuery" size="small" placeholder="搜索群名 / 备注 / ID" allow-clear />
+              <div class="target-list">
+                <button
+                  v-for="t in filteredTargets"
+                  :key="t.key"
+                  type="button"
+                  class="target-opt"
+                  :class="{ active: t.key === newTarget }"
+                  @click="pickTarget(t)"
+                >
+                  <span class="target-badge" :class="'kind-' + t.kind">{{ kindGlyph(t) }}</span>
+                  <span class="target-opt-main">
+                    <span class="target-opt-name">{{ t.name }}</span>
+                    <span class="target-opt-id">{{ t.id || '不绑定任何群聊 / 私聊' }}</span>
+                  </span>
+                  <span v-if="t.platform" class="target-opt-plat">{{ t.platform }}</span>
+                </button>
+                <p v-if="!filteredTargets.length" class="target-empty">
+                  {{ targetQuery ? '没有匹配「' + targetQuery + '」的目标' : '暂无可选目标' }}
+                </p>
+              </div>
+            </div>
+          </div>
           <p v-if="loadingTargets" class="mt-1.5 text-[11px] text-slate-400">正在加载平台通讯录…</p>
           <p v-else class="mt-1.5 text-[11px] text-slate-400 leading-relaxed">{{ targetHint }}</p>
         </div>
@@ -251,7 +284,7 @@ import { confirmAction } from '../ui/confirm'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { Button, Input, Modal, Select } from 'animal-island-vue'
+import { Button, Input, Modal } from 'animal-island-vue'
 import { api } from '../api.js'
 
 // 试聊室：面板内直接和 AI 对话做测试。回复只回显在本页，不发送到任何平台；
@@ -279,9 +312,12 @@ const createErr = ref('')
 const newTitle = ref('')
 const newTarget = ref('test|')
 // 目标列表至少包含「通用试聊」：平台通讯录加载失败时仍可建通用会话
-const targets = ref([{ kind: 'test', id: '', name: '通用试聊' }])
+const targets = ref([{ kind: 'test', id: '', name: '通用试聊', key: 'test|' }])
 const targetsLoaded = ref(false)
 const loadingTargets = ref(false)
+// 目标选择器：内联搜索 + 列表（不用组件库下拉弹层，避免在窄弹窗里被裁切）
+const pickerOpen = ref(true)
+const targetQuery = ref('')
 
 let pollTimer = null
 let pollMs = IDLE_POLL_MS
@@ -289,18 +325,21 @@ let pollMs = IDLE_POLL_MS
 const active = computed(() => sessions.value.find((s) => s.id === activeId.value) || null)
 const canSend = computed(() => !!active.value && !busy.value && !sending.value && draft.value.trim() !== '')
 
-const targetOptions = computed(() =>
-  targets.value.map((t) => ({
-    key: t.kind + '|' + (t.id || ''),
-    label:
-      t.kind === 'test'
-        ? '通用试聊（不绑定会话上下文）'
-        : (t.kind === 'group' ? '群 · ' : '私聊 · ') + t.name,
-  })),
+const selectedTarget = computed(
+  () => targets.value.find((t) => t.key === newTarget.value) || targets.value[0],
 )
 
+// 搜索过滤：群名 / 好友备注 / ID / 平台任一命中
+const filteredTargets = computed(() => {
+  const q = targetQuery.value.trim().toLowerCase()
+  if (!q) return targets.value
+  return targets.value.filter((t) =>
+    [t.name, t.id, t.platform].some((v) => (v || '').toLowerCase().includes(q)),
+  )
+})
+
 const targetHint = computed(() => {
-  const t = targets.value.find((x) => x.kind + '|' + (x.id || '') === newTarget.value)
+  const t = selectedTarget.value
   if (!t || t.kind === 'test') return '只带基础工具，不绑定任何群聊/私聊的提示词覆盖、记忆与知识库'
   const plat = t.platform ? '（' + t.platform + '）' : ''
   return '绑定后继承该会话的系统提示词覆盖、长期记忆、知识库与定时任务等工具' + plat
@@ -330,10 +369,19 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 }
 
+// kindGlyph 会话与目标共用：会话用 target_kind，目标用 kind
 function kindGlyph(s) {
-  if (s.target_kind === 'group') return '群'
-  if (s.target_kind === 'friend') return '私'
+  const kind = s.kind || s.target_kind
+  if (kind === 'group') return '群'
+  if (kind === 'friend') return '私'
   return '试'
+}
+
+// targetDisplay 目标展示名（通用试聊不带名字）
+function targetDisplay(t) {
+  if (!t) return ''
+  if (t.kind === 'test') return '通用试聊'
+  return t.name || t.id || ''
 }
 
 function targetLabel(s) {
@@ -576,12 +624,16 @@ async function openCreate() {
   showCreate.value = true
   createErr.value = ''
   newTitle.value = ''
+  targetQuery.value = ''
+  pickerOpen.value = true
   if (targetsLoaded.value) return
   loadingTargets.value = true
   try {
     const data = await api.getChatConsoleTargets()
-    const rest = (data.items || []).filter((t) => t.kind !== 'test')
-    targets.value = [{ kind: 'test', id: '', name: '通用试聊' }, ...rest]
+    const rest = (data.items || [])
+      .filter((t) => t.kind !== 'test')
+      .map((t) => ({ ...t, key: t.kind + '|' + (t.id || '') }))
+    targets.value = [{ kind: 'test', id: '', name: '通用试聊', key: 'test|' }, ...rest]
     targetsLoaded.value = true
   } catch (e) {
     // 通讯录拉取失败不影响通用试聊
@@ -592,17 +644,27 @@ async function openCreate() {
   }
 }
 
+// pickTarget 选中目标并收起列表
+function pickTarget(t) {
+  newTarget.value = t.key
+  pickerOpen.value = false
+  targetQuery.value = ''
+}
+
 async function onCreate() {
   if (creating.value) return
   createErr.value = ''
-  const [kind, id] = newTarget.value.split('|')
-  const t = targets.value.find((x) => x.kind === kind && (x.id || '') === id)
+  const t = selectedTarget.value
+  if (!t) {
+    createErr.value = '请选择一个对话目标'
+    return
+  }
   creating.value = true
   try {
     const sess = await api.createChatConsoleSession({
-      target_kind: kind,
-      target_id: id || '',
-      target_name: t ? t.name : '',
+      target_kind: t.kind,
+      target_id: t.id || '',
+      target_name: t.name || '',
       title: newTitle.value.trim(),
     })
     showCreate.value = false
@@ -1370,6 +1432,147 @@ watch(busy, () => setPollSpeed())
   min-width: 0;
   font-size: 10px;
   line-height: 1.5;
+  color: var(--ink-disabled);
+}
+
+/* 新建会话：对话目标选择器（内联搜索 + 列表，不超出弹窗） */
+.target-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.target-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 2px solid var(--line-input);
+  background: var(--surface-input);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.target-current:hover {
+  border-color: var(--accent);
+}
+.target-badge {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 800;
+  text-shadow: 0 1px 2px rgb(94 68 35 / 0.26);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.35);
+}
+.target-badge.kind-test { background: linear-gradient(145deg, #f7cd67, #efb93f); }
+.target-badge.kind-group { background: linear-gradient(145deg, var(--accent-hover), var(--accent)); }
+.target-badge.kind-friend { background: linear-gradient(145deg, #8fb7f0, #6a97dd); }
+.target-current-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.target-current-id {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.target-current-toggle {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+.target-panel {
+  width: 100%;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1.5px solid var(--line-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.target-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 208px;
+  margin-top: 6px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.target-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 9px;
+  border: 1.5px solid transparent;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.target-opt:hover {
+  background: var(--surface-2);
+}
+.target-opt.active {
+  background: var(--accent-tint);
+  border-color: #cdeee8;
+}
+.target-opt-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.target-opt-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.target-opt-id {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-disabled);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.target-opt-plat {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--ink-soft);
+  font-size: 9.5px;
+  font-weight: 700;
+}
+.target-empty {
+  margin: 8px 0 4px;
+  text-align: center;
+  font-size: 11px;
   color: var(--ink-disabled);
 }
 
