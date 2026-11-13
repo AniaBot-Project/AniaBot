@@ -17,7 +17,7 @@
           type="button"
           class="sess-item"
           :class="{ active: s.id === activeId }"
-          @click="selectSession(s.id)"
+          @click="selectSession(s.id, { focus: true })"
         >
           <span class="sess-avatar" :class="'kind-' + s.target_kind">{{ kindGlyph(s) }}</span>
           <span class="sess-main">
@@ -199,16 +199,20 @@
       <footer class="composer">
         <p v-if="errorMsg" class="composer-error">{{ errorMsg }}</p>
         <textarea
+          ref="composerEl"
           v-model="draft"
           class="composer-input"
           rows="2"
-          :disabled="!active || busy"
+          :disabled="!active"
           :placeholder="active ? '输入一条消息，Enter 发送、Shift+Enter 换行' : '先选择或新建一个试聊会话'"
           @keydown.enter.exact.prevent="onEnter"
         />
         <div class="composer-bar">
           <span class="composer-hint">
-            试聊会真实执行 AI 选中的工具（含文件 / 命令类），回复不会发送到任何平台；每轮对话会记入 Query 日志并计入 Token 统计
+            <template v-if="busy">AI 正在生成回复，可以先输入下一条消息，生成结束后再发送</template>
+            <template v-else>
+              试聊会真实执行 AI 选中的工具（含文件 / 命令类），回复不会发送到任何平台；每轮对话会记入 Query 日志并计入 Token 统计
+            </template>
           </span>
           <Button
             type="primary"
@@ -306,6 +310,7 @@ const toolsOpen = reactive({})
 const nearBottom = ref(true)
 
 const scrollEl = ref(null)
+const composerEl = ref(null)
 
 const showCreate = ref(false)
 const creating = ref(false)
@@ -511,8 +516,12 @@ function backToList() {
   errorMsg.value = ''
 }
 
-async function selectSession(id) {
+// selectSession 切换会话；opts.focus 为真时把焦点交给编辑框（用户点选会话时用，
+// 首次进入页面自动选中第一个会话不抢焦点）
+async function selectSession(id, opts = {}) {
   if (!id || id === activeId.value) return
+  // 用户点选会话后顺手把焦点交给编辑框（同步聚焦，切过去就能直接打字）
+  if (opts.focus) focusComposer()
   activeId.value = id
   messages.value = []
   busy.value = false
@@ -552,6 +561,28 @@ function stopPolling() {
 
 // ---------- 发送 / 停止 / 清空 / 删除 ----------
 
+// focusComposer 把焦点交还编辑框，光标落到末尾。点「发送」按钮或切换会话后焦点会
+// 落在按钮上，不交还的话接着发消息还得再用鼠标点一下编辑框。
+// 先同步聚焦（仍在点击事件的同一任务里，移动端也能保住软键盘），编辑框此刻还未
+// 启用时（例如刚切换会话、DOM 还没更新）再等一次渲染后重试。
+function focusComposer() {
+  if (focusComposerNow()) return
+  nextTick(focusComposerNow)
+}
+
+function focusComposerNow() {
+  const el = composerEl.value
+  if (!el || el.disabled) return false
+  el.focus()
+  const end = el.value.length
+  try {
+    el.setSelectionRange(end, end)
+  } catch {
+    // 个别浏览器在元素不可聚焦时不允许设置选区，忽略即可
+  }
+  return true
+}
+
 // Enter 发送；中文输入法组合态下的回车只用于选词，不能当发送
 function onEnter(e) {
   if (e && (e.isComposing || e.keyCode === 229)) return
@@ -562,11 +593,15 @@ async function onSend() {
   const text = draft.value.trim()
   const id = activeId.value
   if (!text || !id || busy.value || sending.value) return
+  // 点「发送」按钮时焦点落在按钮上，先同步抢回编辑框（移动端软键盘也不会被收起）
+  focusComposer()
   sending.value = true
   errorMsg.value = ''
   try {
     await api.sendChatConsoleMessage(id, text)
     draft.value = ''
+    // 发送成功后立刻把焦点还给编辑框，不用再点一下才能接着发下一条
+    focusComposer()
     // 立即拉一次，让用户消息与「生成中」气泡立刻出现
     await pollMessages()
     busy.value = true
@@ -575,6 +610,8 @@ async function onSend() {
     setPollSpeed()
   } catch (e) {
     errorMsg.value = e.message
+    // 失败时草稿还在，焦点也留在编辑框，可以直接改一下再回车重发
+    focusComposer()
   } finally {
     sending.value = false
   }
@@ -585,6 +622,8 @@ async function onStop() {
   try {
     await api.stopChatConsole(activeId.value)
     await pollMessages()
+    // 「停止」按钮会随生成结束消失，焦点交还编辑框避免落到页面上
+    focusComposer()
   } catch (e) {
     errorMsg.value = e.message
   }
@@ -599,6 +638,7 @@ async function onClear() {
     messages.value = []
     for (const k of Object.keys(toolsOpen)) delete toolsOpen[k]
     await loadSessions()
+    focusComposer()
   } catch (e) {
     errorMsg.value = e.message
   }
@@ -671,8 +711,10 @@ async function onCreate() {
     showCreate.value = false
     await loadSessions()
     if (sess && sess.id) {
-      await selectSession(sess.id)
+      await selectSession(sess.id, { focus: true })
     }
+    // 新建完会话直接可以开始打字（弹窗关闭后焦点不留在页面上）
+    focusComposer()
   } catch (e) {
     createErr.value = e.message
   } finally {
