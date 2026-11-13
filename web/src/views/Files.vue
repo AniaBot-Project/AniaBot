@@ -34,7 +34,7 @@
           <template v-else-if="tab.name === 'mcp'">
             <p class="text-xs text-slate-500">配置 AI 可调用的 MCP 服务器，修改保存后重启生效。</p>
 
-            <Card v-for="(srv, i) in mcpServers" :key="i" style="padding: 0" class="overflow-hidden">
+            <Card v-for="(srv, i) in mcpServers" :key="i" style="padding: 0">
               <div class="px-6 py-3.5 border-b border-white/50 flex items-center justify-between">
                 <h2 class="text-sm font-semibold text-slate-800 flex items-center gap-2">
                   <span class="w-2 h-2 rounded-full" :class="srv.name ? 'bg-[#34c759]' : 'bg-slate-300'" />
@@ -49,7 +49,7 @@
                 </div>
                 <div>
                   <label :class="labelClass">连接方式</label>
-                  <Select v-model="srv.transport" :options="transportOptions" class="w-full" />
+                  <Select v-model="srv.transport" :options="transportOptions" class="w-full mcp-transport" />
                 </div>
                 <div>
                   <label :class="labelClass">超时时间（秒）</label>
