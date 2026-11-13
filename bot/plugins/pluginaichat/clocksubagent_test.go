@@ -281,8 +281,15 @@ func TestPendingDrainHonorsTotalBudget(t *testing.T) {
 			case <-refillStop:
 				return
 			case <-ticker.C:
-				p.enqueuePending(message.FromUint64(sessionID), true, testGroupMsg(sessionID, "在吗"))
 			}
+			// 停手信号一旦到达就不再投递：这样「停止」之后不可能再有入队，
+			// 收尾断言只需容忍挑选分支那一瞬间已发起的一次投递
+			select {
+			case <-refillStop:
+				return
+			default:
+			}
+			p.enqueuePending(message.FromUint64(sessionID), true, testGroupMsg(sessionID, "在吗"))
 		}
 	}()
 
@@ -308,9 +315,12 @@ func TestPendingDrainHonorsTotalBudget(t *testing.T) {
 	}
 	close(refillStop)
 	refillWG.Wait()
-	// refiller 已停：此时若总预算结算生效，剩余队列应已被丢弃
-	if p.hasPending(key) {
-		t.Fatal("总预算耗尽后剩余排队消息应被丢弃")
+	// 涌入已停：此时若总预算结算生效，积压的排队消息应已被丢弃。允许残留至多
+	// 一条——涌入协程可能在「收尾丢弃」与「停手」之间的微秒级窗口里恰好投递一条，
+	// 它属于下一条消息的消费范围（生产里由 kickPending 兜底），不是滞留积压；
+	// 真正没结算的话，这里会是成批滞留（每 20ms 一条，远超 1）。
+	if n := pendingMsgCount(p, key); n > 1 {
+		t.Fatalf("总预算耗尽后剩余排队消息应被丢弃, 剩余 %d 条", n)
 	}
 	sent := rb.sent()
 	// 关键不变量：用户确实被告知（不是静默丢弃）。文案可能是插件自己的
@@ -330,6 +340,18 @@ func TestPendingDrainHonorsTotalBudget(t *testing.T) {
 	if n := len(sent); n > 0 && strings.Contains(sent[n-1], "已被停止") {
 		t.Fatalf("最后一条提示不应是框架取消文案, got %v", sent)
 	}
+}
+
+// pendingMsgCount 读取会话排队队列长度（加锁读取，不创建队列），供断言使用。
+func pendingMsgCount(p *AIChatPlugin, key string) int {
+	v, ok := p.pendingMsgs.Load(key)
+	if !ok {
+		return 0
+	}
+	q := v.(*pendingQueue)
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.items)
 }
 
 func testGroupMsg(uid uint64, text string) message.Message {
