@@ -81,12 +81,12 @@ func (t *msgHistoryTool) Execute(ctx context.Context, params any) (string, error
 			return "", err
 		}
 		list := *msgs
-		out := FormatMessages(sortByTime(list), t.ctx.Bot)
-		// 显式给出本页最早一条的游标：AI 不必再从列表位置推断往哪传，
-		// 也避免在返回顺序相反的协议端上取错端点。
-		if oldest, ok := oldestInPage(list); ok {
-			out = fmt.Sprintf("最近 %d 条消息（最早一条的 message_seq=%d，传回可继续向前查看更早消息）：\n%s",
-				len(list), oldest, out)
+		sorted := sortByTime(list)
+		out := FormatMessages(sorted, t.ctx.Bot)
+		// 游标数字已标在最早一条前，这里只说明用法，不再重复一遍数字。
+		if _, ok := oldestInPage(sorted); ok {
+			out = fmt.Sprintf("最近 %d 条消息（最早一条前标注的 message_seq 是续查游标，传回可继续向前查看更早消息）：\n%s",
+				len(list), out)
 		}
 		return out, nil
 	}
@@ -245,17 +245,23 @@ func (t *msgHistoryTool) fetch(ctx context.Context, count, seq int) (*[]message.
 	return msgs, nil
 }
 
-// FormatMessages 把消息列表格式化为给 AI 阅读的历史文本：每条带 message_seq
-// 游标（翻页用），正文经 FriendlyText 展开（引用/合并转发按能力展开），内嵌的
-// 图片附件描述补充哈希标注（与 load_images 的加载标记一致）。
+// FormatMessages 把消息列表格式化为给 AI 阅读的历史文本：正文经 FriendlyText
+// 展开（引用/合并转发按能力展开），内嵌的图片附件描述补充哈希标注（与
+// load_images 的加载标记一致）。
+//
+// message_seq（续查游标）只在本页最旧一条之前标注一次：整页消息共用一个续查
+// 入口，逐条标注既无用途，又白占大量上下文。平台不提供游标（seq 为 0）时不标注。
 func FormatMessages(msgs []message.Message, b bot.Bot) string {
 	opts := []message.MsgOptFunc{message.WithGetMsgFunc(b.GetMsgDetail)}
 	if qb, ok := b.(bot.QQ); ok {
 		opts = append(opts, message.WithGetForwardMsgFunc(qb.GetForwardMsg))
 	}
+	cursor, hasCursor := oldestInPage(msgs)
 	var sb strings.Builder
 	for _, msg := range msgs {
-		sb.WriteString(fmt.Sprintf("[message_seq:%d]\n", msg.MessageSeq))
+		if hasCursor && msg.MessageSeq == cursor {
+			sb.WriteString(fmt.Sprintf("[message_seq:%d]\n", msg.MessageSeq))
+		}
 		sb.WriteString(AnnotateEmbeddedImages(msg.FriendlyText(true, opts...)))
 		sb.WriteString("\n")
 	}

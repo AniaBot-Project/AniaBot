@@ -3,6 +3,7 @@ package aitool
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -55,9 +56,18 @@ func mkMsg(seq int, sender string) message.Message {
 	return message.Message{MessageSeq: seq, Sender: message.MessageSender{UserId: message.QID(sender)}}
 }
 
-// mkTimedMsg 构造带时间戳的消息（seq 与时间是同向递增的，便于按时间断言）。
+// mkTimedMsg 构造带时间戳与正文的消息（seq 与时间是同向递增的，正文形如 "m57"
+// 便于按时间/存在性断言：游标只标注一次后，无法再靠 message_seq 定位每一条）。
 func mkTimedMsg(seq, ts int, sender string) message.Message {
-	return message.Message{MessageSeq: seq, Time: uint(ts), Sender: message.MessageSender{UserId: message.QID(sender)}}
+	return message.Message{
+		MessageSeq: seq,
+		Time:       uint(ts),
+		Sender:     message.MessageSender{UserId: message.QID(sender)},
+		Message: []message.OB11Segment{{
+			Type: message.SegmentText,
+			Data: map[string]any{"text": fmt.Sprintf("m%d", seq)},
+		}},
+	}
 }
 
 func callHistory(t *testing.T, tool Tool, args string) string {
@@ -84,13 +94,20 @@ func paramsOf(t *testing.T, tool Tool, args string) any {
 
 func TestHistoryNoFilter(t *testing.T) {
 	fake := &fakeHistoryBot{group: true, pages: [][]message.Message{
-		{mkMsg(105, "qq:1"), mkMsg(104, "qq:2"), mkMsg(103, "qq:1")},
+		{mkTimedMsg(105, 1050, "qq:1"), mkTimedMsg(104, 1040, "qq:2"), mkTimedMsg(103, 1030, "qq:1")},
 	}}
 	tool := NewMsgHistoryTool(historyCtx(fake, nil), "qq_get_msg_history")
 
 	out := callHistory(t, tool, `{"count":3}`)
-	if !strings.Contains(out, "[message_seq:105]") || !strings.Contains(out, "[message_seq:103]") {
-		t.Errorf("输出缺少消息游标:\n%s", out)
+	// 翻页游标只标注一次（最早一条前），逐条标注纯属噪声
+	if got := strings.Count(out, "[message_seq:"); got != 1 {
+		t.Errorf("游标应只标注一次, got %d:\n%s", got, out)
+	}
+	if !strings.Contains(out, "[message_seq:103]\n") {
+		t.Errorf("应标注本页最早一条的游标 103:\n%s", out)
+	}
+	if strings.Index(out, "m103") > strings.Index(out, "m105") {
+		t.Errorf("输出应按时间升序（旧的在前）:\n%s", out)
 	}
 	if fake.lastSeqs[0] != 0 {
 		t.Errorf("首次调用应从最新开始（seq=0）, got %d", fake.lastSeqs[0])
@@ -100,8 +117,8 @@ func TestHistoryNoFilter(t *testing.T) {
 func TestHistoryFilterByUser(t *testing.T) {
 	// 两页数据：第一页只有 1 条命中，第二页 2 条；凑够 3 条即止
 	fake := &fakeHistoryBot{group: true, pages: [][]message.Message{
-		{mkMsg(60, "qq:1"), mkMsg(59, "qq:2"), mkMsg(58, "qq:2"), mkMsg(57, "qq:2")},
-		{mkMsg(56, "qq:1"), mkMsg(55, "qq:1"), mkMsg(54, "qq:2"), mkMsg(53, "qq:2"), mkMsg(52, "qq:2")},
+		{mkTimedMsg(60, 6000, "qq:1"), mkTimedMsg(59, 5900, "qq:2"), mkTimedMsg(58, 5800, "qq:2"), mkTimedMsg(57, 5700, "qq:2")},
+		{mkTimedMsg(56, 5600, "qq:1"), mkTimedMsg(55, 5500, "qq:1"), mkTimedMsg(54, 5400, "qq:2"), mkTimedMsg(53, 5300, "qq:2"), mkTimedMsg(52, 5200, "qq:2")},
 	}}
 	setTestPageSize(t, 4)
 	tool := NewMsgHistoryTool(historyCtx(fake, nil), "qq_get_msg_history")
@@ -113,11 +130,15 @@ func TestHistoryFilterByUser(t *testing.T) {
 	if !strings.Contains(out, "3 条来自 qq:1") {
 		t.Errorf("应注明命中数:\n%s", out)
 	}
-	if strings.Count(out, "[message_seq:") != 3 {
-		t.Errorf("应只输出命中的 3 条:\n%s", out)
+	// 命中 3 条各有一行正文，但游标只标注一次（最旧的 55）
+	if got := strings.Count(out, "[message_seq:"); got != 1 {
+		t.Errorf("游标应只标注一次, got %d:\n%s", got, out)
 	}
-	if !strings.Contains(out, "[message_seq:56]") || !strings.Contains(out, "[message_seq:60]") {
-		t.Errorf("命中消息缺失:\n%s", out)
+	if !strings.Contains(out, "[message_seq:55]\n") {
+		t.Errorf("应标注最旧一条命中的游标 55:\n%s", out)
+	}
+	if strings.Index(out, "m55") > strings.Index(out, "m56") || strings.Index(out, "m56") > strings.Index(out, "m60") {
+		t.Errorf("命中消息应按时间升序（旧的在前）:\n%s", out)
 	}
 	// 第二次调用游标应为第一页最后一条的 seq（57）
 	if fake.lastSeqs[1] != 57 {
@@ -235,8 +256,12 @@ func TestHistoryBackwardCursorByTimeNotPosition(t *testing.T) {
 			if fake.lastSeqs[1] != 57 {
 				t.Errorf("续查游标应为最旧的 57（而非数组端点的 57/60）, got %d", fake.lastSeqs[1])
 			}
-			if !strings.Contains(out, "[message_seq:60]") {
+			if !strings.Contains(out, "m60") {
 				t.Errorf("首条命中应为最新的 60:\n%s", out)
+			}
+			// 命中两条（56 最旧、60 最新）：游标只标在最旧的 56 上
+			if got := strings.Count(out, "[message_seq:"); got != 1 || !strings.Contains(out, "[message_seq:56]\n") {
+				t.Errorf("游标应只标注一次（最旧的 56）, got %d:\n%s", got, out)
 			}
 		})
 	}
@@ -298,11 +323,14 @@ func TestHistoryNoFilterSortsAscendingAndHintsCursor(t *testing.T) {
 	tool := NewMsgHistoryTool(historyCtx(fake, nil), "qq_get_msg_history")
 
 	out := callHistory(t, tool, `{"count":3}`)
-	if !strings.Contains(out, "最早一条的 message_seq=103") {
+	if !strings.Contains(out, "最早一条前标注的 message_seq 是续查游标") {
 		t.Errorf("应给出续查游标提示:\n%s", out)
 	}
+	if got := strings.Count(out, "[message_seq:"); got != 1 || !strings.Contains(out, "[message_seq:103]\n") {
+		t.Errorf("游标应只标注一次（最早一条 103）, got %d:\n%s", got, out)
+	}
 	// 升序：103 在 105 之前
-	if strings.Index(out, "[message_seq:103]") > strings.Index(out, "[message_seq:105]") {
+	if strings.Index(out, "m103") > strings.Index(out, "m105") {
 		t.Errorf("输出应按时间升序（旧的在前）:\n%s", out)
 	}
 }
@@ -319,7 +347,7 @@ func TestHistoryFilterDedupAcrossPages(t *testing.T) {
 	tool := NewMsgHistoryTool(historyCtx(fake, nil), "qq_get_msg_history")
 
 	out := callHistory(t, tool, `{"count":2,"user_id":"1"}`)
-	if got := strings.Count(out, "[message_seq:57]"); got != 1 {
+	if got := strings.Count(out, "m57"); got != 1 {
 		t.Errorf("跨页重叠的命中消息应去重（出现 %d 次）:\n%s", got, out)
 	}
 	if !strings.Contains(out, "2 条来自 qq:1") {
