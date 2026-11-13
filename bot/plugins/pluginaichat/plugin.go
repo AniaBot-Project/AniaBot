@@ -149,6 +149,10 @@ type AIChatPlugin struct {
 	// msgEventTimeout 框架级消息处理超时（bot.msg_event_timeout_sec，Start 时
 	// 从全量 viper 读取）：tryProcessPending 等后台触发的会话处理复用同一预算
 	msgEventTimeout time.Duration
+
+	// chatConsole 面板「试聊室」会话管理器（Web 面板内直接对话测试）；
+	// Start 末尾构造，未就绪时为 nil（面板接口退化为明确错误）
+	chatConsole *chatConsoleManager
 }
 
 const (
@@ -1165,6 +1169,12 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	// 排队消息兜底清扫器：唤醒集中在入队路径时，限流饱和或与锁释放交错
 	// 都可能让消息错过所有消费者，由周期扫描接管（队列为空时零开销）
 	p.startPendingSweeper()
+
+	// 面板「试聊室」：把聊天搬到 Web 控制面板上做对话测试——复用完整对话管线
+	// （提示词/记忆/知识库/工具/上下文压缩），回复只回显面板、不向任何平台发送
+	// 消息；会话转录持久化，AI 上下文跨重启延续
+	p.chatConsole = newChatConsoleManager(p)
+	p.Logger.Info("已启用面板试聊室", "sessions", len(p.chatConsole.list()))
 
 	// 全部组件就绪：放行消息事件（早退路径保持 false，处理器据此跳过）
 	p.ready = true

@@ -247,6 +247,27 @@ export const api = {
   deleteClock: (id) =>
     request(`/api/clocks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
+  // 试聊室：在面板内直接与 AI 对话（复用完整对话管线，回复只回显面板、不发送到任何平台）
+  // 可选目标：通用试聊 + 各平台通讯录里的群/好友（绑定后继承该会话的提示词覆盖、记忆、知识库等）
+  getChatConsoleTargets: () => request('/api/chatconsole/targets'),
+  getChatConsoleSessions: () => request('/api/chatconsole/sessions'),
+  createChatConsoleSession: (payload) =>
+    request('/api/chatconsole/sessions', { method: 'POST', body: JSON.stringify(payload) }),
+  deleteChatConsoleSession: (id) =>
+    request(`/api/chatconsole/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  clearChatConsoleSession: (id) =>
+    request(`/api/chatconsole/sessions/${encodeURIComponent(id)}/clear`, { method: 'POST' }),
+  // 增量拉取消息：after 为已拿到的最大 seq（服务器总会重发最后一条，用于刷新流式文本）
+  getChatConsoleMessages: (id, after = 0) =>
+    request(`/api/chatconsole/sessions/${encodeURIComponent(id)}/messages?after=${after}`),
+  sendChatConsoleMessage: (id, text) =>
+    request(`/api/chatconsole/sessions/${encodeURIComponent(id)}/send`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    }),
+  stopChatConsole: (id) =>
+    request(`/api/chatconsole/sessions/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
+
   getSkills: () => request('/api/skills'),
   getSkillDetail: (name) => request(`/api/skills/${encodeURIComponent(name)}`),
   // 上传 skill（zip 压缩包，multipart 表单，不走 JSON 请求封装）

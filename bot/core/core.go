@@ -522,6 +522,7 @@ func (ania *AniaBot) startAdminPanel() {
 	var kbSrc adminpanel.KnowledgeBaseSource
 	var teamSrc adminpanel.TeamSource
 	var quotaSrc adminpanel.QuotaSource
+	var chatConsoleSrc adminpanel.ChatConsoleSource
 	var queryLogFn func(f querylog.Filter) []querylog.Entry
 	var queryLogStatsFn func(f querylog.Filter) []querylog.StatRow
 	var queryLogClearFn func(f querylog.Filter) int
@@ -564,6 +565,9 @@ func (ania *AniaBot) startAdminPanel() {
 		}
 		if src, ok := p.(adminpanel.QuotaSource); ok {
 			quotaSrc = src
+		}
+		if src, ok := p.(adminpanel.ChatConsoleSource); ok {
+			chatConsoleSrc = src
 		}
 		if src, ok := p.(adminpanel.QueryLogSource); ok {
 			queryLogFn = src.QueryLogRecent
@@ -649,6 +653,7 @@ func (ania *AniaBot) startAdminPanel() {
 		Knowledge:           kbSrc,
 		Teams:               teamSrc,
 		Quota:               quotaSrc,
+		ChatConsole:         chatConsoleSrc,
 		QueryLogs:           queryLogFn,
 		QueryLogsStats:      queryLogStatsFn,
 		QueryLogsClear:      queryLogClearFn,

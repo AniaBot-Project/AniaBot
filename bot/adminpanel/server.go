@@ -258,6 +258,7 @@ type Options struct {
 	Knowledge           KnowledgeBaseSource                                                      // AI 知识库管理（可为 nil）
 	Teams               TeamSource                                                               // Agent 团队管理（可为 nil）
 	Quota               QuotaSource                                                              // 每日 Token 配额管理（可为 nil）
+	ChatConsole         ChatConsoleSource                                                        // 面板试聊室（面板内直接与 AI 对话测试，可为 nil）
 	Marketplace         *marketplace.Service                                                     // 插件市场服务（可为 nil）
 	QueryLogs           func(f querylog.Filter) []querylog.Entry                                 // AI Query 日志（可为 nil）
 	QueryLogsStats      func(f querylog.Filter) []querylog.StatRow                               // Query 日志的轻量统计行（可为 nil）
@@ -378,6 +379,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/qrlogin/{platform}/status", s.requireAuth(http.HandlerFunc(s.handleQRLoginStatus)))
 	s.mux.Handle("POST /api/qrlogin/{platform}/verify", s.requireAuth(http.HandlerFunc(s.handleQRLoginVerify)))
 	s.mux.Handle("POST /api/restart", s.requireAuth(http.HandlerFunc(s.handleRestart)))
+	s.registerChatConsoleRoutes()
 	s.mux.Handle("GET /api/update/info", s.requireAuth(http.HandlerFunc(s.handleUpdateInfo)))
 	s.mux.Handle("POST /api/update/start", s.requireAuth(http.HandlerFunc(s.handleUpdateStart)))
 	s.mux.Handle("GET /api/update/status", s.requireAuth(http.HandlerFunc(s.handleUpdateStatus)))

@@ -376,6 +376,137 @@ function marketStatus() {
 
 // 路由表
 
+// 试聊室（面板内对话测试）演示数据与状态
+// 会话/转录由本地状态模拟：发送后 1.2s 生成一条假回复，停止按钮可中断等待中的回复。
+const chatConsole = (() => {
+  const now = Date.now()
+  // 演示用的内联图片（真实部署里由插件以 data URI 回传）
+  const demoImage = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180">' +
+    '<rect width="320" height="180" rx="16" fill="#e6f9f6"/>' +
+    '<circle cx="58" cy="90" r="26" fill="#19c8b9"/>' +
+    '<text x="58" y="97" text-anchor="middle" font-family="sans-serif" font-size="20" fill="#fff">规</text>' +
+    '<text x="100" y="84" font-family="sans-serif" font-size="19" fill="#11a89b">群规提醒</text>' +
+    '<text x="100" y="112" font-family="sans-serif" font-size="14" fill="#725d42">禁止广告 · 违者移出</text>' +
+    '</svg>',
+  )
+  return {
+    seq: 0,
+    sessions: [
+      {
+        id: 'demo-tune', title: '群聊提示词调优',
+        target_kind: 'group', target_id: 'qq:123456', target_name: 'AniaBot 交流群',
+        created_at: toLocalIso(new Date(now - 5400_000)), updated_at: toLocalIso(new Date(now - 90_000)),
+      },
+      {
+        id: 'demo-test', title: '通用试聊',
+        target_kind: 'test', target_id: '', target_name: '通用试聊',
+        created_at: toLocalIso(new Date(now - 1800_000)), updated_at: toLocalIso(new Date(now - 420_000)),
+      },
+    ],
+    messages: {
+      'demo-tune': [
+        {
+          seq: 1, role: 'user', status: 'ok', time: toLocalIso(new Date(now - 1500_000)),
+          text: '帮我看下群里今天在聊什么，顺便总结一下大家在纠结什么',
+        },
+        {
+          seq: 2, role: 'assistant', status: 'ok', time: toLocalIso(new Date(now - 1495_000)),
+          duration_ms: 6400,
+          text: '今天群里主要在聊 **MCP 服务器** 的配置，有三件事大家在反复确认：\n\n1. `mcp_json` 里 `transport` 到底填 `stdio` 还是 `http`\n2. Windows 下 Python 脚本的路径要写绝对路径\n3. 懒加载模式下工具什么时候才会出现在上下文里\n\n建议把这两条写进群公告，能省掉一半重复提问。',
+          tool_calls_total: 1,
+          tool_calls: [{
+            name: 'qq_get_msg_history',
+            arguments: '{"limit": 30}',
+            result: '[nickname:阿饼 id:qq:10004]: mcp 那个 stdio 怎么配…\n[nickname:Neko id:qq:10007]: 我这边一直报找不到命令\n…（共 30 条）',
+            duration_ms: 186,
+          }],
+          usage: { prompt_tokens: 3180, completion_tokens: 236, total_tokens: 3416, cached_tokens: 2048, iterations: 2 },
+        },
+        {
+          seq: 3, role: 'user', status: 'ok', time: toLocalIso(new Date(now - 300_000)),
+          text: '顺手把「禁止广告」记到本群知识库，再生成一张提醒图',
+        },
+        {
+          seq: 4, role: 'assistant', status: 'ok', time: toLocalIso(new Date(now - 295_000)),
+          duration_ms: 8200,
+          text: '已写入本群知识库（`禁止广告`），并生成了一张提醒图：',
+          tool_calls_total: 2,
+          tool_calls: [
+            { name: 'kb_add', arguments: '{"title":"群规：禁止广告","content":"本群禁止任何形式的广告与引流，违者移出。"}', result: '已保存（id: 8f21c3）', duration_ms: 24 },
+            { name: 'send_image', arguments: '{"prompt":"群规提醒"}', result: '发送成功', duration_ms: 3100 },
+          ],
+          attachments: [{ kind: 'image', url: demoImage, size: 1360 }],
+          usage: { prompt_tokens: 4210, completion_tokens: 188, total_tokens: 4398, cached_tokens: 3072, iterations: 3 },
+        },
+      ],
+      'demo-test': [
+        {
+          seq: 1, role: 'user', status: 'ok', time: toLocalIso(new Date(now - 430_000)),
+          text: '你好，写个 Go 的并发小例子，要求带超时控制',
+        },
+        {
+          seq: 2, role: 'assistant', status: 'ok', time: toLocalIso(new Date(now - 425_000)),
+          duration_ms: 4100,
+          text: '用 `context.WithTimeout` + `select` 就够了：\n\n```go\nctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)\ndefer cancel()\n\nresult := make(chan string, 1)\ngo func() {\n\tresult <- doWork()\n}()\n\nselect {\ncase v := <-result:\n\tfmt.Println("done:", v)\ncase <-ctx.Done():\n\tfmt.Println("timeout:", ctx.Err())\n}\n```\n\n注意 `result` 用带缓冲的 channel，否则超时后那次写入会永久阻塞 goroutine。',
+          tool_calls_total: 0,
+          usage: { prompt_tokens: 96, completion_tokens: 268, total_tokens: 364, cached_tokens: 0, iterations: 1 },
+        },
+      ],
+    },
+    // 等待中的假回复定时器：id -> timer
+    timers: {},
+  }
+})()
+
+function chatConsoleSessionPublic(s) {
+  const msgs = chatConsole.messages[s.id] || []
+  return {
+    ...s,
+    count: msgs.length,
+    busy: msgs.some((m) => m.status === 'running'),
+  }
+}
+
+function chatConsoleNextSeq(id) {
+  const msgs = chatConsole.messages[id] || (chatConsole.messages[id] = [])
+  const max = msgs.reduce((a, m) => Math.max(a, m.seq), 0)
+  return max + 1
+}
+
+// 假回复：1.2s 后写入 assistant 消息（演示中点击「停止」会取消该定时器）
+function scheduleChatConsoleReply(id, seq, text) {
+  const timers = chatConsole.timers[id] || (chatConsole.timers[id] = {})
+  timers[seq] = setTimeout(() => {
+    delete timers[seq]
+    const msgs = chatConsole.messages[id] || []
+    const m = msgs.find((x) => x.seq === seq)
+    if (!m || m.status !== 'running') return
+    m.status = 'ok'
+    m.duration_ms = 1600
+    m.text = text
+    m.usage = { prompt_tokens: 1280, completion_tokens: 142, total_tokens: 1422, cached_tokens: 0, iterations: 1 }
+    m.tool_calls_total = 1
+    m.tool_calls = [{ name: 'time', arguments: '{}', result: toLocalIso(new Date()), duration_ms: 2 }]
+    const s = chatConsole.sessions.find((x) => x.id === id)
+    if (s) s.updated_at = toLocalIso(new Date())
+  }, 1200)
+}
+
+function chatConsoleStop(id) {
+  const timers = chatConsole.timers[id] || {}
+  const msgs = chatConsole.messages[id] || []
+  for (const [seq, timer] of Object.entries(timers)) {
+    clearTimeout(timer)
+    delete timers[seq]
+    const m = msgs.find((x) => x.seq === Number(seq))
+    if (m && m.status === 'running') {
+      m.status = 'stopped'
+      m.error = '已停止生成'
+    }
+  }
+}
+
 const routes = [
   // 认证
   { m: 'POST', re: /^\/api\/login$/, h: (c) => { addOpLog('auth', 'login', '面板登录成功，IP: 127.0.0.1'); return { ok: true } } },
@@ -785,6 +916,100 @@ const routes = [
       }
       const phase = passed >= 7 ? 'restart' : steps[passed][1]
       return { running: true, restarting: t >= 15.5, phase, logs, error: '', errKind: '' }
+    },
+  },
+
+  // 试聊室（面板内对话测试）
+  {
+    m: 'GET', re: /^\/api\/chatconsole\/targets$/, h: () => ({
+      items: [
+        { kind: 'test', name: '通用试聊' },
+        ...buildContacts('groups').map((g) => ({ kind: 'group', id: 'qq:' + g.group_id, name: g.group_name, platform: 'qq' })),
+        ...buildContacts('friends').map((f) => ({ kind: 'friend', id: 'qq:' + f.user_id, name: f.remark || f.nickname, platform: 'qq' })),
+      ],
+    }),
+  },
+  {
+    m: 'GET', re: /^\/api\/chatconsole\/sessions$/, h: () => ({
+      items: [...chatConsole.sessions]
+        .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
+        .map(chatConsoleSessionPublic),
+    }),
+  },
+  {
+    m: 'POST', re: /^\/api\/chatconsole\/sessions$/, h: (c) => {
+      const b = c.body || {}
+      if (!['test', 'group', 'friend'].includes(b.target_kind)) return { status: 400, body: { error: 'target_kind 仅支持 test / group / friend' } }
+      if (b.target_kind !== 'test' && !b.target_id) return { status: 400, body: { error: '绑定群聊/私聊时必须提供 target_id' } }
+      const id = 'demo-' + hexId().slice(0, 6)
+      const title = (b.title || '').trim() || b.target_name || (b.target_kind === 'test' ? '通用试聊' : b.target_kind === 'group' ? '群聊试聊' : '私聊试聊')
+      const s = {
+        id, title,
+        target_kind: b.target_kind,
+        target_id: b.target_kind === 'test' ? '' : (b.target_id || ''),
+        target_name: b.target_kind === 'test' ? '通用试聊' : (b.target_name || ''),
+        created_at: toLocalIso(new Date()), updated_at: toLocalIso(new Date()),
+      }
+      chatConsole.sessions.unshift(s)
+      chatConsole.messages[id] = []
+      addOpLog('system', 'chat_console_create', `面板新建试聊会话 ${id}（${s.target_kind} ${s.target_id}）`)
+      return chatConsoleSessionPublic(s)
+    },
+  },
+  {
+    m: 'DELETE', re: /^\/api\/chatconsole\/sessions\/([^/]+)$/, h: (c) => {
+      const id = decodeURIComponent(c.params[0])
+      chatConsoleStop(id)
+      chatConsole.sessions = chatConsole.sessions.filter((s) => s.id !== id)
+      delete chatConsole.messages[id]
+      addOpLog('system', 'chat_console_delete', `面板删除试聊会话 ${id}`)
+      return { ok: true }
+    },
+  },
+  {
+    m: 'POST', re: /^\/api\/chatconsole\/sessions\/([^/]+)\/clear$/, h: (c) => {
+      const id = decodeURIComponent(c.params[0])
+      chatConsoleStop(id)
+      chatConsole.messages[id] = []
+      addOpLog('system', 'chat_console_clear', `面板清空试聊会话 ${id}`)
+      return { ok: true }
+    },
+  },
+  {
+    m: 'GET', re: /^\/api\/chatconsole\/sessions\/([^/]+)\/messages$/, h: (c) => {
+      const id = decodeURIComponent(c.params[0])
+      const after = parseInt(c.query.get('after') || '0', 10) || 0
+      const msgs = chatConsole.messages[id] || []
+      // 与真实后端一致：返回 seq > after 的消息，并总是附带最后一条（刷新流式文本）
+      const items = msgs.filter((m) => m.seq > after)
+      if (msgs.length && msgs[msgs.length - 1].seq <= after) items.push(msgs[msgs.length - 1])
+      return { items, busy: msgs.some((m) => m.status === 'running') }
+    },
+  },
+  {
+    m: 'POST', re: /^\/api\/chatconsole\/sessions\/([^/]+)\/send$/, h: (c) => {
+      const id = decodeURIComponent(c.params[0])
+      const text = ((c.body && c.body.text) || '').trim()
+      if (!text) return { status: 400, body: { error: '消息不能为空' } }
+      const s = chatConsole.sessions.find((x) => x.id === id)
+      if (!s) return { status: 404, body: { error: '试聊会话不存在: ' + id } }
+      const msgs = chatConsole.messages[id] || (chatConsole.messages[id] = [])
+      if (msgs.some((m) => m.status === 'running')) return { status: 409, body: { error: '上一条消息还在生成中，请稍候或先停止' } }
+      const now = toLocalIso(new Date())
+      const userSeq = chatConsoleNextSeq(id)
+      msgs.push({ seq: userSeq, role: 'user', status: 'ok', text, time: now })
+      const asstSeq = userSeq + 1
+      msgs.push({ seq: asstSeq, role: 'assistant', status: 'running', text: '', time: now })
+      s.updated_at = now
+      const reply = `演示模式下的假回复：我收到了「${text.slice(0, 40)}」。\n\n在真实部署里，这里会走完整的对话管线（系统提示词、记忆、知识库、工具调用与上下文压缩），回复只回显在面板，不会发送到任何平台。\n\n- 试试点「停止」中断生成\n- 也可以绑定一个真实群聊，验证该群的提示词覆盖与记忆`
+      scheduleChatConsoleReply(id, asstSeq, reply)
+      return { ok: true }
+    },
+  },
+  {
+    m: 'POST', re: /^\/api\/chatconsole\/sessions\/([^/]+)\/stop$/, h: (c) => {
+      chatConsoleStop(decodeURIComponent(c.params[0]))
+      return { ok: true }
     },
   },
 

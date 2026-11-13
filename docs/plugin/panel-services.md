@@ -52,6 +52,7 @@ for _, p := range ania.plugins {
 | Agent 团队 | `adminpanel.TeamSource` | AI 对话插件 |
 | 配额管理 | `adminpanel.QuotaSource` | AI 对话插件 |
 | Query 日志 | `adminpanel.QueryLogSource` | AI 对话插件 |
+| 试聊室 | `adminpanel.ChatConsoleSource` | AI 对话插件 |
 
 ## 接口签名
 
@@ -190,6 +191,34 @@ type QueryLogSource interface {
     QueryLogRecent(f querylog.Filter) []querylog.Entry
 }
 ```
+
+### ChatConsoleSource —— 试聊室页
+
+把聊天搬到面板上：管理员在面板里直接发消息，插件用自己的对话管线生成回复并回显（不向任何平台发送消息）。发送是异步的——`ChatConsoleSend` 立即返回，面板按 `Seq` 轮询 `ChatConsoleMessages` 拿流式文本、工具调用明细与最终状态。
+
+```go
+type ChatConsoleSource interface {
+    // 全部试聊会话（最近活动在前）
+    ChatConsoleSessions() []plugininfo.ChatConsoleSession
+    // 新建会话（目标为通用试聊或某个群聊/私聊 scope），返回创建结果
+    ChatConsoleCreate(req plugininfo.ChatConsoleSessionCreate) (plugininfo.ChatConsoleSession, error)
+    // 删除会话（连同转录与 AI 上下文）
+    ChatConsoleDelete(id string) error
+    // Seq 大于 afterSeq 的消息；最后一条总会重新返回，供面板刷新流式文本。
+    // busy 表示该会话是否仍在生成
+    ChatConsoleMessages(id string, afterSeq int64) ([]plugininfo.ChatConsoleMessage, bool, error)
+    // 清空转录与 AI 上下文（保留会话）
+    ChatConsoleClear(id string) error
+    // 异步发送一条用户消息；上一条仍在生成时应返回错误
+    ChatConsoleSend(id, text string) error
+    // 中止该会话正在生成的回复（空闲时为空操作）
+    ChatConsoleStop(id string) error
+}
+```
+
+`plugininfo.ChatConsoleSession`（`ID` / `Title` / `TargetKind` / `TargetID` / `TargetName` / `CreatedAt` / `UpdatedAt` / `Count` / `Busy`）与 `plugininfo.ChatConsoleMessage`（`Seq` / `Role`（user/assistant/system）/ `Text` / `Status`（running/ok/error/stopped/timeout/interrupted）/ `Error` / `Time` / `DurationMs` / `Attachments` / `ToolCalls` / `ToolCallsTotal` / `Usage`）是面板展示用的视图模型；`TargetKind` 取值 `test`（不绑定会话 scope）/ `group` / `friend`。附件用 data URI 直接回传给浏览器（图片内联、文件可下载），体积过大的内容建议只回一句话说明。
+
+`ChatConsoleCreate` 的 `target_id` 由面板从通讯录选择，与线上会话键（`g:<群 ID>` / `f:<用户 ID>`）中的 ID 一致，插件据此复用该会话的系统提示词覆盖、记忆、知识库等能力即可。
 
 ## 完整示例：自定义「消息日志」提供者
 
