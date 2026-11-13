@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/jeanhua/AniaBot/common/adapter"
+	"github.com/jeanhua/AniaBot/common/bot"
 	"github.com/jeanhua/AniaBot/common/model/message"
 	"github.com/jeanhua/AniaBot/common/msgchain"
 	"github.com/spf13/viper"
@@ -98,6 +99,45 @@ func TestRefreshMediaURLRouting(t *testing.T) {
 	}
 	if _, ok := a.RefreshMediaURL(message.SegmentImage, "fid-4", "", ""); ok {
 		t.Fatal("缺少会话 ID 时不应成功")
+	}
+}
+
+// memberListAdapter 支持群成员枚举的假 QQ 适配器：只覆写成员列表并记录调用，
+// 其余 QQExt 方法由嵌入的接口桩满足（测试不会调用）。
+type memberListAdapter struct {
+	fakeAdapter
+	adapter.QQExt
+	calls   int
+	groupID message.QID
+}
+
+func (m *memberListAdapter) GetGroupMemberList(groupId message.QID, noCache bool) (*[]message.GroupUserInfo, bool) {
+	m.calls++
+	m.groupID = groupId
+	list := []message.GroupUserInfo{{UserID: "qq:1", Nickname: "小明"}}
+	return &list, true
+}
+
+// core 需实现 bot.GroupMembers：面板消息日志的 @ 昵称还原依赖它。
+var _ bot.GroupMembers = (*AniaBot)(nil)
+
+// TestGetGroupMemberListRouting 验证 core 的 bot.GroupMembers 实现按群 ID 前缀
+// 路由到适配器：QQ 适配器（含 QQExt）返回成员表，非 QQ 适配器返回 false。
+func TestGetGroupMemberListRouting(t *testing.T) {
+	a := &AniaBot{}
+	qq := &memberListAdapter{fakeAdapter: fakeAdapter{name: "napcat", platform: "qq"}}
+	fs := &fakeAdapter{name: "feishu", platform: "feishu"}
+	a.adapters = []*adapterEntry{
+		{def: adapter.Definition{Name: "napcat", Platform: "qq", IDPrefix: message.QQIDPrefix}, adapter: qq},
+		{def: adapter.Definition{Name: "feishu", Platform: "feishu", IDPrefix: "fs:"}, adapter: fs},
+	}
+
+	members, ok := a.GetGroupMemberList("qq:123", false)
+	if !ok || members == nil || len(*members) != 1 || qq.calls != 1 || qq.groupID != "qq:123" {
+		t.Fatalf("QQ 群成员列表路由错误: ok=%v members=%v calls=%d group=%q", ok, members, qq.calls, qq.groupID)
+	}
+	if _, ok := a.GetGroupMemberList("fs:oc_1", false); ok || qq.calls != 1 {
+		t.Fatalf("非 QQ 适配器不支持群成员枚举，应返回 false, ok=%v calls=%d", ok, qq.calls)
 	}
 }
 

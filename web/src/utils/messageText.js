@@ -176,6 +176,8 @@ export function friendlyPreview(raw, limit = 160) {
     .replace(/\[at:全体成员\]/g, '@全体成员')
     .replace(/\[at我\]/g, '@我')
     .replace(/\[at:id:([^\]]*)\]/g, (_, id) => '@' + String(id).replace(/^qq:/, ''))
+    // 面板读取日志时后端已把 [at:id:…] 还原成成员昵称（[at:小明]）
+    .replace(/\[at:([^\]]*)\]/g, '@$1')
     .replace(/\[分享卡片[^\]]*\]/g, '[分享卡片]')
     .replace(/\[音乐:([^\]]*)\]/g, '[音乐] $1')
     .replace(/\[nickname:(.*?) id:([^\]]*)\]:\s*/g, '$1：')

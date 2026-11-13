@@ -3,7 +3,9 @@ package pluginlog
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/jeanhua/AniaBot/bot/component/msglog"
 	"github.com/jeanhua/AniaBot/bot/utils"
@@ -27,6 +29,9 @@ type LogPlugin struct {
 	// mediaURLs 续期后的媒体地址短缓存（日志 ID + 媒体序号 → 地址）
 	mediaMu   sync.Mutex
 	mediaURLs map[mediaURLKey]mediaURLValue
+
+	// mentions 群成员昵称缓存：面板读取日志时把 [at:id:…] 还原成 [at:昵称]
+	mentions mentionNamer
 }
 
 func NewPlugin() *LogPlugin {
@@ -65,13 +70,38 @@ func (p *LogPlugin) Awake(ctx context.Context, b bot.Bot) error {
 	return nil
 }
 
+// botHandle 取 core 级 bot 外观（Awake 之前为 nil）。
+func (p *LogPlugin) botHandle() bot.Bot {
+	p.botMu.RLock()
+	defer p.botMu.RUnlock()
+	return p.bot
+}
+
+// mentionNames 返回群的成员昵称表（用户 ID → 昵称），供面板把日志里的
+// [at:id:…] 还原成昵称；平台不支持群成员枚举 / 取不到时返回 nil。
+// wait<=0 表示只取缓存并顺带发起后台查询，不等待结果（收消息时预热用）。
+func (p *LogPlugin) mentionNames(groupId string, wait time.Duration) map[string]string {
+	members, _ := p.botHandle().(bot.GroupMembers)
+	return p.mentions.names(members, groupId, wait)
+}
+
+// warmMentionNames 预热群的成员昵称缓存：只发起一次后台查询（受缓存 TTL 与
+// 失败冷却约束），不等待结果，因此不会拖慢收消息。
+func (p *LogPlugin) warmMentionNames(groupId message.QID) {
+	if groupId == "" {
+		return
+	}
+	p.mentionNames(groupId.String(), 0)
+}
+
 // MsgLogPage 供 Web 控制面板分页读取消息日志（实现 adminpanel.MsgLogSource）：
-// 新在前，beforeID>0 时仅返回 ID 小于它的更旧日志。
+// 新在前，beforeID>0 时仅返回 ID 小于它的更旧日志。返回前把 [at:id:…] 还原成
+// 成员昵称（只影响面板展示，留存的日志文本不变）。
 func (p *LogPlugin) MsgLogPage(limit int, beforeID uint64) []msglog.Entry {
 	if p.recorder == nil {
 		return nil
 	}
-	return p.recorder.Page(limit, beforeID)
+	return p.localizeEntries(p.recorder.Page(limit, beforeID))
 }
 
 // MsgLogSessions 返回消息日志的会话摘要（实现 adminpanel.MsgLogSessionSource），
@@ -80,7 +110,15 @@ func (p *LogPlugin) MsgLogSessions() []msglog.Session {
 	if p.recorder == nil {
 		return nil
 	}
-	return p.recorder.Sessions()
+	sessions := p.recorder.Sessions()
+	// 会话预览（侧栏最近一条消息）也带上昵称，避免侧栏与气泡一个显示名字、
+	// 一个显示 QQ 号
+	names := make(map[string]map[string]string)
+	deadline := time.Now().Add(mentionWait)
+	for i := range sessions {
+		sessions[i].LastText = p.localizeText(sessions[i].GroupId, sessions[i].LastText, names, deadline)
+	}
+	return sessions
 }
 
 // MsgLogSessionPage 按会话读取一页日志（新在前）：beforeID>0 取更旧的分页，
@@ -89,7 +127,7 @@ func (p *LogPlugin) MsgLogSessionPage(session string, limit int, beforeID, after
 	if p.recorder == nil {
 		return nil
 	}
-	return p.recorder.PageSession(session, limit, beforeID, afterID)
+	return p.localizeEntries(p.recorder.PageSession(session, limit, beforeID, afterID))
 }
 
 // MsgLogDelete 删除面板里的一条消息日志（实现 adminpanel.MsgLogDeleteSource），
@@ -136,6 +174,11 @@ func (p *LogPlugin) OnGroupMsg(ctx context.Context, b bot.Bot, cmd command.Comma
 		opts = append(opts, message.WithGetForwardMsgFunc(qb.GetForwardMsg))
 	}
 	text := msg.FriendlyText(false, opts...)
+	// 消息里 @ 了别人：顺手预热本群成员昵称缓存（后台查询，不阻塞收消息），
+	// 面板打开「消息日志」时就能直接显示昵称而不是 QQ 号。
+	if strings.Contains(text, "[at:id:") {
+		p.warmMentionNames(msg.GroupId)
+	}
 	p.Logger.Info("[收<-群]: "+text, "groupId", msg.GroupId, "userId", msg.Sender.UserId)
 	p.add(msglog.Entry{
 		Type:      msglog.TypeGroup,

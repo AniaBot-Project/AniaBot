@@ -113,6 +113,15 @@ type MediaRefresher interface {
 	RefreshMediaURL(kind, fileId, groupId, userId string) (string, bool)
 }
 
+// GroupMembers 群成员枚举能力，可选接口（与 bot.QQ 同模式）。
+// core 实现时按群 ID 前缀路由到对应适配器；平台不支持枚举群成员（如 Telegram、
+// QQ 官方）或适配器未连接时返回 false。面板「消息日志」用它把 FriendlyText 里的
+// [at:id:…] 占位还原成成员昵称（见 pluginlog 的 @ 昵称本地化）。
+type GroupMembers interface {
+	// GetGroupMemberList 获取群成员列表
+	GetGroupMemberList(groupId message.QID, noCache bool) (*[]message.GroupUserInfo, bool)
+}
+
 // QQ QQ（NapCat/OneBot v11）平台专属能力，可选接口。
 // 事件来源为 QQ 适配器时，事件回调收到的 bot.Bot 可断言为 bot.QQ。
 type QQ interface {
