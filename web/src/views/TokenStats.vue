@@ -189,11 +189,12 @@
         <Card class="flex flex-col">
           <div class="flex items-center justify-between">
             <span class="tlabel">By Chat Type</span>
-            <Tag variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-[#725d42] inline-block mr-1.5" />群聊 / 私聊</Tag>
+            <Tag variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-[#725d42] inline-block mr-1.5" />群聊 / 私聊 / 试聊</Tag>
           </div>
           <div class="flex h-3 rounded-sm overflow-hidden mt-5 bg-zinc-100">
-            <div class="bg-zinc-800" :style="{ width: shareW(byChatType.group?.total_tokens, byChatType.friend?.total_tokens) }" />
-            <div class="bg-zinc-300" :style="{ width: shareW(byChatType.friend?.total_tokens, byChatType.group?.total_tokens) }" />
+            <div class="bg-zinc-800" :style="{ width: segW(byChatType.group?.total_tokens, byChatType.friend?.total_tokens, byChatType.panel?.total_tokens) }" />
+            <div class="bg-zinc-500" :style="{ width: segW(byChatType.panel?.total_tokens, byChatType.group?.total_tokens, byChatType.friend?.total_tokens) }" />
+            <div class="bg-zinc-300" :style="{ width: segW(byChatType.friend?.total_tokens, byChatType.group?.total_tokens, byChatType.panel?.total_tokens) }" />
           </div>
           <dl class="flex-1 mt-3 text-xs">
             <div class="dimrow">
@@ -203,6 +204,10 @@
             <div class="dimrow">
               <dt class="tlabel">私聊 Friend</dt>
               <dd class="dimval">{{ fmtTokens(byChatType.friend?.total_tokens) }} <span class="text-zinc-400 font-normal">/ {{ byChatType.friend?.requests ?? 0 }} runs</span></dd>
+            </div>
+            <div class="dimrow">
+              <dt class="tlabel">试聊 Panel</dt>
+              <dd class="dimval">{{ fmtTokens(byChatType.panel?.total_tokens) }} <span class="text-zinc-400 font-normal">/ {{ byChatType.panel?.requests ?? 0 }} runs</span></dd>
             </div>
           </dl>
         </Card>
@@ -266,7 +271,7 @@
             </template>
             <template #cell-target_id="{ record }">
               <span class="text-zinc-800 font-medium whitespace-nowrap">
-                <Tag variant="outlined" size="small" class="mr-2">{{ record.chat_type === 'group' ? '群' : '私' }}</Tag>
+                <Tag variant="outlined" size="small" class="mr-2">{{ chatTypeGlyph(record.chat_type) }}</Tag>
                 {{ record.target_id }}
               </span>
             </template>
@@ -467,10 +472,9 @@ function targetSharePct(v) {
   return ((v / total) * 100).toFixed(1) + '%'
 }
 
-function shareW(a, b) {
-  const sum = (a || 0) + (b || 0)
-  if (!sum) return '50%'
-  return (((a || 0) / sum) * 100).toFixed(1) + '%'
+// 会话类型徽标：群聊 / 私聊 / 面板试聊
+function chatTypeGlyph(t) {
+  return { group: '群', friend: '私', panel: '试' }[t] || '?'
 }
 
 // segW 多段堆叠条中某一项的宽度；全为 0 时留空（露出灰底）

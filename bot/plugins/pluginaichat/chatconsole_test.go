@@ -12,18 +12,19 @@ import (
 	"time"
 
 	"github.com/jeanhua/AniaBot/bot/component/llmtool"
+	"github.com/jeanhua/AniaBot/bot/component/querylog"
 	"github.com/jeanhua/AniaBot/common/plugininfo"
 )
 
-// newTestChatConsole 构造一个可用的试聊管理器（LLM 指向 httptest 假服务）。
-// 试聊开启流式展示，因此假服务返回 SSE 分块响应（与真实上游一致）。
-func newTestChatConsole(t *testing.T) (*AIChatPlugin, *chatConsoleManager) {
+// newChatConsoleLLMServer 启动一个假 LLM 服务：按给定分块返回 SSE 流式响应
+//（试聊开启流式展示，因此假的也要按流式格式回）。usage 固定为 11/7/18。
+func newChatConsoleLLMServer(t *testing.T, parts ...string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// 稍作延迟：让 send 之后的并发与轮询逻辑可复现
 		time.Sleep(15 * time.Millisecond)
 		w.Header().Set("Content-Type", "text/event-stream")
-		for _, part := range []string{"面板", "收到的", "回复"} {
+		for _, part := range parts {
 			fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"test\","+
 				"\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":%q},\"finish_reason\":null}]}\n\n", part)
 		}
@@ -32,11 +33,26 @@ func newTestChatConsole(t *testing.T) (*AIChatPlugin, *chatConsoleManager) {
 		fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	t.Cleanup(srv.Close)
+	return srv
+}
+
+// newTestChatConsole 构造一个可用的试聊管理器（LLM 指向 httptest 假服务）。
+func newTestChatConsole(t *testing.T) (*AIChatPlugin, *chatConsoleManager) {
+	t.Helper()
+	return newTestChatConsoleWithParts(t, "面板", "收到的", "回复")
+}
+
+// newTestChatConsoleWithParts 同上，但由调用方指定模型输出分块。
+// 持久化用带 SQL 能力的假存储，Query 日志同时可被测试断言。
+func newTestChatConsoleWithParts(t *testing.T, parts ...string) (*AIChatPlugin, *chatConsoleManager) {
+	t.Helper()
+	srv := newChatConsoleLLMServer(t, parts...)
 
 	p := &AIChatPlugin{ready: true, msgEventTimeout: 10 * time.Second}
 	p.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
-	p.PersistentStorage = newPFake()
+	p.PersistentStorage = newSQLPFake()
 	p.toolExecutor = llmtool.NewToolExecuter()
+	p.initQueryLogger()
 	p.cfg.BaseURL = srv.URL
 	p.cfg.APIKey = "test-key"
 	p.cfg.Model = "test-model"
@@ -148,6 +164,101 @@ func waitConsoleIdle(t *testing.T, m *chatConsoleManager, id string) ([]pluginin
 	}
 	msgs, busy, _ := m.messages(id, 0)
 	return msgs, busy
+}
+
+// TestChatConsoleSplitReply 试聊回复按 ||| 拆成多条消息展示（与线上发送一致）：
+// 首条承载用量与附件，后续片段各占一条 assistant 消息。
+func TestChatConsoleSplitReply(t *testing.T) {
+	_, m := newTestChatConsoleWithParts(t, "第一段|||第二段")
+	info, err := m.create(plugininfo.ChatConsoleSessionCreate{TargetKind: plugininfo.ChatConsoleTargetTest})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := m.send(info.ID, "拆成两条"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	msgs, busy := waitConsoleIdle(t, m, info.ID)
+	if busy {
+		t.Fatal("等待超时后仍在生成")
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("期望 3 条消息（用户 + 两条回复），实际 %d 条: %+v", len(msgs), msgs)
+	}
+	if msgs[1].Role != plugininfo.ChatConsoleRoleAssistant || msgs[1].Text != "第一段" || msgs[1].Status != plugininfo.ChatConsoleStatusOK {
+		t.Fatalf("首条回复不符: %+v", msgs[1])
+	}
+	if msgs[2].Role != plugininfo.ChatConsoleRoleAssistant || msgs[2].Text != "第二段" || msgs[2].Status != plugininfo.ChatConsoleStatusOK {
+		t.Fatalf("第二条回复不符: %+v", msgs[2])
+	}
+	if msgs[1].Usage == nil || msgs[1].Usage.TotalTokens != 18 {
+		t.Fatalf("用量应记在首条回复上: %+v", msgs[1].Usage)
+	}
+	if msgs[2].Usage != nil {
+		t.Fatalf("后续片段不应重复记用量: %+v", msgs[2].Usage)
+	}
+}
+
+// TestChatConsoleWritesQueryLog 试聊照常写 Query 日志（会话类型 panel），
+// token 用量与最终回复一并落盘，并进入 Token 统计的统计行。
+func TestChatConsoleWritesQueryLog(t *testing.T) {
+	p, m := newTestChatConsole(t)
+	info, err := m.create(plugininfo.ChatConsoleSessionCreate{TargetKind: plugininfo.ChatConsoleTargetTest})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := m.send(info.ID, "你好"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	waitConsoleIdle(t, m, info.ID)
+
+	entries := p.queryLogger.Query(querylog.Filter{Limit: 1})
+	if len(entries) != 1 {
+		t.Fatalf("期望 1 条 Query 日志，实际 %d 条", len(entries))
+	}
+	e := entries[0]
+	if e.ChatType != querylog.ChatTypePanel {
+		t.Fatalf("会话类型 = %q, want panel", e.ChatType)
+	}
+	if e.TargetID != "通用试聊" {
+		t.Fatalf("通用试聊的目标 = %q", e.TargetID)
+	}
+	if e.Query != "你好" || e.Status != querylog.StatusSuccess {
+		t.Fatalf("日志内容不符: %+v", e)
+	}
+	if e.PromptTokens != 11 || e.CompletionTokens != 7 || e.TotalTokens != 18 {
+		t.Fatalf("token 用量不符: %+v", e)
+	}
+	if !strings.Contains(e.Reply, "面板收到的回复") {
+		t.Fatalf("最终回复缺失: %q", e.Reply)
+	}
+	if !strings.Contains(e.Note, "通用试聊") {
+		t.Fatalf("应记录试聊会话标题以便辨认: %q", e.Note)
+	}
+
+	rows := p.queryLogger.Stats(querylog.Filter{})
+	if len(rows) != 1 || rows[0].ChatType != querylog.ChatTypePanel || rows[0].TotalTokens != 18 {
+		t.Fatalf("Token 统计行不符: %+v", rows)
+	}
+}
+
+// TestChatConsoleQueryLogTarget 绑定真实会话时 Query 日志沿用该会话的目标 ID，
+// 便于与线上日志按同一个群/好友对照。
+func TestChatConsoleQueryLogTarget(t *testing.T) {
+	p, m := newTestChatConsole(t)
+	info, _ := m.create(plugininfo.ChatConsoleSessionCreate{
+		TargetKind: plugininfo.ChatConsoleTargetGroup,
+		TargetID:   "qq:123456",
+		TargetName: "测试群",
+	})
+	if err := m.send(info.ID, "群里试一句"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	waitConsoleIdle(t, m, info.ID)
+
+	entries := p.queryLogger.Query(querylog.Filter{Limit: 1})
+	if len(entries) != 1 || entries[0].TargetID != "qq:123456" || entries[0].ChatType != querylog.ChatTypePanel {
+		t.Fatalf("绑定会话的 Query 日志目标不符: %+v", entries)
+	}
 }
 
 // TestChatConsoleMessagesCursor 增量轮询：after 为已拿到的最大 Seq 时只回最后一条，

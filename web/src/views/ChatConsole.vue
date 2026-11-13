@@ -208,7 +208,7 @@
         />
         <div class="composer-bar">
           <span class="composer-hint">
-            试聊会真实执行 AI 选中的工具（含文件 / 命令类），回复不会发送到任何平台
+            试聊会真实执行 AI 选中的工具（含文件 / 命令类），回复不会发送到任何平台；每轮对话会记入 Query 日志并计入 Token 统计
           </span>
           <Button
             type="primary"

@@ -213,12 +213,13 @@ export function buildQueryLogs(now) {
     const cached = Math.floor(prompt * (0.3 + rand() * 0.3))
     const iterations = q.tools.length + ri(0, 2)
     const isGroup = rand() < 0.7
+    // 隔几条插入一条面板试聊记录，演示 Query 日志的「试聊」筛选
+    const panel = !proactive && n % 9 === 0
     const item = {
       id: pad(n, 8), // 定长字符串 id，字典序 == 时间序
       time: toLocalIso(new Date(t)),
-      chat_type: isGroup ? 'group' : 'friend',
-      target_id: isGroup ? DEMO_GROUP : pick([DEMO_ADMIN, 'qq:10004']),
-      senders: [pick(MEMBERS).id],
+      chat_type: panel ? 'panel' : isGroup ? 'group' : 'friend',
+      target_id: panel ? '通用试聊' : isGroup ? DEMO_GROUP : pick([DEMO_ADMIN, 'qq:10004']),
       query: q.q,
       status,
       duration_ms: ri(2, 60) * 1000,
@@ -229,6 +230,8 @@ export function buildQueryLogs(now) {
       cached_tokens: cached,
     }
     if (proactive) item.kind = 'proactive'
+    if (panel) item.note = '面板试聊会话「通用试聊」'
+    else item.senders = [pick(MEMBERS).id]
     if (q.tools.length) {
       item.tool_calls = q.tools.map(([name, args]) => ({
         name, arguments: args,
@@ -411,6 +414,7 @@ export function buildTokenStatsDetail(range, now, startStr, endStr) {
     { chat_type: 'friend', target_id: DEMO_ADMIN, ...split(sumAcc(daily.slice(-5)), 0.12) },
     { chat_type: 'friend', target_id: 'qq:10004', ...split(sumAcc(daily.slice(-7)), 0.06) },
     { chat_type: 'group', target_id: 'qq:7891011', ...split(sumAcc(daily.slice(-9)), 0.04) },
+    { chat_type: 'panel', target_id: '通用试聊', ...split(sumAcc(daily.slice(-3)), 0.03) },
   ]
   const hourly = Array.from({ length: 24 }, (_, h) => {
     const q = ri(0, 14), p = ri(0, 2), tk = ri(0, 6)
@@ -437,7 +441,7 @@ export function buildTokenStatsDetail(range, now, startStr, endStr) {
     summary: numAcc(summaryNum),
     today: numAcc(daily[daily.length - 1]),
     by_source: { query: numAcc(split(summaryNum, 0.65)), proactive: numAcc(split(summaryNum, 0.05)), task: numAcc(split(summaryNum, 0.3)) },
-    by_chat_type: { group: numAcc(split(summaryNum, 0.72)), friend: numAcc(split(summaryNum, 0.28)) },
+    by_chat_type: { group: numAcc(split(summaryNum, 0.7)), friend: numAcc(split(summaryNum, 0.25)), panel: numAcc(split(summaryNum, 0.05)) },
     by_status: byStatus,
     top_targets: topTargets.map((t) => ({ chat_type: t.chat_type, target_id: t.target_id, ...numAcc(t) })),
     hourly: hourly.map((h) => ({ date: h.date, query: h.query, proactive: h.proactive, task: h.task, total: h.total })),

@@ -194,7 +194,7 @@ type QueryLogSource interface {
 
 ### ChatConsoleSource —— 试聊室页
 
-把聊天搬到面板上：管理员在面板里直接发消息，插件用自己的对话管线生成回复并回显（不向任何平台发送消息）。发送是异步的——`ChatConsoleSend` 立即返回，面板按 `Seq` 轮询 `ChatConsoleMessages` 拿流式文本、工具调用明细与最终状态。
+把聊天搬到面板上：管理员在面板里直接发消息，插件用自己的对话管线生成回复并回显（不向任何平台发送消息）。发送是异步的——`ChatConsoleSend` 立即返回，面板按 `Seq` 轮询 `ChatConsoleMessages` 拿流式文本、工具调用明细与最终状态。试聊的一轮对话同样写入 Query 日志（`chat_type=panel`）并计入 Token 统计，但不计入每日配额；AI 用 `|||` 分隔的回复按多条 `ChatConsoleMessage` 返回，与线上拆成多条发送的效果一致。
 
 ```go
 type ChatConsoleSource interface {
