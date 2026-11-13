@@ -148,7 +148,7 @@
                   <div class="bubble-meta">
                     <span>{{ clock(m.time) }}</span>
                     <span v-if="m.duration_ms">{{ fmtDur(m.duration_ms) }}</span>
-                    <span v-if="m.usage && m.usage.total_tokens">{{ m.usage.total_tokens }} tokens</span>
+                    <span v-if="m.usage && m.usage.total_tokens">{{ fmtInt(m.usage.total_tokens) }} tokens</span>
                     <span v-if="m.usage && m.usage.iterations > 1">{{ m.usage.iterations }} 轮</span>
                     <button
                       v-if="m.tool_calls_total"
@@ -285,6 +285,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { Button, Input, Modal } from 'animal-island-vue'
+import { fmtInt } from '../utils/format.js'
 import { api } from '../api.js'
 
 // 试聊室：面板内直接和 AI 对话做测试。回复只回显在本页，不发送到任何平台；

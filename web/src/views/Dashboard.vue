@@ -136,20 +136,12 @@
           <span class="tlabel text-zinc-400 pb-1">Sample 5s</span>
         </div>
 
-        <svg viewBox="0 0 100 32" preserveAspectRatio="none" class="w-full h-12 block">
-          <line x1="0" y1="31.5" x2="100" y2="31.5" stroke="#e4e4e7" stroke-width="0.5" />
-          <polyline
-            v-if="cpuPoints"
-            :points="cpuPoints"
-            fill="none"
-            stroke="#18181b"
-            stroke-width="1.5"
-            stroke-linejoin="round"
-            stroke-linecap="round"
-            vector-effect="non-scaling-stroke"
-          />
-          <text v-else x="50" y="18" text-anchor="middle" class="fill-zinc-300" font-size="6" letter-spacing="1">SAMPLING…</text>
-        </svg>
+        <TokenLine
+          :values="cpuHistory"
+          :tip="cpuTip"
+          height="3rem"
+          aria-label="CPU 占用率历史"
+        />
 
         <div class="flex items-center justify-between mt-3 text-[10px] tracking-[0.12em] uppercase text-zinc-400">
           <span class="truncate" :title="host.cpu_model">{{ host.cpu_model || 'Unknown CPU' }}</span>
@@ -219,22 +211,22 @@
         </div>
 
         <div class="flex-1 py-5">
-          <div class="text-4xl font-semibold tracking-tight text-zinc-900">{{ fmtTokens(tokenSummary.total_tokens) }}</div>
-          <div class="tlabel mt-2">Total tokens · {{ tokenSummary.requests ?? 0 }} runs</div>
+          <div class="text-4xl font-semibold tracking-tight text-zinc-900">{{ fmtInt(tokenSummary.total_tokens) }}</div>
+          <div class="tlabel mt-2">Total tokens · {{ fmtInt(tokenSummary.requests) }} runs</div>
         </div>
 
         <dl class="text-xs">
           <div class="tokenrow">
             <dt class="tlabel">Today</dt>
-            <dd class="tokenval">{{ fmtTokens(tokenToday.total_tokens) }} <span class="text-zinc-400 font-normal">/ {{ tokenToday.requests ?? 0 }} runs</span></dd>
+            <dd class="tokenval">{{ fmtInt(tokenToday.total_tokens) }} <span class="text-zinc-400 font-normal">/ {{ fmtInt(tokenToday.requests) }} runs</span></dd>
           </div>
           <div class="tokenrow">
             <dt class="tlabel">Prompt / Completion</dt>
-            <dd class="tokenval">{{ fmtTokens(tokenSummary.prompt_tokens) }} / {{ fmtTokens(tokenSummary.completion_tokens) }}</dd>
+            <dd class="tokenval">{{ fmtInt(tokenSummary.prompt_tokens) }} / {{ fmtInt(tokenSummary.completion_tokens) }}</dd>
           </div>
           <div class="tokenrow">
             <dt class="tlabel">Cached</dt>
-            <dd class="tokenval">{{ fmtTokens(tokenSummary.cached_tokens) }} <span class="text-zinc-400 font-normal">hit {{ cacheHitText }}</span></dd>
+            <dd class="tokenval">{{ fmtInt(tokenSummary.cached_tokens) }} <span class="text-zinc-400 font-normal">hit {{ cacheHitText }}</span></dd>
           </div>
         </dl>
       </Card>
@@ -252,20 +244,16 @@
         </div>
 
         <!-- 小屏固定高度：单列布局下 flex-1 无可分配空间会把图表区压缩为 0 -->
-        <div class="flex items-end gap-1.5 pt-5 pb-1 h-36 xl:flex-1">
-          <div v-for="d in tokenDaily" :key="d.date" class="flex-1 flex flex-col justify-end h-full" :title="dayTip(d)">
-            <div class="w-full bg-zinc-300 rounded-t-sm" :style="{ height: barH(d.completion_tokens) }" />
-            <div class="w-full bg-zinc-700" :style="{ height: barH((d.prompt_tokens || 0) - (d.cached_tokens || 0)) }" />
-            <div class="w-full bg-zinc-400" :style="{ height: barH(d.cached_tokens) }" />
-          </div>
-        </div>
-        <div class="flex items-center justify-between mt-2 text-[10px] tracking-[0.12em] uppercase text-zinc-400">
+        <TokenChart
+          :items="dailyColumns"
+          :series="TOKEN_SERIES"
+          height="9rem"
+          class="pt-5"
+          aria-label="近 14 天 Token 消耗"
+        />
+        <div class="flex items-center justify-between mt-1 text-[10px] tracking-[0.12em] uppercase text-zinc-400">
           <span>{{ tokenDaily[0]?.date?.slice(5) || '—' }}</span>
-          <span class="flex items-center gap-3">
-            <span class="flex items-center gap-1"><i class="w-2 h-2 bg-zinc-700 inline-block rounded-[1px]" />Prompt</span>
-            <span class="flex items-center gap-1"><i class="w-2 h-2 bg-zinc-300 inline-block rounded-[1px]" />Completion</span>
-            <span class="flex items-center gap-1"><i class="w-2 h-2 bg-zinc-400 inline-block rounded-[1px]" />Cached</span>
-          </span>
+          <span>14 Days</span>
           <span>{{ tokenDaily[tokenDaily.length - 1]?.date?.slice(5) || '—' }}</span>
         </div>
         <Divider type="dashed-brown" class="my-3" />
@@ -324,6 +312,9 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { Button, Card, Divider, Progress, Table, Tag } from 'animal-island-vue'
+import TokenChart from '../ui/TokenChart.vue'
+import TokenLine from '../ui/TokenLine.vue'
+import { fmtInt } from '../utils/format.js'
 import { api } from '../api.js'
 
 const icons = {
@@ -418,24 +409,34 @@ const cacheHitText = computed(() => {
   return r != null ? (r * 100).toFixed(1) + '%' : '—'
 })
 
-const tokenDayMax = computed(() => Math.max(0, ...tokenDaily.value.map(d => d.total_tokens || 0)))
+// 柱状图系列（自下而上堆叠）：未命中缓存的输入 / 命中缓存 / 输出
+const TOKEN_SERIES = [
+  { key: 'prompt', label: 'Prompt', tone: 'primary' },
+  { key: 'cached', label: 'Cached', tone: 'clay' },
+  { key: 'completion', label: 'Completion', tone: 'amber' },
+]
 
-// 柱状图分段高度（相对 14 天最大值的百分比）
-function barH(v) {
-  if (!tokenDayMax.value || !v || v <= 0) return '0%'
-  return ((v / tokenDayMax.value) * 100).toFixed(1) + '%'
-}
+const cpuTip = v => `CPU ${Number(v).toFixed(1)}%`
 
-function fmtTokens(n) {
-  if (n == null || !isFinite(n) || n <= 0) return '0'
-  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M'
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k'
-  return String(n)
-}
-
-function dayTip(d) {
-  return `${d.date} · ${d.total_tokens} tok (prompt ${d.prompt_tokens} / completion ${d.completion_tokens} / cached ${d.cached_tokens}) · ${d.requests} runs`
-}
+const dailyColumns = computed(() => tokenDaily.value.map(d => {
+  const prompt = d.prompt_tokens || 0
+  const cached = d.cached_tokens || 0
+  return {
+    key: d.date,
+    values: {
+      prompt: Math.max(0, prompt - cached),
+      cached,
+      completion: d.completion_tokens || 0,
+    },
+    tip: [
+      `${d.date} · ${d.requests || 0} runs`,
+      `共 ${fmtInt(d.total_tokens)} tok`,
+      `输入 ${fmtInt(prompt)}`,
+      `缓存 ${fmtInt(cached)}`,
+      `输出 ${fmtInt(d.completion_tokens)}`,
+    ].join('\n'),
+  }
+}))
 
 // ---- API 余额（服务端执行自定义 JS 查询，结果有缓存） ----
 
@@ -476,16 +477,6 @@ const hostUptimeText = computed(() => {
   const m = Math.floor((s % 3600) / 60)
   const pad = n => String(n).padStart(2, '0')
   return d > 0 ? `${d}d ${pad(h)}:${pad(m)}` : `${pad(h)}:${pad(m)}`
-})
-
-const cpuPoints = computed(() => {
-  const h = cpuHistory.value
-  if (h.length < 2) return ''
-  const max = Math.max(10, ...h)
-  const n = h.length
-  return h
-    .map((v, i) => `${((i / (n - 1)) * 100).toFixed(2)},${(31 - (v / max) * 29).toFixed(2)}`)
-    .join(' ')
 })
 
 function fmtBytes(b) {

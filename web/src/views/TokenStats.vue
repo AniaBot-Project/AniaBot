@@ -11,15 +11,15 @@
         <Card class="flex flex-col">
           <div class="flex items-center justify-between">
             <span class="tlabel">Total Tokens</span>
-            <Tag variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-[#725d42] inline-block mr-1.5" />{{ oSummary.requests ?? 0 }} Runs</Tag>
+            <Tag variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-[#725d42] inline-block mr-1.5" />{{ fmtInt(oSummary.requests) }} Runs</Tag>
           </div>
           <div class="flex-1 py-4">
-            <div class="text-4xl font-semibold tracking-tight text-zinc-900">{{ fmtTokens(oSummary.total_tokens) }}</div>
+            <div class="text-4xl font-semibold tracking-tight text-zinc-900">{{ fmtInt(oSummary.total_tokens) }}</div>
             <div class="tlabel mt-2">历史留存累计</div>
           </div>
           <div class="border-t border-dotted border-zinc-300 pt-2.5 flex justify-between text-[10px] tracking-[0.12em] uppercase text-zinc-500">
-            <span>Prompt {{ fmtTokens(oSummary.prompt_tokens) }}</span>
-            <span>Completion {{ fmtTokens(oSummary.completion_tokens) }}</span>
+            <span>Prompt {{ fmtInt(oSummary.prompt_tokens) }}</span>
+            <span>Completion {{ fmtInt(oSummary.completion_tokens) }}</span>
           </div>
         </Card>
 
@@ -27,15 +27,15 @@
         <Card class="flex flex-col">
           <div class="flex items-center justify-between">
             <span class="tlabel">Today</span>
-            <Tag variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-[#34c759] inline-block mr-1.5" />{{ oToday.requests ?? 0 }} Runs</Tag>
+            <Tag variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-[#34c759] inline-block mr-1.5" />{{ fmtInt(oToday.requests) }} Runs</Tag>
           </div>
           <div class="flex-1 py-4">
-            <div class="text-4xl font-semibold tracking-tight text-zinc-900">{{ fmtTokens(oToday.total_tokens) }}</div>
+            <div class="text-4xl font-semibold tracking-tight text-zinc-900">{{ fmtInt(oToday.total_tokens) }}</div>
             <div class="tlabel mt-2">今日消耗</div>
           </div>
           <div class="border-t border-dotted border-zinc-300 pt-2.5 flex justify-between text-[10px] tracking-[0.12em] uppercase text-zinc-500">
-            <span>Prompt {{ fmtTokens(oToday.prompt_tokens) }}</span>
-            <span>Completion {{ fmtTokens(oToday.completion_tokens) }}</span>
+            <span>Prompt {{ fmtInt(oToday.prompt_tokens) }}</span>
+            <span>Completion {{ fmtInt(oToday.completion_tokens) }}</span>
           </div>
         </Card>
 
@@ -49,11 +49,11 @@
             </Tag>
           </div>
           <div class="flex-1 py-4">
-            <div class="text-4xl font-semibold tracking-tight text-zinc-900">{{ pctText(oSummary.cache_hit_rate) }}</div>
+            <div class="text-4xl font-semibold tracking-tight text-zinc-900">{{ fmtPct(oSummary.cache_hit_rate) }}</div>
             <div class="tlabel mt-2">Cached / Prompt</div>
           </div>
           <div class="border-t border-dotted border-zinc-300 pt-2.5 text-[10px] tracking-[0.12em] uppercase text-zinc-500">
-            命中 {{ fmtTokens(oSummary.cached_tokens) }} tokens
+            命中 {{ fmtInt(oSummary.cached_tokens) }} tokens
           </div>
         </Card>
 
@@ -64,7 +64,7 @@
             <Tag variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-[#725d42] inline-block mr-1.5" />Per Run</Tag>
           </div>
           <div class="flex-1 py-4">
-            <div class="text-4xl font-semibold tracking-tight text-zinc-900">{{ fmtTokens(Math.round(oSummary.avg_total_tokens || 0)) }}</div>
+            <div class="text-4xl font-semibold tracking-tight text-zinc-900">{{ fmtInt(Math.round(oSummary.avg_total_tokens || 0)) }}</div>
             <div class="tlabel mt-2">单次平均消耗</div>
           </div>
           <div class="border-t border-dotted border-zinc-300 pt-2.5 text-[10px] tracking-[0.12em] uppercase text-zinc-500">
@@ -99,10 +99,10 @@
       <!-- 范围摘要条 -->
       <Card class="flex items-center gap-x-6 gap-y-2 flex-wrap">
         <span class="tlabel text-zinc-800">{{ rangeMeta.label }}</span>
-        <span class="text-xs text-zinc-600">Total <b class="text-zinc-900">{{ fmtTokens(summary.total_tokens) }}</b></span>
-        <span class="text-xs text-zinc-600">Runs <b class="text-zinc-900">{{ summary.requests ?? 0 }}</b></span>
-        <span class="text-xs text-zinc-600">Avg <b class="text-zinc-900">{{ fmtTokens(Math.round(summary.avg_total_tokens || 0)) }}</b> / run</span>
-        <span class="text-xs text-zinc-600">Cache <b class="text-zinc-900">{{ pctText(summary.cache_hit_rate) }}</b></span>
+        <span class="text-xs text-zinc-600">Total <b class="text-zinc-900">{{ fmtInt(summary.total_tokens) }}</b></span>
+        <span class="text-xs text-zinc-600">Runs <b class="text-zinc-900">{{ fmtInt(summary.requests) }}</b></span>
+        <span class="text-xs text-zinc-600">Avg <b class="text-zinc-900">{{ fmtInt(Math.round(summary.avg_total_tokens || 0)) }}</b> / run</span>
+        <span class="text-xs text-zinc-600">Cache <b class="text-zinc-900">{{ fmtPct(summary.cache_hit_rate) }}</b></span>
         <span class="text-[10px] tracking-[0.12em] uppercase text-zinc-400 ml-auto">{{ daily[0]?.date || '—' }} ~ {{ daily[daily.length - 1]?.date || '—' }}</span>
       </Card>
 
@@ -110,32 +110,16 @@
       <Card>
         <div class="flex items-center justify-between">
           <span class="tlabel">{{ singleDay ? 'Hourly Tokens · By Source' : 'Daily Tokens · By Source' }}</span>
-          <div class="flex items-center gap-3">
-            <span class="flex items-center gap-1.5 text-[10px] tracking-[0.12em] uppercase text-zinc-400">
-              <i class="w-2 h-2 bg-zinc-700 inline-block rounded-[1px]" />对话
-              <i class="w-2 h-2 bg-zinc-500 inline-block rounded-[1px] ml-2" />主动互动
-              <i class="w-2 h-2 bg-zinc-300 inline-block rounded-[1px] ml-2" />定时任务
-            </span>
-            <Button type="text" size="small" @click="loadDetail">刷新</Button>
-          </div>
+          <Button type="text" size="small" @click="loadDetail">刷新</Button>
         </div>
 
-        <div class="flex items-end gap-0.75 pt-5 pb-1 h-40">
-          <template v-if="singleDay">
-            <div v-for="(h, i) in hourly" :key="i" class="flex-1 flex flex-col justify-end h-full min-w-0" :title="hourTip(i, h)">
-              <div class="w-full bg-zinc-700" :style="{ height: hourBarH(h.query?.total_tokens) }" />
-              <div class="w-full bg-zinc-500" :style="{ height: hourBarH(h.proactive?.total_tokens) }" />
-              <div class="w-full bg-zinc-300 rounded-t-sm" :style="{ height: hourBarH(h.task?.total_tokens) }" />
-            </div>
-          </template>
-          <template v-else>
-            <div v-for="d in daily" :key="d.date" class="flex-1 flex flex-col justify-end h-full min-w-0" :title="dayTip(d)">
-              <div class="w-full bg-zinc-700" :style="{ height: barH(d.query?.total_tokens) }" />
-              <div class="w-full bg-zinc-500" :style="{ height: barH(d.proactive?.total_tokens) }" />
-              <div class="w-full bg-zinc-300 rounded-t-sm" :style="{ height: barH(d.task?.total_tokens) }" />
-            </div>
-          </template>
-        </div>
+        <TokenChart
+          :items="columnItems"
+          :series="SOURCE_SERIES"
+          height="10rem"
+          class="pt-5"
+          aria-label="按来源的 Token 消耗"
+        />
         <div class="flex items-center justify-between mt-2 text-[10px] tracking-[0.12em] uppercase text-zinc-400">
           <template v-if="singleDay">
             <span>00:00</span>
@@ -164,25 +148,24 @@
             <span class="tlabel">By Source</span>
             <Tag variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-[#725d42] inline-block mr-1.5" />对话 / 主动互动 / 任务</Tag>
           </div>
-          <div class="flex h-3 rounded-sm overflow-hidden mt-5 bg-zinc-100">
-            <div class="bg-zinc-800" :style="{ width: segW(bySource.query?.total_tokens, bySource.proactive?.total_tokens, bySource.task?.total_tokens) }" />
-            <div class="bg-zinc-500" :style="{ width: segW(bySource.proactive?.total_tokens, bySource.query?.total_tokens, bySource.task?.total_tokens) }" />
-            <div class="bg-zinc-300" :style="{ width: segW(bySource.task?.total_tokens, bySource.query?.total_tokens, bySource.proactive?.total_tokens) }" />
+          <div class="flex-1 mt-5 space-y-4">
+            <div v-for="s in sourceRows" :key="s.key">
+              <div class="flex items-baseline justify-between gap-3">
+                <span class="tlabel">{{ s.label }}</span>
+                <span class="dimval">{{ fmtInt(s.tokens) }}</span>
+              </div>
+              <Progress
+                class="mt-1.5"
+                :percent="s.pct"
+                size="small"
+                :info-format="pctFmt"
+                :aria-label="`${s.label} Token 占比`"
+              />
+              <div class="mt-1 text-[10px] tracking-[0.1em] uppercase text-zinc-400">
+                {{ fmtInt(s.runs) }} runs · avg {{ fmtInt(s.avg) }}
+              </div>
+            </div>
           </div>
-          <dl class="flex-1 mt-3 text-xs">
-            <div class="dimrow">
-              <dt class="tlabel">对话 Query</dt>
-              <dd class="dimval">{{ fmtTokens(bySource.query?.total_tokens) }} <span class="text-zinc-400 font-normal">/ {{ bySource.query?.requests ?? 0 }} runs · avg {{ fmtTokens(Math.round(bySource.query?.avg_total_tokens || 0)) }}</span></dd>
-            </div>
-            <div class="dimrow">
-              <dt class="tlabel">主动互动 Proactive</dt>
-              <dd class="dimval">{{ fmtTokens(bySource.proactive?.total_tokens) }} <span class="text-zinc-400 font-normal">/ {{ bySource.proactive?.requests ?? 0 }} runs · avg {{ fmtTokens(Math.round(bySource.proactive?.avg_total_tokens || 0)) }}</span></dd>
-            </div>
-            <div class="dimrow">
-              <dt class="tlabel">定时任务 Cron</dt>
-              <dd class="dimval">{{ fmtTokens(bySource.task?.total_tokens) }} <span class="text-zinc-400 font-normal">/ {{ bySource.task?.requests ?? 0 }} runs · avg {{ fmtTokens(Math.round(bySource.task?.avg_total_tokens || 0)) }}</span></dd>
-            </div>
-          </dl>
         </Card>
 
         <!-- BY CHAT TYPE -->
@@ -191,42 +174,47 @@
             <span class="tlabel">By Chat Type</span>
             <Tag variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-[#725d42] inline-block mr-1.5" />群聊 / 私聊 / 试聊</Tag>
           </div>
-          <div class="flex h-3 rounded-sm overflow-hidden mt-5 bg-zinc-100">
-            <div class="bg-zinc-800" :style="{ width: segW(byChatType.group?.total_tokens, byChatType.friend?.total_tokens, byChatType.panel?.total_tokens) }" />
-            <div class="bg-zinc-500" :style="{ width: segW(byChatType.panel?.total_tokens, byChatType.group?.total_tokens, byChatType.friend?.total_tokens) }" />
-            <div class="bg-zinc-300" :style="{ width: segW(byChatType.friend?.total_tokens, byChatType.group?.total_tokens, byChatType.panel?.total_tokens) }" />
+          <div class="flex-1 mt-5 space-y-4">
+            <div v-for="c in chatTypeRows" :key="c.key">
+              <div class="flex items-baseline justify-between gap-3">
+                <span class="tlabel">{{ c.label }}</span>
+                <span class="dimval">{{ fmtInt(c.tokens) }}</span>
+              </div>
+              <Progress
+                class="mt-1.5"
+                :percent="c.pct"
+                size="small"
+                :info-format="pctFmt"
+                :aria-label="`${c.label} Token 占比`"
+              />
+              <div class="mt-1 text-[10px] tracking-[0.1em] uppercase text-zinc-400">
+                {{ fmtInt(c.runs) }} runs
+              </div>
+            </div>
           </div>
-          <dl class="flex-1 mt-3 text-xs">
-            <div class="dimrow">
-              <dt class="tlabel">群聊 Group</dt>
-              <dd class="dimval">{{ fmtTokens(byChatType.group?.total_tokens) }} <span class="text-zinc-400 font-normal">/ {{ byChatType.group?.requests ?? 0 }} runs</span></dd>
-            </div>
-            <div class="dimrow">
-              <dt class="tlabel">私聊 Friend</dt>
-              <dd class="dimval">{{ fmtTokens(byChatType.friend?.total_tokens) }} <span class="text-zinc-400 font-normal">/ {{ byChatType.friend?.requests ?? 0 }} runs</span></dd>
-            </div>
-            <div class="dimrow">
-              <dt class="tlabel">试聊 Panel</dt>
-              <dd class="dimval">{{ fmtTokens(byChatType.panel?.total_tokens) }} <span class="text-zinc-400 font-normal">/ {{ byChatType.panel?.requests ?? 0 }} runs</span></dd>
-            </div>
-          </dl>
         </Card>
 
         <!-- BY STATUS -->
         <Card class="flex flex-col">
           <div class="flex items-center justify-between">
             <span class="tlabel">By Status</span>
-            <Tag variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-[#725d42] inline-block mr-1.5" />{{ statusTotal }} Finished</Tag>
+            <Tag variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-[#725d42] inline-block mr-1.5" />{{ fmtInt(statusTotal) }} Finished</Tag>
           </div>
-          <div class="flex h-3 rounded-sm overflow-hidden mt-5 bg-zinc-100">
-            <div v-for="s in statusList" :key="s.key" :class="s.bar" :style="{ width: statusW(s.count) }" :title="`${s.label} ${s.count}`" />
-          </div>
-          <dl class="flex-1 mt-3 text-xs">
-            <div v-for="s in statusList" :key="s.key" class="dimrow">
-              <dt class="tlabel flex items-center gap-1.5"><span class="tdot" :class="s.dot" />{{ s.label }}</dt>
-              <dd class="dimval">{{ s.count }} <span class="text-zinc-400 font-normal">{{ statusPct(s.count) }}</span></dd>
+          <div class="flex-1 mt-5 space-y-2">
+            <div v-for="s in statusRows" :key="s.key" class="flex items-center gap-2.5">
+              <span class="tlabel w-[76px] shrink-0 flex items-center gap-1.5"><span class="tdot" :class="s.dot" />{{ s.label }}</span>
+              <Progress
+                class="flex-1"
+                :percent="s.pct"
+                size="small"
+                :show-info="false"
+                :aria-label="`${s.label} 占比`"
+              />
+              <span class="dimval w-[92px] text-right shrink-0">
+                {{ fmtInt(s.count) }} <span class="text-zinc-400 font-normal">{{ statusPct(s.count) }}</span>
+              </span>
             </div>
-          </dl>
+          </div>
         </Card>
       </div>
 
@@ -239,11 +227,16 @@
             <Tag variant="solid" size="small"><span class="w-1.5 h-1.5 rounded-full bg-[#725d42] inline-block mr-1.5" />24h</Tag>
           </div>
           <!-- 小屏固定高度：单列布局下 flex-1 无可分配空间会把图表区压缩为 0 -->
-          <div class="flex items-end gap-1 pt-5 pb-1 h-36 xl:flex-1">
-            <div v-for="(h, i) in hourly" :key="i" class="flex-1 flex flex-col justify-end h-full" :title="`${i}:00 · ${h.total?.total_tokens || 0} tok · ${h.total?.requests || 0} runs`">
-              <div class="w-full rounded-t-sm" :class="(h.total?.total_tokens || 0) > 0 ? 'bg-zinc-700' : 'bg-zinc-200'" :style="{ height: hourBarH(h.total?.total_tokens) }" />
-            </div>
-          </div>
+          <TokenChart
+            :items="hourlyItems"
+            :series="HOURLY_SERIES"
+            :legend="false"
+            height="9rem"
+            :min-pct="4"
+            track
+            class="pt-5"
+            aria-label="24 小时 Token 分布"
+          />
           <div class="flex justify-between mt-2 text-[10px] tracking-[0.12em] uppercase text-zinc-400">
             <span>00</span><span>06</span><span>12</span><span>18</span><span>23</span>
           </div>
@@ -277,14 +270,23 @@
             </template>
             <template #cell-share="{ record }">
               <div class="flex items-center gap-2">
-                <div class="flex-1 h-1.5 bg-zinc-100 rounded-sm overflow-hidden">
-                  <div class="h-full bg-zinc-700" :style="{ width: targetShareW(record.total_tokens) }" />
-                </div>
+                <Progress
+                  class="flex-1"
+                  :percent="targetShareW(record.total_tokens)"
+                  size="small"
+                  :show-info="false"
+                  :aria-label="`${record.target_id} Token 占比`"
+                />
                 <span class="text-[10px] text-zinc-400 w-11 text-right shrink-0">{{ targetSharePct(record.total_tokens) }}</span>
               </div>
             </template>
+            <template #cell-requests="{ record }">
+              <span class="text-zinc-600 whitespace-nowrap">{{ fmtInt(record.requests) }}</span>
+            </template>
             <template #cell-total_tokens="{ record }">
-              <span class="text-zinc-800 font-medium whitespace-nowrap" :title="`${record.total_tokens} tok (prompt ${record.prompt_tokens} / completion ${record.completion_tokens} / cached ${record.cached_tokens})`">{{ fmtTokens(record.total_tokens) }}</span>
+              <Tooltip :title="targetTip(record)" placement="top-end">
+                <span class="text-zinc-800 font-medium whitespace-nowrap">{{ fmtInt(record.total_tokens) }}</span>
+              </Tooltip>
             </template>
           </Table>
         </Card>
@@ -295,7 +297,9 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Button, Card, DatePicker, Divider, Table, Tag } from 'animal-island-vue'
+import { Button, Card, DatePicker, Divider, Progress, Table, Tag, Tooltip } from 'animal-island-vue'
+import TokenChart from '../ui/TokenChart.vue'
+import { fmtInt, fmtPct } from '../utils/format.js'
 import { api } from '../api.js'
 
 // 时间维度筛选选项（与后端 resolveTokenRange 对应）
@@ -319,6 +323,15 @@ const targetColumns = [
 ]
 
 const CUSTOM_MAX_DAYS = 62
+
+// 柱状图系列（自下而上堆叠）
+const SOURCE_SERIES = [
+  { key: 'query', label: '对话', tone: 'primary' },
+  { key: 'proactive', label: '主动互动', tone: 'clay' },
+  { key: 'task', label: '定时任务', tone: 'amber' },
+]
+
+const HOURLY_SERIES = [{ key: 'total', label: 'Tokens', tone: 'primary' }]
 
 const overview = ref({})
 const detail = ref({})
@@ -416,54 +429,96 @@ watch(range, () => {
 // ---- 状态分布 ----
 
 const STATUS_META = [
-  { key: 'success', label: '成功', bar: 'bg-zinc-800', dot: 'bg-[#34c759]' },
-  { key: 'skipped', label: '保持安静', bar: 'bg-blue-200', dot: 'bg-[#0071e3]' },
-  { key: 'stopped', label: '已停止', bar: 'bg-zinc-400', dot: 'bg-zinc-400' },
-  { key: 'timeout', label: '超时', bar: 'bg-zinc-300', dot: 'bg-[#ff9f0a]' },
-  { key: 'error', label: '错误', bar: 'bg-zinc-200', dot: 'bg-[#ff3b30]' },
-  { key: 'interrupted', label: '中断', bar: 'bg-zinc-200', dot: 'bg-amber-600' },
+  { key: 'success', label: '成功', dot: 'bg-[#34c759]' },
+  { key: 'skipped', label: '保持安静', dot: 'bg-[#0071e3]' },
+  { key: 'stopped', label: '已停止', dot: 'bg-zinc-400' },
+  { key: 'timeout', label: '超时', dot: 'bg-[#ff9f0a]' },
+  { key: 'error', label: '错误', dot: 'bg-[#ff3b30]' },
+  { key: 'interrupted', label: '中断', dot: 'bg-amber-600' },
 ]
 
 const statusList = computed(() => STATUS_META.map(m => ({ ...m, count: byStatus.value[m.key] || 0 })))
 const statusTotal = computed(() => statusList.value.reduce((s, x) => s + x.count, 0))
-
-function statusW(count) {
-  if (!statusTotal.value || !count) return '0%'
-  return ((count / statusTotal.value) * 100).toFixed(1) + '%'
-}
+const statusRows = computed(() => statusList.value.map(s => ({
+  ...s,
+  pct: statusTotal.value ? (s.count / statusTotal.value) * 100 : 0,
+})))
 
 function statusPct(count) {
   if (!statusTotal.value) return '—'
   return ((count / statusTotal.value) * 100).toFixed(1) + '%'
 }
 
-// ---- 图表计算 ----
+// ---- 图表数据 ----
 
-const dayMax = computed(() => Math.max(0, ...daily.value.map(d => d.total?.total_tokens || 0)))
+const columnItems = computed(() => {
+  const rows = singleDay.value ? hourly.value : daily.value
+  return rows.map((row, i) => {
+    const values = {
+      query: row.query?.total_tokens || 0,
+      proactive: row.proactive?.total_tokens || 0,
+      task: row.task?.total_tokens || 0,
+    }
+    const head = singleDay.value ? `${String(i).padStart(2, '0')}:00` : row.date
+    return {
+      key: singleDay.value ? i : row.date,
+      values,
+      tip: [
+        `${head} · ${fmtInt(row.total?.requests)} runs`,
+        `共 ${fmtInt(row.total?.total_tokens)} tok`,
+        `对话 ${fmtInt(values.query)}`,
+        `主动互动 ${fmtInt(values.proactive)}`,
+        `定时任务 ${fmtInt(values.task)}`,
+      ].join('\n'),
+    }
+  })
+})
 
-function barH(v) {
-  if (!dayMax.value || !v || v <= 0) return '0%'
-  return ((v / dayMax.value) * 100).toFixed(1) + '%'
+const hourlyItems = computed(() => hourly.value.map((h, i) => ({
+  key: i,
+  values: { total: h.total?.total_tokens || 0 },
+  tip: `${String(i).padStart(2, '0')}:00 · ${fmtInt(h.total?.total_tokens)} tok · ${fmtInt(h.total?.requests)} runs`,
+})))
+
+// 拆分维度：百分比取自本维度合计，Progress 负责画条，文案里保留原始数值
+function rowsWithShare(rows) {
+  const sum = rows.reduce((s, r) => s + (r.data?.total_tokens || 0), 0)
+  return rows.map(r => ({
+    key: r.key,
+    label: r.label,
+    tokens: r.data?.total_tokens || 0,
+    runs: r.data?.requests || 0,
+    avg: Math.round(r.data?.avg_total_tokens || 0),
+    pct: sum ? ((r.data?.total_tokens || 0) / sum) * 100 : 0,
+  }))
 }
 
-const hourMax = computed(() => Math.max(0, ...hourly.value.map(h => h.total?.total_tokens || 0)))
+const sourceRows = computed(() => rowsWithShare([
+  { key: 'query', label: '对话 Query', data: bySource.value.query },
+  { key: 'proactive', label: '主动互动 Proactive', data: bySource.value.proactive },
+  { key: 'task', label: '定时任务 Cron', data: bySource.value.task },
+]))
 
-function hourBarH(v) {
-  if (!hourMax.value || !v || v <= 0) return '4%'
-  return Math.max(4, (v / hourMax.value) * 100).toFixed(1) + '%'
-}
+const chatTypeRows = computed(() => rowsWithShare([
+  { key: 'group', label: '群聊 Group', data: byChatType.value.group },
+  { key: 'friend', label: '私聊 Friend', data: byChatType.value.friend },
+  { key: 'panel', label: '试聊 Panel', data: byChatType.value.panel },
+]))
+
+const pctFmt = p => (p > 0 ? p.toFixed(1) + '%' : '0%')
 
 const peakHourText = computed(() => {
-  if (!hourMax.value) return '—'
-  const idx = hourly.value.findIndex(h => (h.total?.total_tokens || 0) === hourMax.value)
-  return idx < 0 ? '—' : `${String(idx).padStart(2, '0')}:00 · ${fmtTokens(hourMax.value)}`
+  const max = Math.max(0, ...hourly.value.map(h => h.total?.total_tokens || 0))
+  if (!max) return '—'
+  const idx = hourly.value.findIndex(h => (h.total?.total_tokens || 0) === max)
+  return idx < 0 ? '—' : `${String(idx).padStart(2, '0')}:00 · ${fmtInt(max)}`
 })
 
 const targetMax = computed(() => Math.max(0, ...topTargets.value.map(t => t.total_tokens || 0)))
 
 function targetShareW(v) {
-  if (!targetMax.value || !v) return '0%'
-  return ((v / targetMax.value) * 100).toFixed(1) + '%'
+  if (!targetMax.value || !v) return 0
+  return (v / targetMax.value) * 100
 }
 
 function targetSharePct(v) {
@@ -477,33 +532,17 @@ function chatTypeGlyph(t) {
   return { group: '群', friend: '私', panel: '试' }[t] || '?'
 }
 
-// segW 多段堆叠条中某一项的宽度；全为 0 时留空（露出灰底）
-function segW(v, ...rest) {
-  const sum = (v || 0) + rest.reduce((s, x) => s + (x || 0), 0)
-  if (!sum) return '0%'
-  return (((v || 0) / sum) * 100).toFixed(1) + '%'
+function targetTip(record) {
+  return [
+    `${record.target_id} · ${fmtInt(record.requests)} runs`,
+    `合计 ${fmtInt(record.total_tokens)} tok`,
+    `输入 ${fmtInt(record.prompt_tokens)}`,
+    `输出 ${fmtInt(record.completion_tokens)}`,
+    `缓存 ${fmtInt(record.cached_tokens)}`,
+  ].join('\n')
 }
 
 // ---- 格式化 ----
-
-function fmtTokens(n) {
-  if (n == null || !isFinite(n) || n <= 0) return '0'
-  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M'
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k'
-  return String(n)
-}
-
-function pctText(r) {
-  return r != null && r > 0 ? (r * 100).toFixed(1) + '%' : '—'
-}
-
-function dayTip(d) {
-  return `${d.date} · 共 ${d.total?.total_tokens || 0} tok（对话 ${d.query?.total_tokens || 0} / 主动互动 ${d.proactive?.total_tokens || 0} / 任务 ${d.task?.total_tokens || 0}）· ${d.total?.requests || 0} runs`
-}
-
-function hourTip(i, h) {
-  return `${String(i).padStart(2, '0')}:00 · 共 ${h.total?.total_tokens || 0} tok（对话 ${h.query?.total_tokens || 0} / 主动互动 ${h.proactive?.total_tokens || 0} / 任务 ${h.task?.total_tokens || 0}）· ${h.total?.requests || 0} runs`
-}
 
 function load() {
   loadOverview()
@@ -527,17 +566,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.dimrow {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.5rem 0;
-  border-bottom: 1px dotted rgb(212 212 216);
-}
-.dimrow:last-child {
-  border-bottom: 0;
-}
 .dimval {
   color: rgb(39 39 42);
   font-weight: 500;
