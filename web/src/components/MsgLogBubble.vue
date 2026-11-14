@@ -128,7 +128,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, provide, ref, watch } from 'vue'
 import { Icon } from 'animal-island-vue'
 import { auth, canDirectMsgMedia, msgMediaLinkUrl, msgMediaUrl } from '../api.js'
 import { avatarGradient, avatarInitials, qqUserAvatarUrl } from '../utils/avatar.js'
@@ -161,11 +161,16 @@ const isNotice = computed(() => props.log.type === 'notice')
 const clock = computed(() => fmtClock(props.log.time))
 const preview = computed(() => friendlyPreview(props.log.text, 140))
 
-const media = computed(() => (Array.isArray(props.log.media) ? props.log.media.filter((m) => m && m.kind) : []))
+const allMedia = computed(() => (Array.isArray(props.log.media) ? props.log.media.filter((m) => m && m.kind) : []))
+// 气泡底部只放本条消息自己的媒体；合并转发记录内部的图片（InForward）在对应
+// 转发卡片里按占位顺序内联展示，不重复堆到气泡底部。
+const media = computed(() => allMedia.value.filter((m) => !m.in_forward))
 const images = computed(() => media.value.filter((m) => m.kind === 'image' && m.url))
 const files = computed(() => media.value.filter((m) => m.kind === 'file'))
 const records = computed(() => media.value.filter((m) => m.kind === 'record' && m.url))
 const videos = computed(() => media.value.filter((m) => m.kind === 'video' && m.url))
+// 转发记录内部的图片：数组顺序即出现顺序，按转发节点里 [图片] 的先后逐个匹配
+const forwardImages = computed(() => allMedia.value.filter((m) => m.in_forward && m.kind === 'image' && m.url))
 
 const imageLayout = computed(() => {
   if (images.value.length === 1) return 'is-single'
@@ -263,17 +268,18 @@ function onImageError(m) {
 }
 
 // 顶层正文里的 [图片] / [文件:…] 占位会被本条消息实际渲染的媒体吃掉（逐个消耗）；
-// 引用 / 转发里的占位属于别的消息，只做样式化，不消耗这份计数。
+// 引用里的占位属于别的消息，只做样式化；转发节点里的 [图片] 换成转发内部的
+// 真实图片（见 attachForwardImages）。
 const blocks = computed(() => {
   const counts = {
     image: images.value.length,
     file: files.value.length,
     record: records.value.length + videos.value.length,
   }
-  return withTokens(splitMessageBlocks(props.log.text), counts, true)
+  return withTokens(splitMessageBlocks(props.log.text), counts, true, { images: forwardImages.value.slice() })
 })
 
-function withTokens(list, counts, isRoot = false) {
+function withTokens(list, counts, isRoot = false, forward = null) {
   return list.map((b) => {
     if (b.type === 'text') {
       const tokens = parseInline(b.text)
@@ -283,17 +289,25 @@ function withTokens(list, counts, isRoot = false) {
       return { ...b, blocks: withTokens(b.blocks || [], counts) }
     }
     if (b.type === 'forward') {
-      return {
-        ...b,
-        blocks: withTokens(b.blocks || [], counts),
-        nodes: b.nodes.map((n) => ({
-          ...n,
-          tokens: parseInline(n.text),
-          blocks: withTokens(n.blocks || [], counts),
-        })),
-      }
+      // 按渲染顺序消费转发内图片：先正文前的块，再逐个节点（节点正文 → 其嵌套内容）
+      const lead = withTokens(b.blocks || [], counts, false, forward)
+      const nodes = b.nodes.map((n) => {
+        const tokens = attachForwardImages(parseInline(n.text), forward)
+        return { ...n, tokens, blocks: withTokens(n.blocks || [], counts, false, forward) }
+      })
+      return { ...b, blocks: lead, nodes }
     }
     return b
+  })
+}
+
+// 转发节点正文里的 [图片] 按先后顺序换成转发记录内部的图片；没有对应媒体时
+// 保留「图片」占位提示（旧日志、内联内容缺失或超出媒体上限）。
+function attachForwardImages(tokens, forward) {
+  if (!forward || !forward.images.length) return tokens
+  return tokens.map((t) => {
+    if (t.type !== 'image-placeholder' || !forward.images.length) return t
+    return { type: 'image', media: forward.images.shift() }
   })
 }
 
@@ -328,6 +342,19 @@ function openImage(index) {
     index,
   })
 }
+
+// 转发卡片里的图片沿用气泡同一套地址续签 / 失败重试状态：递归渲染层
+// （MsgLogTokens）通过 inject 取用，避免在两处各维护一份媒体状态。
+provide('msglogMedia', {
+  src: imageSrc,
+  failed: isFailed,
+  onError: onImageError,
+  retry,
+  loaded: () => emit('media-load'),
+  preview(item) {
+    emit('preview', { items: [{ media: item, ref: refFor(item), src: imageSrc(item) }], index: 0 })
+  },
+})
 
 function mediaUrl(url, name = '', download = false, ref = null) {
   return msgMediaUrl(url, name, download, ref)

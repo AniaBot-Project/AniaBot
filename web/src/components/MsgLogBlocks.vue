@@ -183,7 +183,7 @@ defineProps({
 }
 .forward-body {
   padding: 8px 11px 10px;
-  max-height: 240px;
+  max-height: 300px;
   overflow-y: auto;
   font-size: 12px;
   line-height: 1.6;
@@ -204,7 +204,9 @@ defineProps({
 }
 .msg-forward.is-nested > .forward-body {
   padding: 6px 9px 8px;
-  max-height: 200px;
+  /* 嵌套卡片不再自己滚动：交给外层卡片统一滚动，避免「框中框」和多处滚动条 */
+  max-height: none;
+  overflow: visible;
 }
 .forward-line + .forward-line {
   margin-top: 2px;

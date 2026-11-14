@@ -1,6 +1,7 @@
 package pluginlog
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/jeanhua/AniaBot/bot/component/msglog"
@@ -78,6 +79,129 @@ func TestExtractMediaCap(t *testing.T) {
 	}
 	if got := extractMedia(segs); len(got) != maxMediaPerMessage {
 		t.Fatalf("媒体数量 = %d, want %d", len(got), maxMediaPerMessage)
+	}
+}
+
+// TestExtractMediaForward 合并转发记录内部的图片追加在顶层媒体之后并标记
+// InForward，顺序与 FriendlyText 写出 [图片] 占位的顺序一致（含多层嵌套），
+// 面板据此把图片放回对应转发节点；内部的文件 / 语音不收集。
+func TestExtractMediaForward(t *testing.T) {
+	deep := message.Message{
+		Sender: message.MessageSender{UserId: message.FromUint64(303)},
+		Message: []message.OB11Segment{
+			{Type: message.SegmentImage, Data: map[string]any{"url": "https://cdn.example.com/deep.png"}},
+		},
+	}
+	middle := message.Message{
+		Sender: message.MessageSender{UserId: message.FromUint64(202)},
+		Message: []message.OB11Segment{
+			{Type: message.SegmentImage, Data: map[string]any{
+				"url": "https://cdn.example.com/mid-1.png", "file_id": "fid-mid-1",
+			}},
+			{Type: message.SegmentForward, Data: map[string]any{
+				"id": "inner", "content": []message.Message{deep},
+			}},
+			{Type: message.SegmentFile, Data: map[string]any{
+				"file": "https://cdn.example.com/inner.pdf", "name": "inner.pdf",
+			}},
+			{Type: message.SegmentImage, Data: map[string]any{"url": "https://cdn.example.com/mid-2.png"}},
+		},
+	}
+	segs := []message.OB11Segment{
+		{Type: message.SegmentImage, Data: map[string]any{"url": "https://cdn.example.com/top.png"}},
+		{Type: message.SegmentForward, Data: map[string]any{
+			"id": "outer", "content": []message.Message{middle},
+		}},
+	}
+	media := extractMedia(segs)
+	if len(media) != 4 {
+		t.Fatalf("媒体数量 = %d, want 4: %+v", len(media), media)
+	}
+	if media[0].Kind != msglog.MediaImage || media[0].URL != "https://cdn.example.com/top.png" || media[0].InForward {
+		t.Fatalf("顶层图片解析错误: %+v", media[0])
+	}
+	wantURLs := []string{
+		"https://cdn.example.com/mid-1.png",
+		"https://cdn.example.com/deep.png",
+		"https://cdn.example.com/mid-2.png",
+	}
+	for i, want := range wantURLs {
+		got := media[i+1]
+		if got.Kind != msglog.MediaImage || got.URL != want || !got.InForward {
+			t.Fatalf("第 %d 张转发内图片 = %+v, want url %s 且 InForward", i+1, got, want)
+		}
+	}
+	if media[1].FileId != "fid-mid-1" {
+		t.Fatalf("转发内图片应保留文件 ID 供续期: %+v", media[1])
+	}
+}
+
+// TestExtractMediaForwardCap 转发内的图片单独计数，不挤占顶层图片额度。
+func TestExtractMediaForwardCap(t *testing.T) {
+	nested := make([]message.Message, 0, maxForwardMediaPerMessage+5)
+	for i := 0; i < maxForwardMediaPerMessage+5; i++ {
+		nested = append(nested, message.Message{
+			Message: []message.OB11Segment{{Type: message.SegmentImage, Data: map[string]any{
+				"url": "https://cdn.example.com/f.png",
+			}}},
+		})
+	}
+	segs := []message.OB11Segment{
+		{Type: message.SegmentImage, Data: map[string]any{"url": "https://cdn.example.com/top.png"}},
+		{Type: message.SegmentForward, Data: map[string]any{"id": "fwd", "content": nested}},
+	}
+	media := extractMedia(segs)
+	if len(media) != 1+maxForwardMediaPerMessage {
+		t.Fatalf("媒体数量 = %d, want %d", len(media), 1+maxForwardMediaPerMessage)
+	}
+	if media[0].InForward || !media[1].InForward {
+		t.Fatalf("顶层与转发内媒体标记错误: %+v", media[:2])
+	}
+}
+
+// TestForwardMediaOrderMatchesText 转发内图片的收集顺序必须与 FriendlyText 写出
+// [图片] 占位的顺序一致：面板是按顺序把图片填回转发节点的，顺序错了会张冠李戴。
+func TestForwardMediaOrderMatchesText(t *testing.T) {
+	deep := message.Message{
+		Sender: message.MessageSender{UserId: message.FromUint64(303)},
+		Message: []message.OB11Segment{
+			{Type: message.SegmentImage, Data: map[string]any{"url": "https://cdn.example.com/deep.png"}},
+		},
+	}
+	middle := message.Message{
+		Sender: message.MessageSender{UserId: message.FromUint64(202)},
+		Message: []message.OB11Segment{
+			{Type: message.SegmentImage, Data: map[string]any{"url": "https://cdn.example.com/mid-1.png"}},
+			{Type: message.SegmentText, Data: map[string]any{"text": "夹在中间的转发"}},
+			{Type: message.SegmentForward, Data: map[string]any{"id": "inner", "content": []message.Message{deep}}},
+			{Type: message.SegmentImage, Data: map[string]any{"url": "https://cdn.example.com/mid-2.png"}},
+		},
+	}
+	msg := message.Message{
+		Message: []message.OB11Segment{{Type: message.SegmentForward, Data: map[string]any{
+			"id": "outer", "content": []message.Message{middle},
+		}}},
+	}
+	text := msg.FriendlyText(true)
+	re := regexp.MustCompile(`\[图片 [^\]]*?url:([^\]]+)\]`)
+	var textURLs []string
+	for _, m := range re.FindAllStringSubmatch(text, -1) {
+		textURLs = append(textURLs, m[1])
+	}
+	var mediaURLs []string
+	for _, m := range extractMedia(msg.Message) {
+		if !m.InForward {
+			t.Fatalf("这条消息没有顶层图片，媒体都应来自转发: %+v", m)
+		}
+		mediaURLs = append(mediaURLs, m.URL)
+	}
+	if len(textURLs) != 3 || len(mediaURLs) != 3 {
+		t.Fatalf("文本图片 = %d, 媒体 = %d, want 3/3\ntext=%q", len(textURLs), len(mediaURLs), text)
+	}
+	for i := range textURLs {
+		if textURLs[i] != mediaURLs[i] {
+			t.Fatalf("第 %d 张图片顺序不一致：文本 %q, 媒体 %q", i, textURLs[i], mediaURLs[i])
+		}
 	}
 }
 

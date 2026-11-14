@@ -81,6 +81,12 @@ type Media struct {
 	Name   string `json:"name,omitempty"`    // 文件名 / 语音视频标题
 	Size   int64  `json:"size,omitempty"`    // 文件大小（字节）
 	FileId string `json:"file_id,omitempty"` // 平台文件 ID（媒体地址过期时用于续期）
+
+	// InForward 该媒体位于合并转发记录内部（属于某个转发节点，而不是本条
+	// 消息本身）：面板只在对应转发卡片里按顺序把它填回 [图片] 占位，不放进
+	// 气泡底部的图片 / 文件列表；没有内联内容的转发不会有这类媒体，占位符
+	// 保留为「图片」提示。
+	InForward bool `json:"in_forward,omitempty"`
 }
 
 // Entry 一条消息日志

@@ -124,20 +124,24 @@ export function buildMsgLogs(now) {
   group(44, G1, 'qq:10000', '管理员',
     '\n<合并转发消息>\n  [nickname:管理员 id:qq:10000]: 周末活动安排：周六晚 8 点组队开黑，语音频道见\n  [nickname:星野 id:qq:10001]: 收到，带我一个\n  [nickname:咕咕鸟 id:qq:10006]: +1\n</合并转发消息>\n')
   // 嵌套合并转发（转发节点自己又是一条转发）：文本格式与 FriendlyText 一致，
-  // 内层块整体多缩进两个空格；引用它的消息同样把整段内容缩进一层。
+  // 内层块整体多缩进两个空格；引用它的消息同样把整段内容缩进一层。转发内部的
+  // 图片以 in_forward 媒体记录，面板会按 [图片] 占位顺序填回对应节点。
   const nestedForward = '<合并转发消息>'
     + '\n  [nickname:管理员 id:qq:10000]: '
     + '\n  <合并转发消息>'
-    + '\n    [nickname:星野 id:qq:10001]: 周末的联机房间开好了'
+    + '\n    [nickname:星野 id:qq:10001]: 周末的联机房间开好了[图片]'
     + '\n    [nickname:咕咕鸟 id:qq:10006]: 我十点到'
     + '\n  </合并转发消息>'
     + '\n  [nickname:阿白 id:qq:10002]: 这也能转发？'
     + '\n  <合并转发消息>'
-    + '\n    [nickname:星野 id:qq:10001]: 可以，聊天记录能套娃'
+    + '\n    [nickname:星野 id:qq:10001]: 可以，聊天记录能套娃[图片]'
     + '\n    [nickname:林然 id:qq:10003]: 孩子们'
     + '\n  </合并转发消息>'
     + '\n</合并转发消息>'
-  group(43, G1, 'qq:10000', '管理员', '\n' + nestedForward + '\n')
+  group(43, G1, 'qq:10000', '管理员', '\n' + nestedForward + '\n', [
+    { kind: 'image', name: '联机房间.png', url: PHOTO_SEA, in_forward: true },
+    { kind: 'image', name: '套娃.png', url: PHOTO_MENU, in_forward: true },
+  ])
   group(41, G1, 'qq:10003', '林然',
     '<reply>\n  [nickname:管理员 id:qq:10000]: \n  '
       + nestedForward.replace(/\n/g, '\n  ') + '\n</reply>\n我看不懂了')
