@@ -33,45 +33,7 @@
       </div>
 
       <div class="msg-bubble" :class="{ 'has-media': media.length > 0 }">
-        <template v-for="(b, bi) in blocks" :key="'b' + bi">
-          <div v-if="b.type === 'text'" class="msg-text">
-            <MsgLogTokens :tokens="b.tokens" />
-          </div>
-
-          <blockquote v-else-if="b.type === 'quote'" class="msg-quote">
-            <div class="quote-head">
-              <span class="quote-bar" />
-              <span class="quote-name">{{ b.sender || '引用消息' }}</span>
-            </div>
-            <div class="quote-body">
-              <MsgLogTokens :tokens="b.tokens" />
-            </div>
-          </blockquote>
-
-          <details v-else-if="b.type === 'forward'" class="msg-forward">
-            <summary>
-              <span class="forward-ico">↪</span>
-              <span>合并转发消息</span>
-              <span class="forward-count">{{ b.count }} 条</span>
-              <span class="forward-tip">展开</span>
-            </summary>
-            <div class="forward-body">
-              <div
-                v-for="(n, ni) in b.nodes"
-                :key="ni"
-                class="forward-line"
-                :style="{ marginLeft: Math.min(n.indent, 10) * 4 + 'px' }"
-              >
-                <template v-if="n.type === 'node'">
-                  <span class="forward-name">{{ n.name }}</span>
-                  <span class="forward-colon">：</span>
-                  <span>{{ n.text }}</span>
-                </template>
-                <span v-else class="forward-tag">{{ n.text }}</span>
-              </div>
-            </div>
-          </details>
-        </template>
+        <MsgLogBlocks :blocks="blocks" />
 
         <!-- 图片：点击放大；加载失败时点击重试（面板会先向平台续期过期地址） -->
         <div v-if="images.length" class="msg-images" :class="imageLayout">
@@ -172,13 +134,12 @@ import { auth, canDirectMsgMedia, msgMediaLinkUrl, msgMediaUrl } from '../api.js
 import { avatarGradient, avatarInitials, qqUserAvatarUrl } from '../utils/avatar.js'
 import {
   friendlyPreview,
-  parseForwardNodes,
   parseInline,
   pruneMediaTokens,
   shortId,
   splitMessageBlocks,
 } from '../utils/messageText.js'
-import MsgLogTokens from './MsgLogTokens.vue'
+import MsgLogBlocks from './MsgLogBlocks.vue'
 
 const props = defineProps({
   log: { type: Object, required: true },
@@ -301,23 +262,40 @@ function onImageError(m) {
   markFailed(m)
 }
 
-// 文本块与引用块共用一份媒体计数：文本里的 [图片] / [文件:…] 占位会被实际媒体吃掉。
+// 顶层正文里的 [图片] / [文件:…] 占位会被本条消息实际渲染的媒体吃掉（逐个消耗）；
+// 引用 / 转发里的占位属于别的消息，只做样式化，不消耗这份计数。
 const blocks = computed(() => {
   const counts = {
     image: images.value.length,
     file: files.value.length,
     record: records.value.length + videos.value.length,
   }
-  return splitMessageBlocks(props.log.text).map((b) => {
-    if (b.type === 'text' || b.type === 'quote') {
-      return { ...b, tokens: pruneMediaTokens(parseInline(b.text), counts) }
+  return withTokens(splitMessageBlocks(props.log.text), counts, true)
+})
+
+function withTokens(list, counts, isRoot = false) {
+  return list.map((b) => {
+    if (b.type === 'text') {
+      const tokens = parseInline(b.text)
+      return { ...b, tokens: isRoot ? pruneMediaTokens(tokens, counts) : tokens }
+    }
+    if (b.type === 'quote') {
+      return { ...b, blocks: withTokens(b.blocks || [], counts) }
     }
     if (b.type === 'forward') {
-      return { ...b, nodes: parseForwardNodes(b.text) }
+      return {
+        ...b,
+        blocks: withTokens(b.blocks || [], counts),
+        nodes: b.nodes.map((n) => ({
+          ...n,
+          tokens: parseInline(n.text),
+          blocks: withTokens(n.blocks || [], counts),
+        })),
+      }
     }
     return b
   })
-})
+}
 
 const failed = ref(new Set())
 function isFailed(m) {
@@ -550,126 +528,6 @@ function fileBadge(name) {
 .msg-bubble.has-media {
   padding-bottom: 11px;
 }
-.msg-text {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.msg-text + .msg-text {
-  margin-top: 4px;
-}
-
-/* ---------- 引用 ---------- */
-.msg-quote {
-  margin: 3px 0 6px;
-  padding: 7px 10px 7px 11px;
-  border-radius: 11px;
-  background: var(--surface-2);
-  border: 1.5px solid var(--line);
-  position: relative;
-}
-.quote-head {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-bottom: 2px;
-  font-size: 10.5px;
-  color: var(--ink-soft);
-  min-width: 0;
-}
-.quote-bar {
-  width: 3px;
-  height: 11px;
-  border-radius: 3px;
-  background: var(--accent);
-  flex-shrink: 0;
-}
-.quote-name {
-  font-weight: 700;
-  color: #7c6547;
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.quote-id {
-  font-family: var(--font-mono);
-  color: var(--ink-muted);
-}
-.quote-body {
-  font-size: 12px;
-  color: var(--ink-soft);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 96px;
-  overflow: hidden;
-}
-
-/* ---------- 合并转发 ---------- */
-.msg-forward {
-  margin: 5px 0;
-  border-radius: 12px;
-  background: var(--surface-2);
-  border: 1.5px solid var(--line-strong);
-  overflow: hidden;
-}
-.msg-forward summary {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 11px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
-  color: #6b5538;
-  list-style: none;
-  user-select: none;
-}
-.msg-forward summary::-webkit-details-marker {
-  display: none;
-}
-.msg-forward[open] summary {
-  border-bottom: 1.5px dashed var(--line-strong);
-}
-.forward-ico {
-  color: var(--accent-strong);
-  font-weight: 800;
-}
-.forward-count {
-  font-size: 10.5px;
-  color: var(--ink-muted);
-  font-weight: 600;
-}
-.forward-tip {
-  margin-left: auto;
-  font-size: 10px;
-  color: var(--ink-muted);
-  font-weight: 600;
-}
-.msg-forward[open] .forward-tip {
-  opacity: 0;
-}
-.forward-body {
-  padding: 8px 11px 10px;
-  max-height: 240px;
-  overflow-y: auto;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--ink-soft);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.forward-line + .forward-line {
-  margin-top: 2px;
-}
-.forward-name {
-  color: #7c6547;
-  font-weight: 700;
-}
-.forward-tag {
-  color: var(--ink-muted);
-  font-size: 11px;
-}
-
 /* ---------- 图片 ---------- */
 .msg-images {
   display: flex;

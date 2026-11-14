@@ -123,6 +123,24 @@ export function buildMsgLogs(now) {
     '<reply>\n  [nickname:阿白 id:qq:10002]: 收到，正好下周要重装\n</reply>\n同求 +1')
   group(44, G1, 'qq:10000', '管理员',
     '\n<合并转发消息>\n  [nickname:管理员 id:qq:10000]: 周末活动安排：周六晚 8 点组队开黑，语音频道见\n  [nickname:星野 id:qq:10001]: 收到，带我一个\n  [nickname:咕咕鸟 id:qq:10006]: +1\n</合并转发消息>\n')
+  // 嵌套合并转发（转发节点自己又是一条转发）：文本格式与 FriendlyText 一致，
+  // 内层块整体多缩进两个空格；引用它的消息同样把整段内容缩进一层。
+  const nestedForward = '<合并转发消息>'
+    + '\n  [nickname:管理员 id:qq:10000]: '
+    + '\n  <合并转发消息>'
+    + '\n    [nickname:星野 id:qq:10001]: 周末的联机房间开好了'
+    + '\n    [nickname:咕咕鸟 id:qq:10006]: 我十点到'
+    + '\n  </合并转发消息>'
+    + '\n  [nickname:阿白 id:qq:10002]: 这也能转发？'
+    + '\n  <合并转发消息>'
+    + '\n    [nickname:星野 id:qq:10001]: 可以，聊天记录能套娃'
+    + '\n    [nickname:林然 id:qq:10003]: 孩子们'
+    + '\n  </合并转发消息>'
+    + '\n</合并转发消息>'
+  group(43, G1, 'qq:10000', '管理员', '\n' + nestedForward + '\n')
+  group(41, G1, 'qq:10003', '林然',
+    '<reply>\n  [nickname:管理员 id:qq:10000]: \n  '
+      + nestedForward.replace(/\n/g, '\n  ') + '\n</reply>\n我看不懂了')
   group(36, G1, 'qq:10003', '林然', '周六晚上我可能十点后才能上')
   group(30, G1, 'qq:10002', '阿白', '没事，语音频道一直开着')
   group(22, G1, 'qq:10001', '星野', '[图片][图片]', [
