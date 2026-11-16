@@ -37,7 +37,7 @@ func NewCustomPlugin() *CustomPlugin {
 			Name:      "自定义插件",
 			HelpWords: "这是一个自定义插件",
 			AdminOnly: false,
-			ShowFor:   plugininfo.ShowForGroup | plugininfo.ShowForFriend, // 必须设置，否则 AddPlugin panic
+			ShowFor:   plugininfo.ShowForGroup | plugininfo.ShowForFriend, // 显示范围，不设置则 /help 不显示
 			Order:     0,
 		},
 	}

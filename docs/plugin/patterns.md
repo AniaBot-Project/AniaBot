@@ -206,7 +206,7 @@ default:
 
 QQ 的图片/文件链接通常约 3 分钟过期。防撤回插件（源码见 `custom/plugins/antiwithdrawal`）的两种应对：
 
-1. 通过 QQ 平台专属能力 `bot.(bot.QQ).GetNCrkey()` 获取 rkey 改写 URL 续期（`utils.NewURLModifier`）——合并转发与 rkey 均属 QQ 能力，防撤回插件声明 `Meta.Platforms = []string{"qq"}` 并类型断言 `bot.QQ`
+1. 通过 QQ 平台专属能力 `b.(bot.QQ).GetNCrkey()` 获取 rkey 改写 URL 续期（`utils.NewURLModifier`）——合并转发与 rkey 均属 QQ 能力，防撤回插件声明 `Meta.Platforms = []string{"qq"}` 并类型断言 `bot.QQ`
 2. 无法续期时降级为文字占位：`[图片消息，已经超过3分钟过期时间]`
 
 持久化历史消息里的媒体，更推荐用 core 统一路由的 `bot.MediaRefresher` 重新申请地址，失败再显示占位；见 [平台能力与优雅降级](/plugin/platforms#媒体地址续期)。
