@@ -202,7 +202,7 @@ import (
 type widgetConfig struct {
 	Enable  bool     `cfg:"plugin.widget.enable" label:"启用" group:"小组件" default:"true"`
 	Mode    string   `cfg:"plugin.widget.mode" label:"模式" type:"select" options:"simple,advanced" group:"小组件" default:"simple"`
-	Groups  []string `cfg:"plugin.widget.groups" label:"作用群" group:"小组件" help:"群 ID，逗号分隔；QQ 可填群号，其他平台带前缀"`
+	Groups  []string `cfg:"plugin.widget.groups" label:"作用群" group:"小组件" help:"群 ID，逗号分隔；NapCat 可填群号，Luckylilia 用 lil:群号，其他平台带前缀"`
 	Limit   int      `cfg:"plugin.widget.limit" label:"每日上限" group:"小组件.限制" default:"20" min:"0" max:"100" type:"slider"`
 	Token   string   `cfg:"plugin.widget.token" label:"Token" type:"password" sensitive:"true" group:"小组件.密钥"`
 	Verbose *bool    `cfg:"plugin.widget.verbose" label:"详细日志" group:"小组件.调试" help:"留空使用默认行为"`
@@ -228,7 +228,7 @@ func (p *WidgetPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	if p.cfg.Limit <= 0 {
 		p.cfg.Limit = 20
 	}
-	// 规范化配置中的群 ID：QQ 群号补 qq: 前缀，其他平台 ID 原样保留
+	// 仅去除首尾空白；构造 QID 时用 message.FromString 自动补平台前缀
 	for i, g := range p.cfg.Groups {
 		p.cfg.Groups[i] = strings.TrimSpace(g)
 	}

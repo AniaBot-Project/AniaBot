@@ -6,7 +6,7 @@
 
 ```
 AddPlugin()
-  │  检查 ShowFor 非零、Meta.Name 全局唯一；按 Order 稳定排序
+  │  检查 Meta.Name 全局唯一、ShowFor 哨兵；按 Order 稳定排序
   ▼
 ConfigSchema() / ConfigFields()      ← 注册配置字段（依赖注入之前）
   │
@@ -114,7 +114,7 @@ func (p *MyPlugin) Awake(ctx context.Context, b bot.Bot) error {
 
 - 在启动约 1 秒后调用，全部插件的 `Start` 已完成；
 - **首次启动设置向导未完成时会跳过 Awake**，向导完成并重启后才正常执行；
-- Awake 触发时平台适配器已开始连接，但不保证连接已经建立；发送消息仍要检查 `(msgId, success)` 返回值并降级；
+- Awake 触发时框架已开始连接平台，但不保证连接已经建立；发送消息仍要检查 `(msgId, success)` 返回值并降级；
 - 单插件超时 1 分钟。
 
 ## 运行期事件
@@ -214,7 +214,7 @@ func (p *MyPlugin) OnUnload(ctx context.Context, reason plugin.UnloadReason) err
 - 单元测试优先测纯逻辑：把命令解析、参数校验、格式化抽成普通函数，用表驱动测试，不要为了测试启动整个框架；
 - 需要并发安全的状态用 `sync.Mutex` / `sync.Map` / `atomic`，并用 `go test -race ./...` 检查；
 - 调试配置时看日志中的「注册插件配置结构体失败」「加载插件配置失败」，通常是标签写错或字段类型不支持；
-- 插件「不触发」先按以下顺序排查：是否 `AddPlugin`、`ShowFor` 是否设置、`Meta.Platforms` 是否包含来源平台、`Order` 更小的插件是否返回了 `false`、群聊命令是否 @ 了机器人、命令是否以 `/` 开头。
+- 插件「不触发」先按以下顺序排查：是否 `AddPlugin`、`Meta.Platforms` 是否包含来源平台、`Order` 更小的插件是否返回了 `false`、群聊命令是否 @ 了机器人、命令是否以 `/` 开头。
 
 ```bash
 go test ./...

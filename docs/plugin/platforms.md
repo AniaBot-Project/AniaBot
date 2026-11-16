@@ -200,6 +200,7 @@ if gm, ok := b.(bot.GroupMembers); ok {
 无法映射为公共事件/通知的平台事件走 `OnPlatformEvent`：
 
 ```go
+// import "github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
 func (p *MyPlugin) OnPlatformEvent(ctx context.Context, b bot.Bot, ev message.PlatformEvent) error {
 	if ev.Platform != "feishu" {
 		return nil
