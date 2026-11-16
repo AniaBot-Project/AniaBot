@@ -16,7 +16,9 @@ func (p *NewsPlugin) StartCron(ctx context.Context, b bot.Bot, c plugin.CronMana
 }
 ```
 
-`AddFunc(spec, cmd)` 返回 `(cron.EntryID, error)`，`EntryID` 可用于后续移除（自行持有管理）。
+`AddFunc(spec, cmd)` 返回 `(cron.EntryID, error)`。`EntryID` 可以记录到日志或用于排查，但 `CronManager` 只暴露 `AddFunc`，**没有移除方法**；任务随 Bot 进程生命周期存在，退出/重启时 cron 整体停止，插件被市场卸载也会在重启后消失。
+
+`StartCron` 在全部插件 `Start` 之后执行，单插件超时 1 分钟，按插件 `Order` 串行调用。
 
 ## cron 表达式
 
@@ -28,6 +30,8 @@ func (p *NewsPlugin) StartCron(ctx context.Context, b bot.Bot, c plugin.CronMana
 | `*/5 * * * *` | 每 5 分钟 |
 | `0 9 * * 1-5` | 工作日 9:00 |
 | `0 0 1 * *` | 每月 1 号 0:00 |
+
+非法表达式会让 `AddFunc` 返回 error；建议记录日志并返回，不要忽略。
 
 ## 完整示例：整点报时插件
 
@@ -48,7 +52,7 @@ import (
 
 type hourlyConfig struct {
 	// 多平台下群 ID 不一定是数字（如飞书 fs:oc_xxx），用 []string 承载
-	Groups []string `cfg:"plugin.hourly.groups" label:"报时群 ID 列表" group:"整点报时" help:"每行一个群 ID（QQ 为 qq:群号，其他平台带前缀）"`
+	Groups []string `cfg:"plugin.hourly.groups" label:"报时群 ID 列表" group:"整点报时" help:"每行一个群 ID（NapCat 为 qq:群号，Luckylilia 为 lil:群号，其他平台带前缀）"`
 }
 
 type HourlyPlugin struct {
@@ -73,14 +77,18 @@ func (p *HourlyPlugin) ConfigSchema() any { return &p.cfg }
 // StartCron 注册定时任务
 func (p *HourlyPlugin) StartCron(ctx context.Context, b bot.Bot, c plugin.CronManager) error {
 	_, err := c.AddFunc("0 * * * *", func() {
-		text := fmt.Sprintf("⏰ 现在是 %s", time.Now().Format("15:04"))
-		for _, g := range p.cfg.Groups {
-			chain := msgchain.Builder().Group()
-			chain.Text(text)
-			if _, ok := b.SendGroupMsg(message.FromString(g), chain.Build()); !ok {
-				p.Logger.Error("报时发送失败", "group", g)
+		// cron 回调不在框架的 panic 恢复里，用 b.Go 执行实际逻辑；
+		// 否则回调 panic 会直接拖垮进程。
+		b.Go("hourly-broadcast", func() {
+			text := fmt.Sprintf("⏰ 现在是 %s", time.Now().Format("15:04"))
+			for _, g := range p.cfg.Groups {
+				chain := msgchain.Builder().Group()
+				chain.Text(text)
+				if _, ok := b.SendGroupMsg(message.FromString(g), chain.Build()); !ok {
+					p.Logger.Error("报时发送失败", "group", g)
+				}
 			}
-		}
+		})
 	})
 	return err
 }
@@ -91,9 +99,15 @@ func (p *HourlyPlugin) StartCron(ctx context.Context, b bot.Bot, c plugin.CronMa
 ## 注意事项
 
 ::: warning 任务函数中的 panic
-cron 回调由框架调度执行。为安全起见，任务内避免可能 panic 的操作，或自行 recover；发送消息等操作建议检查返回值并记录日志。
+cron 回调由 cron 自己的 goroutine 执行，**没有** `safeExecute` 的 panic 恢复。任务内必须用 `b.Go` 包裹实际工作，或自行 `recover`；发送消息等操作建议检查返回值并记录日志。
 :::
 
 ::: tip 静态 vs 动态任务
 `StartCron` 适合**代码中预先定义好**的静态任务。如果你需要**用户/AI 在运行时动态创建**的任务，AI 对话插件的 clock 系统已实现完整方案（持久化 + 命令管理），可直接参考 `bot/plugins/pluginaichat/clock.go`，或在自己的插件中基于 `PersistentStorage` + cron 实现类似机制。
 :::
+
+## 相关
+
+- [插件生命周期与依赖注入](/plugin/lifecycle) —— `StartCron` 在生命周期中的位置与超时
+- [插件配置](/plugin/configuration) —— 把 cron 表达式做成可配置项
+- [后台推送模式](/plugin/patterns) —— 定时任务 + 目标群列表的写法

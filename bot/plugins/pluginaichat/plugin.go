@@ -146,6 +146,11 @@ type AIChatPlugin struct {
 	// planBlockedTools 静态清单同等阻断；键为工具名
 	platformSideEffects sync.Map
 
+	// historyTools 各会话实际注册的历史消息工具名（平台前缀版本，如
+	// qq_get_msg_history，见 registerPlatformTools）；「定时任务播报」提示
+	// 据此给出该平台准确的工具名。键为 sessionKey
+	historyTools sync.Map
+
 	// msgEventTimeout 框架级消息处理超时（bot.msg_event_timeout_sec，Start 时
 	// 从全量 viper 读取）：tryProcessPending 等后台触发的会话处理复用同一预算
 	msgEventTimeout time.Duration
@@ -678,6 +683,18 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 		extraText = "【计划模式】当前处于计划模式：请只做分析与规划并输出实施计划，不要执行任何会产生实际副作用的操作（修改文件、运行命令、改配置、建任务等会被系统自动阻止）。用户确认计划后会退出计划模式再执行。\n\n" + extraText
 	}
 
+	// 定时任务播报提示：定时任务走一次性会话，推送的消息不在本会话历史里，
+	// 也不随历史回放出现。用户在播报之后发言时补一条提示，引导 AI 先用历史
+	// 消息工具确认播报内容，避免答非所问。消费一次（请求成功后才记账，失败
+	// 轮次下次发言仍会提示）；尾部注入，落盘仍用注入前的用户原文。
+	var deliveryHintSeq uint64
+	if p.clockManager != nil {
+		if hint, seq, ok := p.clockManager.deliveryHint(id, isGroup, p.historyToolNameFor(sessionKey(id, isGroup))); ok {
+			extraText = hint + "\n\n" + extraText
+			deliveryHintSeq = seq
+		}
+	}
+
 	// 落盘用注入前的原始用户文本：记忆/知识库/待办/计划附言等注入只作用于当轮，
 	// 不随历史回放（旧注入白占上下文，且可能引用已失效的记忆 ID 或过期资料）；
 	// 用户消息本身正常落盘，跨轮/跨重启的对话上下文保持完整
@@ -692,6 +709,11 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	//（清单未变时恰恰是最需要提醒的时候）
 	if err == nil && p.cfg.Todo.Enable && p.todoManager != nil {
 		p.todoManager.commitReminder(sessionKey(id, isGroup))
+	}
+	// 定时任务播报提示同理：请求失败时提示并未生效（用户会再发一次），
+	// 不记账，下一次发言重新注入
+	if err == nil && deliveryHintSeq != 0 && p.clockManager != nil {
+		p.clockManager.commitDeliveryHint(id, isGroup, deliveryHintSeq)
 	}
 	p.finishQuery(recorder, chat, usage, resp, err)
 	// 主对话消耗计入会话与全局配额（子代理/团队/定时任务在其各自调用点累加）

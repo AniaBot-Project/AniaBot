@@ -15,6 +15,7 @@ import (
 	"github.com/jeanhua/AniaBot/common/model/message"
 	"github.com/jeanhua/AniaBot/common/msgchain"
 	"github.com/jeanhua/AniaBot/common/plugin"
+	"github.com/jeanhua/AniaBot/common/plugininfo"
 )
 
 func main() {
@@ -36,6 +37,7 @@ func NewCustomPlugin() *CustomPlugin {
 			Name:      "自定义插件",
 			HelpWords: "这是一个自定义插件",
 			AdminOnly: false,
+			ShowFor:   plugininfo.ShowForGroup | plugininfo.ShowForFriend, // 必须设置，否则 AddPlugin panic
 			Order:     0,
 		},
 	}
@@ -47,6 +49,7 @@ func (p *CustomPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 		builder := msgchain.Builder().Group()          // 群消息构造器
 		builder.Text("测试成功")                           // 构造消息
 		bot.SendGroupMsg(msg.GroupId, builder.Build()) // 发送消息
+		return false, nil                              // 已处理，不再传给后续插件
 	}
 	return true, nil // 表示继续执行下一个插件
 }

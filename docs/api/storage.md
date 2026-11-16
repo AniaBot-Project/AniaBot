@@ -112,7 +112,7 @@ err := storage.EnsureTables(ctx, db, dialect, storage.TableDDL{
 - `SQLBackend(store)` 内部是类型断言（与 `bot.QQ` 同款惯例）；`Clone` 出的子存储共享同一 `*sql.DB`，探测同样成功
 - `TableDDL` 按方言提供建表语句，`EnsureTables` 幂等执行（建议 `CREATE TABLE IF NOT EXISTS`）
 - 探测或建表失败时应只记日志并回退 KV，**不要阻断插件启动**
-- 插件自建表统一 `ania_` 前缀；框架内置表：`ania_chat_session` / `ania_chat_message`（对话历史）、`ania_memory`（长期记忆）、`ania_query_log` / `ania_task_log`（日志）
+- 插件自建表统一 `ania_` 前缀；框架内置表：`ania_chat_session` / `ania_chat_message`（对话历史）、`ania_memory`（长期记忆）、`ania_kb_doc`（知识库）、`ania_intention`（主动互动意图）、`ania_query_log` / `ania_task_log` / `ania_op_log`（Query / 任务 / 操作日志）
 - 约定：MySQL 字符串键用 `VARCHAR(255) COLLATE utf8mb4_bin`、大载荷用 `MEDIUMTEXT`；SQL 冗余过滤列只做 WHERE 收窄，Go 侧匹配仍是最终判定，保证 SQL / KV 两条路径语义一致
 
 ## 后端配置

@@ -149,12 +149,15 @@ func (p *DicePlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 | --- | --- |
 | `cfg` | 点分配置键（必填）；嵌套结构体作为键前缀递归；`cfg:"-"` 跳过 |
 | `label` / `group` / `help` | 面板显示名 / 分组 / 说明。`group` 支持「父分组.子分组」两级写法（如 `骰子.规则`，`.` 或 ` · ` 分隔），同一父分组合为一张卡片，配置项多时在卡片内按子分组用分节框归类 |
-| `type` | 覆盖类型推断：`password`、`text`（多行文本）、`select`（需配合 `options`） |
-| `options` | select 可选项，逗号分隔 |
+| `type` | 覆盖类型推断：`password`、`text`（多行文本）、`select`（需配合 `options`）、`multiselect`（`[]string` + `options`）、`slider`（int/float + `min`/`max`/`step`/`ticks`） |
+| `options` | `select` / `multiselect` 的可选项，逗号分隔 |
+| `min` / `max` / `step` / `ticks` | `slider` 的范围、步长与刻度标签 |
 | `sensitive` | `"true"` 时面板不回显（API 密钥等） |
 | `default` | 默认值，按字段类型解析；切片逗号分隔；`\n` 可表达多行文本 |
 
-类型推断：`string`→字符串、`bool`→开关、`int`→整数、`float64`→小数、`[]string`/`[]int`→列表。指针字段（如 `*int`）表示可选参数：配置键不存在时保持 `nil`。`Start()` 返回非 nil 错误会导致插件初始化失败并在日志中报错。
+类型推断：`string`→字符串、`bool`→开关、`int`→整数、`float64`→小数、`[]string`/`[]int`→列表。指针字段（如 `*int`）表示可选参数：配置键不存在时保持 `nil`。完整标签、嵌套结构体、`select`/`slider`/敏感字段与 `ConfigEditor` 的用法见 [插件配置](/plugin/configuration)。
+
+`Start()` 返回非 nil 错误只会记录错误日志，**不会**阻止插件继续加载和接收事件；若初始化失败后不希望响应，需要自己置状态标志并在事件入口判断。生命周期与卸载规则见 [插件生命周期与依赖注入](/plugin/lifecycle)。
 
 ::: tip 底层机制
 配置统一存于数据库（配置中心），框架启动时构建内存 viper 传给 `Start`。框架级共享键（如 `files.mcp_json`）不属于插件结构体，仍可通过 `cfg.GetString("files.mcp_json")` 读取。需要动态生成字段声明的场景，可实现低层接口 `ConfigRegistrar`（返回 `[]pluginconfig.Field`）。
@@ -173,11 +176,13 @@ if p.SystemConfig.IsAdmin(msg.Sender.UserId) { /* 管理员专属 */ }
 
 ## 完整代码
 
-项目内置了一个最小示例可直接参考：[`custom/mvp/example.go`](https://github.com/AniaBot-Project/AniaBot/blob/main/custom/mvp/example.go)，以及模板 [`custom/plugins/pluginexample/plugin.go`](https://github.com/AniaBot-Project/AniaBot/blob/main/custom/plugins/pluginexample/plugin.go)。
+项目内置了可直接参考的最小示例：[`custom/mvp/example.go`](https://github.com/AniaBot-Project/AniaBot/blob/main/custom/mvp/example.go)（最小可运行 main），以及插件模板 [`custom/plugins/example/plugin.go`](https://github.com/AniaBot-Project/AniaBot/blob/main/custom/plugins/example/plugin.go)（带 `plugin.json` 的市场示例）。更多真实插件见 [`custom/plugins/`](https://github.com/AniaBot-Project/AniaBot/tree/main/custom/plugins)。
 
 ## 下一步
 
 - [命令解析](/plugin/commands) —— `cmd` 的完整解析规则
+- [插件配置](/plugin/configuration) —— 配置字段全量参考
+- [插件生命周期与依赖注入](/plugin/lifecycle) —— 启动/卸载与调试
 - [从零开发完整插件](/plugin/tutorial) —— 综合运用配置、存储、定时任务与面板服务的完整教程
 - [消息构造器](/plugin/message-builder) —— 图片、视频、合并转发等全部消息类型
 - [数据存储](/plugin/storage) —— 让插件记住东西

@@ -9,6 +9,8 @@ AniaBot 的 Web 控制面板与插件有两种协作机制，**不要混淆**：
 
 面板的功能页面**不是写死的**：core 启动面板前会遍历插件，用类型断言探测 `adminpanel.XxxSource` 可选接口（与 `bot.QQ` 同一套「可选接口 + 类型断言」惯例）。插件实现了哪个接口，对应页面就自动接上它的数据；没有任何插件实现时，页面返回空数据，面板照常运行。
 
+目前 core 的发现循环跟踪 **9 个核心接口**（`TaskLogSource` / `ClockTaskSource` / `MsgLogSource` / `SkillSource` / `MemorySource` / `KnowledgeBaseSource` / `TeamSource` / `QuotaSource` / `QueryLogSource`），它们全部集齐后即停止遍历；另有 **7 个可选扩展接口**（`MsgLogSessionSource` / `MsgLogMediaSource` / `MsgLogDeleteSource` / `MsgLogSessionDeleteSource` / `SkillToggleSource` / `SkillDetailSource` / `ChatConsoleSource`），不参与停止条件；但循环在核心接口集齐后就会 `break`，所以只实现可选接口、且注册在 break 点之后的插件同样不会被发现。
+
 ## 发现机制
 
 `bot/core/core.go` 的 `startAdminPanel()` 负责接线：
@@ -32,7 +34,7 @@ for _, p := range ania.plugins {
 关键语义：
 
 - **单提供者**：每个接口只有一个插件接线，后遍历到的插件会**覆盖**前面的（同样 `break` 发生在集齐全部接口时）
-- **内置插件已占用全部接口**：默认 `cmd/main.go` 里，AI 对话插件实现了 8 个接口、日志插件实现了 `MsgLogSource`，在第 6 个插件（AI 对话）处就集齐并 `break` —— **之后注册的自定义插件不会成为面板数据源**
+- **内置插件已占用核心接口**：默认 `cmd/main.go` 里，AI 对话插件实现了 8 个核心接口（TaskLog / Clock / Skill / Memory / Knowledge / Team / Quota / QueryLog）以及可选的 `ChatConsoleSource`，日志插件实现了 `MsgLogSource`（及 4 个可选扩展）；发现循环在第 6 个插件（AI 对话）处集齐 9 个核心接口后 `break` —— **之后注册的自定义插件不会成为面板数据源**，即使只实现可选接口也一样
 - **要让自定义插件接管某个页面**：从 `cmd/main.go` 移除占用该接口的内置插件（典型做法是移除 `pluginaichat.NewAIChatPlugin()`），或完全按自己的插件组合构建（见下文示例）
 
 ::: warning 单提供者的实际影响
@@ -43,10 +45,10 @@ for _, p := range ania.plugins {
 
 | 面板页面 | 接口 | 内置提供者 |
 | --- | --- | --- |
-| 消息日志 | `adminpanel.MsgLogSource` + `adminpanel.MsgLogSessionSource` + 删除类的 `adminpanel.MsgLogDeleteSource` / `adminpanel.MsgLogSessionDeleteSource`（后三项可选） | 日志打印插件（`pluginlog`） |
+| 消息日志 | `adminpanel.MsgLogSource` + `adminpanel.MsgLogSessionSource` + `adminpanel.MsgLogMediaSource` + 删除类的 `adminpanel.MsgLogDeleteSource` / `adminpanel.MsgLogSessionDeleteSource`（后四项可选） | 日志打印插件（`pluginlog`） |
 | 任务日志 | `adminpanel.TaskLogSource` | AI 对话插件（clock） |
 | 定时任务 | `adminpanel.ClockTaskSource` | AI 对话插件（clock） |
-| 技能管理 | `adminpanel.SkillSource` + `adminpanel.SkillToggleSource`（可选） | AI 对话插件 |
+| 技能管理 | `adminpanel.SkillSource` + `adminpanel.SkillToggleSource`（可选） + `adminpanel.SkillDetailSource`（可选） | AI 对话插件 |
 | 记忆管理 | `adminpanel.MemorySource` | AI 对话插件 |
 | 知识库 | `adminpanel.KnowledgeBaseSource` | AI 对话插件 |
 | Agent 团队 | `adminpanel.TeamSource` | AI 对话插件 |
@@ -102,10 +104,14 @@ type MsgLogSessionDeleteSource interface {
 ```go
 type TaskLogSource interface {
     TaskLogQuery(f tasklog.Filter) []tasklog.Entry
+    // 轻量统计行（不含完整 payload），供面板 Token 统计聚合
+    TaskLogStats(f tasklog.Filter) []tasklog.StatRow
+    // 按条件清除执行日志（零值条件清除全部），返回删除条数
+    TaskLogClear(f tasklog.Filter) int
 }
 ```
 
-`tasklog.Filter` 支持按 `TargetType`（group/friend）、`TargetID`、`TaskID`、`Status`、时间范围、标题关键词过滤与 `Before` 游标分页；`tasklog.Entry` 包含任务标题、触发内容、状态（running/success/timeout/error/interrupted）、耗时、回复与 token 用量等。推荐直接用 `bot/component/tasklog` 的 `Logger`（内部已实现过滤与分页）。
+`tasklog.Filter` 支持按 `TargetType`（group/friend）、`TargetID`、`TaskID`、`Status`、时间范围、标题关键词过滤与 `Before` 游标分页；`tasklog.Entry` 包含任务标题、触发内容、状态（running/success/timeout/error/interrupted）、耗时、回复与 token 用量等。日志为 SQL 行级存储，**长期保留、不做容量淘汰**，由管理员在面板导出或按条件清除；SQL 探测/建表失败时写入丢弃、读取为空。推荐直接用 `bot/component/tasklog` 的 `Logger`（内部已实现过滤、统计与清除）。
 
 ### ClockTaskSource —— 定时任务页
 
@@ -132,6 +138,11 @@ type SkillSource interface {
 // 可选：启用/禁用外置 skill（内置 skill 由实现方拒绝禁用）
 type SkillToggleSource interface {
     SkillSetEnabled(name string, enabled bool) error
+}
+
+// 可选：查看某个 skill 的 SKILL 详情（面板详情弹窗）
+type SkillDetailSource interface {
+    SkillDetail(name string) (plugininfo.SkillDetail, error)
 }
 ```
 
@@ -189,6 +200,10 @@ type QuotaSource interface {
 ```go
 type QueryLogSource interface {
     QueryLogRecent(f querylog.Filter) []querylog.Entry
+    // 轻量统计行（全量留存记录），供 Token 统计聚合
+    QueryLogStats(f querylog.Filter) []querylog.StatRow
+    // 按条件清除 Query 日志，返回删除条数
+    QueryLogClear(f querylog.Filter) int
 }
 ```
 
@@ -324,7 +339,7 @@ func main() {
 - **方法缺一不可**：`adminpanel.XxxSource` 是完整接口，实现时必须实现全部方法（不需要的能力返回空值/错误即可）
 - **nil 安全**：面板会在数据源为 nil 时返回空数据并正常渲染，插件内部初始化失败时返回 nil 即可，不要 panic
 - **即时生效**：`MemorySource` / `SkillSource` / `KnowledgeBaseSource` / `TeamSource` / `QuotaSource` 的改动由插件自己落盘，**无需重启**；`TaskLogSource` / `MsgLogSource` / `QueryLogSource` 是查询接口，同样实时反映插件当前数据；`MsgLogDeleteSource` / `MsgLogSessionDeleteSource` 由面板提交后立即生效，插件负责自行持久化删除结果（用 `msglog.Recorder` 的 `Delete` / `DeleteSession` 即可）
-- **数据量控制**：分页类接口遵循「新在前 + `before` 游标」约定，返回条数不要超过 `limit`；记录型组件（`msglog` / `tasklog` / `querylog`）内部已实现容量淘汰，直接复用即可
+- **数据量控制**：分页类接口遵循「新在前 + `before` 游标」约定，返回条数不要超过 `limit`；`msglog` 是缓存层滚动缓冲（默认 5000 条），`tasklog` / `querylog` 为 SQL 长期留存、由面板按条件清除，直接复用这些组件即可，不要自己无限增长
 - **与 `bot.QQ` 同款惯例**：这是「可选接口 + 类型断言」能力的又一应用，探测不到就优雅降级（页面空数据），框架与面板代码零改动
 
 ## 下一步

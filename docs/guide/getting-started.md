@@ -83,7 +83,7 @@ AniaBot/
 ├── common/
 │   ├── adapter/           # 平台适配器抽象：Adapter（公共契约）+ QQExt（可选能力）+ Definition/Register 注册表
 │   ├── bot/               # bot.Bot（公共能力）+ bot.QQ（QQ 专属可选接口）
-│   ├── plugin/            # 插件接口：Meta / Plugin / PlatformEventHandler
+│   ├── plugin/            # 插件接口：Meta / Plugin / ConfigSchema / UnloadEvent / 平台扩展接口
 │   └── model/             # message（通用消息段）/ msgchain（消息构造器）/ command
 ├── bot/
 │   ├── core/              # 核心：插件生命周期、事件分发、多适配器容器 + ID 前缀路由、DI、配置中心

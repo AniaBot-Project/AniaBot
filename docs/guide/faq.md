@@ -119,7 +119,7 @@ export ANIABOT_MYSQL_DSN="root:password@tcp(host:3306)/aniabot?charset=utf8mb4&p
 
 ### 插件 panic 会拖垮整个机器人吗？
 
-不会。框架对每个插件调用都有 `safeExecute` 包裹，panic 会被捕获并触发所有插件的 `OnPanic` 回调（系统插件默认私聊通知管理员）。通过 `bot.Go(name, f)` 启动的协程同样有崩溃恢复。
+不会。框架对每个插件调用都有 `safeExecute` 包裹，panic 会被捕获并只记录日志，其他插件继续收到事件；通过 `b.Go(name, f)` 启动的协程 panic 会恢复并触发所有插件的 `OnPanic`（系统插件默认私聊通知管理员）。事件回调自身的 panic 不会触发 `OnPanic`，需要告警时请把工作放进 `b.Go`。
 
 ### 如何调试插件？
 

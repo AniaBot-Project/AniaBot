@@ -226,7 +226,7 @@ func (ania *AniaBot) onGroupEvent(e *adapterEntry, msg message.Message) {
 - `true` → 继续传播；`false` → 阻断（后续插件收不到）
 - 三档参考值：`LevelLog(-1000)` → `LevelNormal(0)` → `LevelPostHandle(1000)`（AI 对话插件在最后，作为兜底响应）
 - 插件 panic **不阻断**：`safeExecuteWithReturn` 捕获后视为 `true` 继续传播（与通知事件一致）
-- 每个插件调用都有独立超时（消息 5 分钟、生命周期事件 1 分钟），防止插件挂死拖垮整个分发
+- 每个插件调用都有独立超时（消息/通知 5 分钟，生命周期事件 1 分钟，发送事件 10 秒），防止插件挂死拖垮整个分发；`Start` 返回的错误只记日志，插件仍会继续加载
 
 ### 通知广播
 
@@ -281,7 +281,7 @@ AddPlugin() → 按 Order 排序
   → Awake(ctx, bot)        启动完成 1 秒后（首次向导未完成时跳过）
   → OnGroupMsg / OnFriendMsg / OnXxxNotice / OnPlatformEvent  运行期事件
   → OnBeforeSendMsg / OnAfterSendMsg  Bot 发送消息前后（可选接口，见发送事件）
-  → OnPanic(ctx, bot, name, err)  任何插件或 bot.Go 协程 panic 时
+  → OnPanic(ctx, bot, name, err)  仅 b.Go 协程 panic 时广播
   → OnUnload(ctx, reason)  插件卸载前一次（可选接口 UnloadEvent，逆序执行）
 ```
 
@@ -313,7 +313,7 @@ AddPlugin() → 按 Order 排序
 ### 并发模型
 
 - 插件每次调用被 `safeExecute` 包裹，panic 只影响自身
-- 插件内需要协程时用 `bot.Go(name, f)`：panic 自动恢复并回调所有插件 `OnPanic`（每个 OnPanic 调用自身也有 recover，防止连环 panic 杀死进程），同时维护 goroutine 计数供面板展示
+- 插件内需要协程时用 `b.Go(name, f)`：panic 自动恢复并回调所有插件 `OnPanic`（每个 OnPanic 调用自身也有 recover，防止连环 panic 杀死进程），同时维护 goroutine 计数供面板展示
 - WebSocket 适配器采用**工作池 + 消息队列**：连接层只收发，解析与分发在 worker 协程完成；`worker_count` 默认 `CPU×2`，队列满丢弃（日志可查），ACK 帧直接投递不排队（避免 worker 全部阻塞等 ACK 时互相饿死）
 
 ## 配置中心
@@ -384,7 +384,7 @@ storage.EnsureTables(ctx, db, dialect, storage.TableDDL{...})
 插件发消息的统一入口是 `msgchain.Builder()`，它把「意图」翻译成 `[]OB11Segment`：
 
 ```go
-msgchain.Builder().Group(target).Text("你好").Mention(qid).Reply(msgID).Build()
+msgchain.Builder().Group().Text("你好").Mention(qid).Reply(msgID).Build()
 ```
 
 实现上是一个**可变段数组的流式 builder**（`common/msgchain`）：

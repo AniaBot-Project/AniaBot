@@ -68,6 +68,7 @@ export default withMermaid(defineConfig({
             { text: '插件系统概览', link: '/plugin/overview' },
             { text: '第一个插件', link: '/plugin/first-plugin' },
             { text: '从零开发完整插件', link: '/plugin/tutorial' },
+            { text: '插件配置', link: '/plugin/configuration' },
             { text: '命令解析', link: '/plugin/commands' },
             { text: '消息构造器', link: '/plugin/message-builder' },
           ],
@@ -75,6 +76,8 @@ export default withMermaid(defineConfig({
         {
           text: '进阶能力',
           items: [
+            { text: '生命周期与依赖注入', link: '/plugin/lifecycle' },
+            { text: '平台能力与优雅降级', link: '/plugin/platforms' },
             { text: '数据存储', link: '/plugin/storage' },
             { text: '定时任务', link: '/plugin/cron' },
             { text: '面板服务注册', link: '/plugin/panel-services' },

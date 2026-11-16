@@ -147,7 +147,7 @@ Skill 把领域知识封装成 `SKILL.md`（支持 frontmatter 的 `name` / `des
 flowchart TB
     A[cron 触发 / RunNow] --> B{上一次还在跑?}
     B -->|是| C[跳过本次触发]
-    B -->|否| D[bot.Go 启动执行]
+    B -->|否| D[b.Go 启动执行]
     D --> E[记录任务日志 running]
     D --> F[配额检查]
     F -->|超限| G[跳过并告知用户]
@@ -169,6 +169,7 @@ flowchart TB
 - 执行日志走 `bot/component/tasklog`（`ania_task_log` 行级），记录工具调用明细、token 用量、最终回复；进程重启后遗留的 running 记录标记为 `interrupted`
 - 中间轮文本丢弃，只有最终回复推送给目标；工具显式发送的图片/文件正常发出
 - `skip_output` 工具（`clockskip.go`，仅在任务会话注册）：AI 判断本次无需汇报时调用，收尾输出（含子代理结果汇总后的合成轮）只记入执行日志、不推送给目标，供巡检/监控类任务保持安静；跳过标记与原因随任务日志落盘（面板与 `/clock log` 可见）
+- 播报提示（`noteDelivered` / `deliveryHint`）：成功推送（最终回复、工具发出的图片/文件）后按目标会话记一个投递序号；用户在该会话的下一轮发言里，提示以尾部注入的方式拼在用户消息前（请求成功后才 `commitDeliveryHint` 记账，失败轮次会重新注入；`PersistUserText` 保证它不进入历史回放），指引 AI 先用该会话可用的 `*_get_msg_history` 工具确认播报内容——任务会话与主对话的历史互不相通，不提示的话用户对着播报追问时 AI 只能反问
 - 用户经 `/clock` 管理，AI 经 `clock_create/list/update/delete/log` 工具管理
 
 ## 子代理（subagent）

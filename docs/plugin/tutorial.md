@@ -129,7 +129,7 @@ func (p *DailyBriefPlugin) reply(b bot.Bot, msg message.Message, text string) {
 type dailyBriefConfig struct {
 	Enable bool     `cfg:"plugin.daily_brief.enable" label:"启用每日早报" group:"每日早报" default:"true"`
 	Cron   string   `cfg:"plugin.daily_brief.cron" label:"推送时间(cron)" group:"每日早报" default:"30 8 * * *"`
-	Groups []string `cfg:"plugin.daily_brief.groups" label:"推送群 ID" group:"每日早报" help:"每行一个，QQ 为 qq:群号，其他平台带前缀（如 fs:oc_xxx）"`
+	Groups []string `cfg:"plugin.daily_brief.groups" label:"推送群 ID" group:"每日早报" help:"每行一个，NapCat 为 qq:群号，Luckylilia 为 lil:群号，其他平台带前缀（如 fs:oc_xxx）"`
 }
 
 // ConfigSchema 返回配置结构体指针（框架在依赖注入前调用，必须每次返回同一指针）
@@ -173,7 +173,7 @@ func (s *briefStore) Get(ctx context.Context, groupID string) string {
 func (p *DailyBriefPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	p.brief = newBriefStore(p.PersistentStorage)
 	// 执行日志：面板「任务日志」页的数据源（见第 6 步）
-	p.log = tasklog.New(p.PersistentStorage.Clone("brieflog:"), 100, p.Logger.WithGroup("brieflog"))
+	p.log = tasklog.New(p.PersistentStorage.Clone("brieflog:"), p.Logger.WithGroup("brieflog"))
 	p.Logger.Info("每日早报插件初始化完成", "cron", p.cfg.Cron, "groups", p.cfg.Groups)
 	return nil
 }
@@ -183,12 +183,12 @@ func (p *DailyBriefPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 
 ## 第 5 步：定时任务
 
-在 `StartCron` 钩子中注册 cron 任务，到点后通过 `bot.Go` 启动安全协程执行：
+在 `StartCron` 钩子中注册 cron 任务，到点后用 `b.Go` 启动受管协程执行：
 
 ```go
 func (p *DailyBriefPlugin) StartCron(ctx context.Context, b bot.Bot, c plugin.CronManager) error {
 	_, err := c.AddFunc(p.cfg.Cron, func() {
-		// bot.Go：panic 自动恢复并通知所有插件 OnPanic，不要用裸 go
+		// b.Go：panic 自动恢复并通知所有插件 OnPanic，不要用裸 go
 		b.Go("daily-brief", func() { p.pushAll(b) })
 	})
 	if err != nil {
@@ -244,15 +244,16 @@ func (p *DailyBriefPlugin) push(b bot.Bot, groupID message.QID) {
 要点：
 
 - `p.cfg.Cron` 是配置里的 cron 表达式（默认每天 08:30），启动时读取，改配置重启后生效
-- 配置的群 ID 是多平台统一 ID（QQ 为 `qq:群号`、飞书 `fs:oc_xxx`、Telegram 带前缀），`message.FromString` 直接构造 `QID`，core 会自动路由到对应平台适配器
+- 配置的群 ID 是多平台统一 ID（NapCat 为 `qq:群号`、Luckylilia 为 `lil:群号`、飞书 `fs:oc_xxx`、Telegram 带 `tg:` 前缀），`message.FromString` 直接构造 `QID`，core 会自动路由到对应平台适配器
 - `SendGroupMsg` 返回 `(msgId, success)`，失败只返回 false 不会 panic——推送失败要自行处理（这里记入任务日志）
-- `tasklog.Logger` 负责执行日志的持久化与容量淘汰（这里保留 100 条）
+- `tasklog.Logger` 负责执行日志的持久化（SQL 后端行级存储），日志长期保留、不做容量淘汰，管理员可在面板「任务日志」页导出或按条件清除；SQL 探测/建表失败时会降级为「写入丢弃、读取为空」，不要把它当核心业务状态
+- `tasklog.New(store, logger)` 的 store 需要是持久化存储的 SQL 后端；`p.PersistentStorage.Clone("brieflog:")` 已满足
 
 ## 第 6 步：注册面板服务
 
 这是本教程的关键一步：让 Web 面板「任务日志」页展示本插件的推送记录。
 
-实现 `adminpanel.TaskLogSource` 接口（一个方法）：
+实现 `adminpanel.TaskLogSource` 接口（当前有 3 个方法，缺一不可）：
 
 ```go
 // TaskLogQuery 按条件查询本插件的推送日志（实现 adminpanel.TaskLogSource）
@@ -262,12 +263,28 @@ func (p *DailyBriefPlugin) TaskLogQuery(f tasklog.Filter) []tasklog.Entry {
 	}
 	return p.log.Query(f)
 }
+
+// TaskLogStats 返回轻量统计行，供面板 Token 统计聚合
+func (p *DailyBriefPlugin) TaskLogStats(f tasklog.Filter) []tasklog.StatRow {
+	if p.log == nil {
+		return nil
+	}
+	return p.log.Stats(f)
+}
+
+// TaskLogClear 按条件清除执行日志（零值条件清除全部），返回删除条数
+func (p *DailyBriefPlugin) TaskLogClear(f tasklog.Filter) int {
+	if p.log == nil {
+		return 0
+	}
+	return p.log.Clear(f)
+}
 ```
 
 就这么简单——core 启动面板时会遍历插件、类型断言发现实现了 `TaskLogSource` 的插件，自动把「任务日志」页接到 `p.log` 上，面板零改动。
 
 ::: warning 单提供者约定
-面板服务是**单提供者**：同一接口只会接一个插件，且内置的 AI 对话插件已经实现了 `TaskLogSource`（它与日志插件一起集齐了全部 9 个面板接口，导致之后注册的自定义插件不会被接线）。要让本插件的日志出现在「任务日志」页，需要在 `cmd/main.go` **移除 `pluginaichat.NewAIChatPlugin()`** 的注册（详见 [插件注册面板服务](/plugin/panel-services)）。
+面板服务是**单提供者**：同一接口只会接一个插件，且 core 的发现循环在 9 个核心接口集齐后就会 `break`。默认 `cmd/main.go` 中 AI 对话插件已经实现了 `TaskLogSource`（它和日志插件一起集齐了全部 9 个核心面板接口），因此**之后注册的自定义插件不会被接线**。要让本插件的日志出现在「任务日志」页，需要在 `cmd/main.go` **移除 `pluginaichat.NewAIChatPlugin()`** 的注册（详见 [插件注册面板服务](/plugin/panel-services)）。
 :::
 
 ## 第 7 步：注册运行与调试
@@ -311,7 +328,10 @@ go run ./cmd
 
 ## 下一步
 
-- [插件注册面板服务](/plugin/panel-services) —— 全部 9 个面板接口与接入规则
+- [插件注册面板服务](/plugin/panel-services) —— 全部面板接口、可选扩展与接入规则
+- [插件配置](/plugin/configuration) —— `ConfigSchema` 的完整标签与默认值机制
+- [插件生命周期与依赖注入](/plugin/lifecycle) —— 启动/卸载、超时与并发
+- [平台能力与优雅降级](/plugin/platforms) —— 多平台发送与能力探测
 - [常见模式](/plugin/patterns) —— 管理员权限、并发安全、消息拦截等实战模式
 - [数据存储](/plugin/storage) —— SQL 关系表、命名空间等进阶用法
 - [API 参考](/api/events) —— 全部事件签名

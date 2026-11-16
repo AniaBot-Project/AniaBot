@@ -77,6 +77,24 @@ type ClockUpdateFields struct {
 	CreatedBy  *string // 群任务触发时 @ 的用户 ID，空字符串表示不再 @
 }
 
+// clockDelivery 一次成功投递到目标会话的定时任务消息（最终回复，或工具主动
+// 发送的图片/文件）。定时任务以一次性会话执行，这些消息既不在目标会话的
+// 历史窗口里，也不会随历史回放出现。
+type clockDelivery struct {
+	At    time.Time
+	Title string
+}
+
+// clockDeliveryHint 单个目标会话的投递提示状态：last 为最近一次成功投递，
+// seq/hintedSeq 是投递序号与已提示到的序号。用序号而不是投递时间判断，
+// 避免提示注入后、对话结束前又发生的新投递被一并吞掉（下一次发言仍会提示），
+// 也不受系统时钟精度（同刻两次投递）影响。
+type clockDeliveryHint struct {
+	last      clockDelivery
+	seq       uint64
+	hintedSeq uint64
+}
+
 // clockManager AI 定时任务调度器：持久化 + 调度 + 触发执行 + 执行日志。
 //
 // 拥有独立的 *cron.Cron 实例（不与框架的 cron 共用），从而与 StartCron 注册的
@@ -100,6 +118,11 @@ type clockManager struct {
 	cron        *cron.Cron
 	cronStarted bool
 	bot         bot.Bot
+
+	// deliveries 各目标会话最近一次成功投递的定时任务消息（键为 sessionKey）。
+	// 定时任务的消息不会进入目标会话的对话历史，主对话在用户随后发言时据此
+	// 补一条「查看消息历史」的提示（见 noteDelivered / deliveryHint）。
+	deliveries map[string]*clockDeliveryHint
 }
 
 func newClockManager(p *AIChatPlugin, defaultTimeout time.Duration) *clockManager {
@@ -112,6 +135,7 @@ func newClockManager(p *AIChatPlugin, defaultTimeout time.Duration) *clockManage
 		tasks:          map[string]*ClockTask{},
 		entries:        map[string]cron.EntryID{},
 		running:        map[string]bool{},
+		deliveries:     map[string]*clockDeliveryHint{},
 		cron:           cron.New(),
 	}
 	m.loadAll()
@@ -927,6 +951,73 @@ func (m *clockManager) makeClockCallback(ctx context.Context, task *ClockTask, u
 	return cbs
 }
 
+// ---- 投递提示 ----
+
+// noteDelivered 记录一次成功投递到目标会话的定时任务消息。
+//
+// 定时任务以一次性会话执行，推送的消息既不在主对话的历史窗口里，也不会随历史
+// 回放出现；不在用户随后发言时提示，AI 就完全不知道本会话「刚收到过一条自己
+// 没发过的消息」，用户对着播报追问时只能反问。提示的注入见 deliveryHint。
+func (m *clockManager) noteDelivered(task *ClockTask) {
+	if m == nil || task == nil {
+		return
+	}
+	key := sessionKey(parseQID(task.TargetID), task.TargetType == clockTargetGroup)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st, ok := m.deliveries[key]
+	if !ok {
+		st = &clockDeliveryHint{}
+		m.deliveries[key] = st
+	}
+	st.seq++
+	st.last = clockDelivery{At: time.Now(), Title: task.Title}
+}
+
+// deliveryHint 在「上次提示之后又有新投递」时构造提示文本：定时任务播报不在
+// 对话历史里，引导 AI 先用历史消息工具确认内容再回应。toolName 为该会话实际
+// 可用的历史消息工具名（平台前缀版本，如 qq_get_msg_history）。
+//
+// 返回的投递序号供调用方在请求成功（确实进了上下文）后调用 commitDeliveryHint
+// 标记已提示——请求失败的轮次提示并未生效，下一次发言会重新注入。
+func (m *clockManager) deliveryHint(id message.QID, isGroup bool, toolName string) (string, uint64, bool) {
+	if m == nil {
+		return "", 0, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st, ok := m.deliveries[sessionKey(id, isGroup)]
+	if !ok || st.last.At.IsZero() || st.seq <= st.hintedSeq {
+		return "", 0, false
+	}
+	tool := strings.TrimSpace(toolName)
+	if tool == "" {
+		tool = "get_msg_history"
+	}
+	title := strings.TrimSpace(st.last.Title)
+	if title == "" {
+		title = "未命名任务"
+	}
+	hint := fmt.Sprintf("【定时任务播报】定时任务「%s」在用户这条消息之前向本会话推送过消息（%s 发出）。"+
+		"那条消息由任务的独立会话产生，不在你的对话历史里；用户当前发言可能是在回应它。"+
+		"回复前请先用 %s 查看本会话最近的消息，确认播报内容；若与当前对话无关，正常回复即可。",
+		title, st.last.At.Local().Format("01-02 15:04"), tool)
+	return hint, st.seq, true
+}
+
+// commitDeliveryHint 标记该序号的投递提示已注入成功，后续发言不再重复提示。
+// 只推进到 seq（提示注入成功的那一次），提示注入期间到达的新投递不受影响。
+func (m *clockManager) commitDeliveryHint(id message.QID, isGroup bool, seq uint64) {
+	if m == nil || seq == 0 {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if st, ok := m.deliveries[sessionKey(id, isGroup)]; ok && seq > st.hintedSeq {
+		st.hintedSeq = seq
+	}
+}
+
 // ---- 目标消息发送 ----
 
 // sendFinalOutput 收尾推送最终回复。语义：
@@ -945,7 +1036,12 @@ func (m *clockManager) sendFinalOutput(task *ClockTask, resp string, skipped boo
 	if strings.TrimSpace(resp) == "" {
 		return false
 	}
-	return m.sendText(task, resp)
+	if !m.sendText(task, resp) {
+		return false
+	}
+	// 只有真正发出去的消息才登记投递提示：跳过输出、空文本与发送失败都算没播报
+	m.noteDelivered(task)
+	return true
 }
 
 // sendText 向任务目标发送文本，并在成功后标记「机器人刚说过话」（主动互动据此
@@ -1017,11 +1113,17 @@ func (m *clockManager) sendImage(task *ClockTask, bs64 string) bool {
 		builder := msgchain.Builder().Group()
 		builder.ImageBase64(bs64)
 		_, ok := m.bot.SendGroupMsg(qid, builder.Build())
+		if ok {
+			m.noteDelivered(task)
+		}
 		return ok
 	}
 	builder := msgchain.Builder().Friend()
 	builder.ImageBase64(bs64)
 	_, ok := m.bot.SendFriendMsg(qid, builder.Build())
+	if ok {
+		m.noteDelivered(task)
+	}
 	return ok
 }
 
@@ -1034,10 +1136,16 @@ func (m *clockManager) sendFile(task *ClockTask, name, bs64 string) bool {
 		builder := msgchain.Builder().Group()
 		builder.FileBase64(name, bs64)
 		_, ok := m.bot.SendGroupMsg(qid, builder.Build())
+		if ok {
+			m.noteDelivered(task)
+		}
 		return ok
 	}
 	builder := msgchain.Builder().Friend()
 	builder.FileBase64(name, bs64)
 	_, ok := m.bot.SendFriendMsg(qid, builder.Build())
+	if ok {
+		m.noteDelivered(task)
+	}
 	return ok
 }

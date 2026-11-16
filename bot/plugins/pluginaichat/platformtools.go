@@ -2,6 +2,7 @@ package pluginaichat
 
 import (
 	"context"
+	"strings"
 
 	"github.com/jeanhua/AniaBot/bot/component/llmtool"
 	"github.com/jeanhua/AniaBot/common/aitool"
@@ -49,6 +50,7 @@ func (p *AIChatPlugin) registerPlatformTools(sessionExecutor *llmtool.SessionToo
 			sessionExecutor.RegisterSession(llmtool.AdaptProviderTool(
 				aitool.NewMsgHistoryTool(ctx, "get_msg_history")))
 		}
+		p.rememberHistoryTool(sessionKey(id, isGroup), "get_msg_history")
 		return
 	}
 	skipLog := func(format string, args ...any) {
@@ -81,6 +83,11 @@ func (p *AIChatPlugin) registerPlatformTools(sessionExecutor *llmtool.SessionToo
 			p.platformSideEffects.Store(name, struct{}{})
 		}
 		sessionExecutor.RegisterSession(llmtool.AdaptProviderTool(t))
+		// 历史消息工具名按会话登记：「定时任务播报」提示据此按平台给出准确
+		// 工具名（qq_get_msg_history / tg_get_msg_history），而不是硬编码通用名
+		if strings.HasSuffix(name, "get_msg_history") {
+			p.rememberHistoryTool(sessionKey(id, isGroup), name)
+		}
 		registered++
 	}
 	if p.Logger != nil {
@@ -93,4 +100,23 @@ func (p *AIChatPlugin) registerPlatformTools(sessionExecutor *llmtool.SessionToo
 func (p *AIChatPlugin) platformToolBlocked(name string) bool {
 	_, blocked := p.platformSideEffects.Load(name)
 	return blocked
+}
+
+// rememberHistoryTool 登记会话实际可用的历史消息工具名（注入「定时任务播报」
+// 提示时使用）。会话淘汰时随其他旁挂状态一并删除。
+func (p *AIChatPlugin) rememberHistoryTool(key, name string) {
+	if key == "" || name == "" {
+		return
+	}
+	p.historyTools.Store(key, name)
+}
+
+// historyToolNameFor 返回会话可用的历史消息工具名；未登记时回退通用名。
+func (p *AIChatPlugin) historyToolNameFor(key string) string {
+	if v, ok := p.historyTools.Load(key); ok {
+		if name, ok2 := v.(string); ok2 && name != "" {
+			return name
+		}
+	}
+	return "get_msg_history"
 }

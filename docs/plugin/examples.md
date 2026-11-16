@@ -213,4 +213,12 @@ func (p *WelcomePlugin) OnGroupDecrease(ctx context.Context, b bot.Bot, notice m
 ## 更多真实示例
 
 - 内置插件源码：`bot/plugins/` 下的六个插件（系统、日志、请求拦截、复读机、AI 对话、每日新闻）都是优秀的学习样本；官方插件仓库（AniaBot-Plugins）里的插件（如防撤回、白名单管理）同样是很好的参考
-- 自定义插件模板：仓库 `custom/` 目录下的 `plugins/pluginexample`（带注释的插件骨架）与 `mvp`（最小可运行示例）
+- 本仓库 `custom/plugins/` 还内置了一批可直接运行的完整插件：`checkin`（签到 + 持久化 + 排行）、`eew`（WebSocket/HTTP 轮询 + 定时推送）、`groupdigest`（后台任务 + AI 调用）、`whitelist`（拦截器 + 管理员鉴权）、`antiwithdrawal`（QQ 合并转发 + rkey 续期）
+- 自定义插件模板：仓库 `custom/plugins/example`（带 `plugin.json` 的市场骨架）、`custom/plugins/pluginexample`（注释版骨架）与 `custom/mvp`（最小可运行 main）
+
+## 相关
+
+- [插件配置](/plugin/configuration) —— 给示例插件加上面板可配置项
+- [插件生命周期与依赖注入](/plugin/lifecycle) —— 后台任务、卸载与测试
+- [平台能力与优雅降级](/plugin/platforms) —— 让示例适配多平台
+- [常见模式](/plugin/patterns) —— 权限、限流、拦截、资源过期等实战写法

@@ -18,7 +18,7 @@ chain.Text(" 你好！")
 chain.Face(14)                       // QQ 自带表情
 chain.ImageUrl("https://example.com/pic.png")
 
-msgId, ok := bot.SendGroupMsg(msg.GroupId, chain.Build())
+msgId, ok := b.SendGroupMsg(msg.GroupId, chain.Build())
 ```
 
 方法可以链式连写：
@@ -27,7 +27,7 @@ msgId, ok := bot.SendGroupMsg(msg.GroupId, chain.Build())
 chain := msgchain.Builder().Friend().
     Text("任务完成 ✅").
     ImageUrl("https://example.com/report.png")
-bot.SendFriendMsg(userId, chain.Build())
+b.SendFriendMsg(userId, chain.Build())
 ```
 
 ## 普通消息方法
@@ -47,7 +47,7 @@ bot.SendFriendMsg(userId, chain.Build())
 | `Raw(segments...)` | 直接追加原始 `OB11Segment`，用于转发收到的消息段 |
 | `Keyboard(rows...)` | 内联按钮键盘（行 × 按钮），用 `Button` / `ButtonURL` / `Row` 构造；平台不支持时出站自动剥离，插件应先断言 `bot.Interactive` 探测（见 [Bot 接口](/api/bot#内联按钮交互-bot-interactive-可选接口)） |
 
-最后调用 `Build()` 得到链对象，传给 `bot.SendGroupMsg` / `bot.SendFriendMsg`。
+最后调用 `Build()` 得到链对象，传给 `b.SendGroupMsg` / `b.SendFriendMsg`。
 
 ### Raw 的典型用途：原样转发
 
@@ -56,7 +56,7 @@ bot.SendFriendMsg(userId, chain.Build())
 ```go
 chain := msgchain.Builder().Group()
 chain.Raw(msg.Message...) // msg.Message 是 []message.OB11Segment
-bot.SendGroupMsg(msg.GroupId, chain.Build())
+b.SendGroupMsg(msg.GroupId, chain.Build())
 ```
 
 ### 内联按钮：翻页等轻交互
@@ -88,10 +88,16 @@ for _, m := range messages {
     fb.Message(m.UserId, m.Nickname, node.Build())
 }
 
-bot.SendGroupForwardMsg(groupId, fb.Build())
+// 合并转发是可选能力：断言成功也要检查返回值，非 QQ 平台/后台路径可能返回 false
+if fs, ok := b.(bot.GroupForwardSender); ok {
+    if _, success := fs.SendGroupForwardMsg(groupId, fb.Build()); success {
+        return false, nil
+    }
+}
+// 降级：逐条发送或合并为一段文本
 ```
 
-私聊合并转发同理：`Builder().FriendForward()` + `bot.SendFriendForwardMsg`。
+私聊合并转发用 `Builder().FriendForward()` + `bot.FriendForwardSender`（QQ 也可用 `bot.QQ.SendFriendForwardMsg`）。平台不支持时请退化为普通消息，详见 [平台能力与优雅降级](/plugin/platforms)。
 
 ::: tip 伪造聊天记录？
 `Message(userId, nickname, chain)` 的 userId 和 nickname 完全由你指定 —— 利用这一点可以实现「伪造聊天记录」等趣味玩法。
@@ -102,26 +108,31 @@ bot.SendGroupForwardMsg(groupId, fb.Build())
 构造好链之后，通过 `bot.Bot` 发送：
 
 ```go
-bot.SendGroupMsg(groupId, groupChain)  // → (msgId, ok) 公共能力，所有平台可用
-bot.SendFriendMsg(userId, friendChain) // → (msgId, ok) 公共能力，所有平台可用
+b.SendGroupMsg(groupId, groupChain)  // → (msgId, ok) 公共能力，所有平台可用
+b.SendFriendMsg(userId, friendChain) // → (msgId, ok) 公共能力，所有平台可用
 
-// 以下为 QQ 平台专属能力，需先断言 bot.QQ（事件来源为 QQ 适配器时成功）：
-qb := bot.(bot.QQ)
-qb.SendGroupForwardMsg(groupId, forwardChain)    // → (msgId, ok)
-qb.SendFriendForwardMsg(userId, forwardChain)    // → (msgId, ok)
-qb.SendGroupAIVoiceMsg(groupId, character, text) // AI 语音（需 NapCat 支持）
-qb.SendPokeMsg(userId, &groupId)                 // 戳一戳（groupId 可传 nil 表示私聊）
+// 以下为可选能力，需先类型断言；调用后仍要检查返回值：
+if qb, ok := b.(bot.QQ); ok {
+    qb.SendGroupForwardMsg(groupId, forwardChain)    // → (msgId, ok)
+    qb.SendFriendForwardMsg(userId, forwardChain)    // → (msgId, ok)
+    qb.SendGroupAIVoiceMsg(groupId, character, text) // AI 语音（需 NapCat 支持）
+    qb.SendPokeMsg(userId, &groupId)                 // 戳一戳（groupId 可传 nil 表示私聊）
+}
+
+// 不依赖 QQ 事件的统一路由接口（后台推送也可用）：
+if fs, ok := b.(bot.GroupForwardSender); ok { fs.SendGroupForwardMsg(...) }
+if fs, ok := b.(bot.FriendForwardSender); ok { fs.SendFriendForwardMsg(...) }
 ```
 
 ::: tip 多平台
 公共能力 `SendGroupMsg` / `SendFriendMsg` 在所有平台可用（飞书等平台内部自动翻译）；
-QQ 专属方法在 `bot.QQ` 可选接口中，类型断言探测，断言失败即平台不支持。
-::: 
+QQ 专属方法在 `bot.QQ` 可选接口中；合并转发、流式回复、媒体续期等由 core 统一路由的接口在非支持平台可能断言成功但返回 `false`，务必检查返回值。
+:::
 
 所有发送方法返回 `(msgId, success)`，失败时记得处理：
 
 ```go
-if _, ok := bot.SendGroupMsg(msg.GroupId, chain.Build()); !ok {
+if _, ok := b.SendGroupMsg(msg.GroupId, chain.Build()); !ok {
     p.Logger.Error("消息发送失败", "group", msg.GroupId)
 }
 ```

@@ -3,7 +3,7 @@
 `bot.Bot` 是插件与机器人交互的唯一入口，每个事件方法都会注入。它聚合了**公共**消息收发、信息查询、系统能力与协程管理；平台专属能力（合并转发、戳一戳、rkey 等）不在 `bot.Bot`，而是通过可选的 `bot.QQ` 等扩展接口暴露。
 
 ::: info 错误处理约定
-所有方法返回 `(value, bool)` —— 失败时内部已记录日志，以 `false` 返回，不暴露 error。
+发送/查询类方法返回 `(value, bool)` —— 失败时内部已记录日志，以 `false` 返回，不暴露 error；`Stop()` / `Go()` / `GetPluginList()` 是少数无 bool 返回值的方法。可选接口调用后也要检查 bool，不能只凭类型断言判断平台支持。
 :::
 
 ## 公共能力（所有平台）
@@ -61,7 +61,7 @@ Stop()
 Go(name string, f func())
 ```
 
-`name` 用于日志与 panic 告警中标识任务来源。插件内的任何后台协程都应该用 `bot.Go` 启动，而不是裸 `go`。
+`name` 用于日志与 panic 告警中标识任务来源。插件内的任何后台协程都应该用 `b.Go` 启动，而不是裸 `go`。
 
 ## QQ 专属能力（bot.QQ，可选接口）
 
@@ -141,7 +141,7 @@ type GroupUserInfo struct {
 
 ## 媒体地址续期（bot.MediaRefresher，可选接口）
 
-QQ 等平台的图片 / 文件地址带有时效性鉴权参数（如 rkey，约 2 小时过期），过期后直连只会拿到 4xx。平台支持时，事件回调里的 `bot.Bot` 可断言为 `bot.MediaRefresher`，按平台文件 ID 重新申请一个可用地址：
+QQ 等平台的图片 / 文件地址带有时效性鉴权参数（rkey 本身约 2 小时有效期，但图片直链通常约 3 分钟就会失效），过期后直连只会拿到 4xx。平台支持时，事件回调里的 `bot.Bot` 可断言为 `bot.MediaRefresher`，按平台文件 ID 重新申请一个可用地址：
 
 ```go
 if mr, ok := b.(bot.MediaRefresher); ok {
@@ -152,11 +152,11 @@ if mr, ok := b.(bot.MediaRefresher); ok {
 }
 ```
 
-`groupId` / `userId` 用于定位会话（群文件、私聊文件续期需要），没有会话信息时传空串。core 自身也实现该接口：后台路径（没有事件来源）调用时按 `groupId` / `userId` 的 ID 前缀路由到对应适配器；平台不支持时返回 `("", false)`，插件应退化为「链接已失效」提示。
+`groupId` / `userId` 用于定位会话（群文件、私聊文件续期需要），没有会话信息时传空串。core 自身也实现该接口：后台路径（没有事件来源）调用时按 `groupId` / `userId` 的 ID 前缀路由到对应适配器；平台不支持时返回 `("", false)`。注意 core 实现意味着**非 QQ 平台也可能断言成功**，必须检查返回值，并退化为「链接已失效」提示。
 
-## 群聊合并转发（bot.GroupForwardSender，可选接口）
+## 合并转发（bot.GroupForwardSender / bot.FriendForwardSender，可选接口）
 
-合并转发同样是 QQ 专属能力，但单独成接口 `bot.GroupForwardSender`：事件回调里断言成功表示当前平台支持；**后台路径**（没有事件来源，如定时任务、面板触发的推送）持有的 core 也能断言成功——调用时按目标群 ID 前缀路由到对应适配器。适配器不支持（非 QQ 平台）时返回 `("", false)`，插件应退化为逐条发送：
+合并转发是 QQ 专属能力，但单独成接口，便于后台路径复用：
 
 ```go
 if fs, ok := b.(bot.GroupForwardSender); ok {
@@ -164,17 +164,53 @@ if fs, ok := b.(bot.GroupForwardSender); ok {
     // 每个节点一条记录：node 的 user_id/nickname 是记录里显示的发送者（机器人自身）
     fwd.Message(msg.SelfId, "AniaBot", msgchain.Builder().Group().Text("第一段").Build())
     fwd.Message(msg.SelfId, "AniaBot", msgchain.Builder().Group().Text("第二段").Build())
-    if _, success := fs.SendGroupForwardMsg(msg.GroupId, fwd.Build()); !success {
-        // 平台不支持或发送失败 → 逐条发送
+    if _, success := fs.SendGroupForwardMsg(msg.GroupId, fwd.Build()); success {
+        return false, nil
+    }
+    // 平台不支持或发送失败 → 逐条发送
+}
+```
+
+私聊用 `bot.FriendForwardSender`（`SendFriendForwardMsg`）。core 自身实现这两个接口并按目标 ID 前缀路由到适配器，因此：
+
+- **后台路径**（定时任务、面板推送，没有事件来源）可以直接用 core 的 `bot.Bot` 调用；
+- 事件回调里**非 QQ 平台也可能断言成功**，但调用返回 `("", false)`。必须检查返回值并退化为逐条发送，不要只凭断言判断平台支持。
+
+节点内容支持普通消息段（文本/图片/@ 等），QQ 客户端展开「聊天记录」后可见。
+
+## 流式回复（bot.StreamSender，可选接口）
+
+平台支持「先发一条、再逐段替换」时（飞书卡片 Patch、Telegram / Discord 消息编辑），可断言 `bot.StreamSender` 获得打字机效果：
+
+```go
+if ss, ok := b.(bot.StreamSender); ok {
+    handle, ok := ss.SendGroupStream(groupId, msgchain.Builder().Group().Text("正在生成…").Build())
+    if ok && handle != nil {
+        defer handle.End()
+        if err := handle.Patch("生成中的文本"); err != nil {
+            // 内容超限/平台拒绝：停止 Patch，等最终文本一次性发送
+        }
     }
 }
 ```
 
-节点内容支持普通消息段（文本/图片/@ 等），QQ 客户端展开「聊天记录」后可见。
+`SendGroupStream` / `SendFriendStream` 创建消息并返回 `StreamHandle`；`Patch` 替换内容（实现方负责节流与长度上限），`End` 结束并强制发送最终内容（幂等）。QQ/OneBot v11 没有消息编辑 API，QQ 事件外观会显式返回 `(nil, false)`；其他平台也可能返回 false，必须判断 `ok` 与 `handle != nil`。平台不支持时退化为一次性回复。
+
+## 群成员枚举（bot.GroupMembers，可选接口）
+
+```go
+if gm, ok := b.(bot.GroupMembers); ok {
+    if list, ok := gm.GetGroupMemberList(groupId, false); ok {
+        // 使用成员列表
+    }
+}
+```
+
+core 实现该接口并按群 ID 路由，目前仅 QQ（NapCat / Luckylilia）的适配器支持；其他平台断言可能成功但返回 `(nil, false)`，必须检查返回值。`noCache=true` 表示绕过适配器缓存（若支持）。
 
 ## 内联按钮交互（bot.Interactive，可选接口）
 
-Telegram 等平台支持在消息上渲染可点击按钮（inline keyboard）：点击不产生新消息，而是回调事件送回插件，适合翻页、菜单等交互。插件先断言 `bot.Interactive` 探测平台能力，支持时在消息链中附加 keyboard 段：
+Telegram 等平台支持在消息上渲染可点击按钮（inline keyboard；当前由 Telegram 适配器实现）：点击不产生新消息，而是回调事件送回插件，适合翻页、菜单等交互。插件先断言 `bot.Interactive` 探测平台能力，支持时在消息链中附加 keyboard 段：
 
 ```go
 func (p *MyPlugin) OnGroupMsg(ctx context.Context, b bot.Bot, cmd command.Command, msg message.Message) (bool, error) {
@@ -210,7 +246,7 @@ func (p *MyPlugin) OnInteraction(ctx context.Context, b bot.Bot, ev *message.Int
 
 ## 消息编辑（bot.MsgEditor，可选接口）
 
-支持「先发后改」的平台（Telegram `editMessageText` 等）可断言 `bot.MsgEditor` 编辑已发出消息——配合按钮做就地翻页（点「下一页」原消息刷新内容与按钮，不刷屏）：
+支持「先发后改」的平台可断言 `bot.MsgEditor` 编辑已发出消息（当前由 Telegram 适配器实现；其他平台断言失败，应退化为发送新消息）——配合按钮做就地翻页（点「下一页」原消息刷新内容与按钮，不刷屏）：
 
 ```go
 if ed, ok := b.(bot.MsgEditor); ok {
@@ -222,4 +258,4 @@ if ed, ok := b.(bot.MsgEditor); ok {
 }
 ```
 
-chain 携带 keyboard 段时同时更换按钮，未携带时保持原按钮。QQ/OneBot v11 无消息编辑 API，断言失败，插件应退化为发送新消息。
+`EditGroupMsg` / `EditFriendMsg` 分别编辑群聊与私聊消息；chain 携带 keyboard 段时同时更换按钮，未携带时保持原按钮。QQ/OneBot v11 无消息编辑 API，断言失败，插件应退化为发送新消息。

@@ -45,7 +45,7 @@ if p.enable.Load() { /* ... */ }
 
 ## 按群隔离的缓存队列
 
-防撤回插件（源码见官方插件仓库 `plugins/antiwithdrawal`）的模式 —— `sync.Map` + `LoadOrStore` 惰性初始化：
+防撤回插件（源码见 `custom/plugins/antiwithdrawal`）的模式 —— `sync.Map` + `LoadOrStore` 惰性初始化。`MessageQueue` 是该插件自带的泛型环形缓冲，不是框架公共类型，抄的时候要一并复制 `queue.go`：
 
 ```go
 queueI, _ := p.msg.LoadOrStore(msg.GroupId, NewMessageQueue[*message.Message](100))
@@ -55,17 +55,28 @@ queue.Add(&msg)
 
 ## 安全的协程
 
-插件内启动后台协程时，用 `bot.Go` 代替裸 `go`，享有崩溃恢复：
+插件内启动后台协程时，用 `b.Go` 代替裸 `go`，享有崩溃恢复：
 
 ```go
-bot.Go("my-background-task", func() {
-    ticker := time.NewTicker(time.Minute)
-    defer ticker.Stop()
-    for range ticker.C {
-        // 周期性工作；panic 不会拖垮进程，且会通知所有插件的 OnPanic
-    }
-})
+// 在事件回调或 Awake 里拿到 b（bot.Bot）
+func (p *MyPlugin) Awake(ctx context.Context, b bot.Bot) error {
+	b.Go("my-background-task", func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// 周期性工作；panic 不会拖垮进程，且会通知所有插件的 OnPanic
+			}
+		}
+	})
+	return nil
+}
 ```
+
+不要用裸 `go f()` 启动可能 panic 的后台任务，也不要在 `Start` 里用 `context.Background()` 起永不退出的循环——卸载时无法取消。
 
 ## 消息拦截器
 
@@ -95,11 +106,18 @@ type myConfig struct {
 	Timeout int    `cfg:"plugin.myplugin.timeout" label:"超时(秒)" group:"我的插件" default:"30"`
 }
 
+type MyPlugin struct {
+	plugin.Meta
+	cfg myConfig
+}
+
 func (p *MyPlugin) ConfigSchema() any { return &p.cfg }
 
 func (p *MyPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	if p.cfg.API == "" {
-		// 初始化失败：fmt.Errorf 包装哨兵并附具体原因，框架统一记录错误日志
+		// 初始化失败：fmt.Errorf 包装哨兵并附具体原因，框架统一记录错误日志。
+		// 注意：返回 error 不会阻止插件加载，仍需要用自己的 ready/disabled 标志
+		// 在事件入口阻止后续处理。
 		return fmt.Errorf("%w: 未配置 plugin.myplugin.api", aniaerror.ParameterInitializeError)
 	}
 	if p.cfg.Timeout <= 0 {
@@ -109,7 +127,7 @@ func (p *MyPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 }
 ```
 
-标签与类型推断的完整说明见[第一个插件 · 声明自己的配置](/plugin/first-plugin#进阶-声明自己的配置)。
+标签、嵌套结构体、`select`/`slider`/指针可选字段的完整说明见 [插件配置](/plugin/configuration)。
 
 ## 发送失败的处理
 
@@ -118,7 +136,7 @@ func (p *MyPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 ```go
 if _, ok := b.SendGroupMsg(msg.GroupId, chain.Build()); !ok {
     p.Logger.Error("发送消息失败", "group", msg.GroupId, "message", "[每日新闻]")
-    return nil // 或重试
+    // 视业务决定：重试、降级或直接返回
 }
 p.Logger.Info("发送消息", "group", msg.GroupId, "message", "[每日新闻]")
 ```
@@ -131,22 +149,47 @@ p.Logger.Info("发送消息", "group", msg.GroupId, "message", "[每日新闻]")
 type MyPlugin struct {
     plugin.Meta
     rateCh chan struct{}
+    bgCtx  context.Context
+    cancel context.CancelFunc
+}
+
+type myConfig struct {
+    RateLimit int `cfg:"plugin.myplugin.rate_limit" label:"每秒请求上限" group:"我的插件" default:"5"`
 }
 
 func (p *MyPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
-    limit := cfg.GetInt("plugin.myPlugin.rate_limit")
+    limit := p.cfg.RateLimit
+    if limit <= 0 {
+        limit = 1
+    }
     p.rateCh = make(chan struct{}, limit)
-    // 每秒补充令牌
+    // Start 的 ctx 在返回后会被 cancel，常驻任务要自建 context，
+    // 并在 OnUnload 中调用 p.cancel()。
+    p.bgCtx, p.cancel = context.WithCancel(context.Background())
     go func() {
-        for range time.Tick(time.Second) {
-            for i := 0; i < limit; i++ {
-                select {
-                case p.rateCh <- struct{}{}:
-                default:
+        ticker := time.NewTicker(time.Second)
+        defer ticker.Stop()
+        for {
+            select {
+            case <-p.bgCtx.Done():
+                return
+            case <-ticker.C:
+                for i := 0; i < limit; i++ {
+                    select {
+                    case p.rateCh <- struct{}{}:
+                    default:
+                    }
                 }
             }
         }
     }()
+    return nil
+}
+
+func (p *MyPlugin) OnUnload(ctx context.Context, reason plugin.UnloadReason) error {
+    if p.cancel != nil {
+        p.cancel()
+    }
     return nil
 }
 
@@ -161,18 +204,51 @@ default:
 
 ## 资源过期处理
 
-QQ 的图片/文件链接约 3 分钟过期。防撤回插件（源码见官方插件仓库 `plugins/antiwithdrawal`）的两种应对：
+QQ 的图片/文件链接通常约 3 分钟过期。防撤回插件（源码见 `custom/plugins/antiwithdrawal`）的两种应对：
 
 1. 通过 QQ 平台专属能力 `bot.(bot.QQ).GetNCrkey()` 获取 rkey 改写 URL 续期（`utils.NewURLModifier`）——合并转发与 rkey 均属 QQ 能力，防撤回插件声明 `Meta.Platforms = []string{"qq"}` 并类型断言 `bot.QQ`
 2. 无法续期时降级为文字占位：`[图片消息，已经超过3分钟过期时间]`
+
+持久化历史消息里的媒体，更推荐用 core 统一路由的 `bot.MediaRefresher` 重新申请地址，失败再显示占位；见 [平台能力与优雅降级](/plugin/platforms#媒体地址续期)。
 
 ::: tip 多平台能力探测
 `bot.Bot` 仅含公共能力；QQ 专属方法（合并转发/戳一戳/群签到/rkey/AI 语音等）在 `bot.QQ` 可选接口中，事件来源为 QQ 适配器时断言成功：
 ```go
 if qb, ok := b.(bot.QQ); ok { ncrkey, ok := qb.GetNCrkey() }
 ```
-其他平台断言失败，插件据此优雅退化。插件可用 `Meta.Platforms` 声明支持的平台（空 = 全部平台）。
+其他平台断言失败，插件据此优雅退化。注意：`GroupForwardSender` / `StreamSender` / `MediaRefresher` 等由 core 统一路由的接口在非支持平台也可能断言成功，必须检查调用返回值。插件可用 `Meta.Platforms` 声明支持的平台（空 = 全部平台）。
 :::
+
+## 卸载清理：先关闸门再清理
+
+`OnUnload` 可能与运行期事件并发执行。仅 `cancel()` 后台 goroutine 不够：清理期间仍可能有事件把缓存写回去。推荐先置一个原子闸门，所有事件入口和后台循环都先检查：
+
+```go
+type MyPlugin struct {
+    plugin.Meta
+    closed atomic.Bool
+}
+
+func (p *MyPlugin) OnGroupMsg(ctx context.Context, b bot.Bot, cmd command.Command, msg message.Message) (bool, error) {
+    if p.closed.Load() {
+        return true, nil
+    }
+    // ...
+}
+
+func (p *MyPlugin) OnUnload(ctx context.Context, reason plugin.UnloadReason) error {
+    p.closed.Store(true) // 先关闸门
+    if p.cancel != nil {
+        p.cancel()
+    }
+    if reason == plugin.UnloadUninstall {
+        p.PersistentStorage.Clear(ctx)
+    }
+    return nil
+}
+```
+
+`UnloadShutdown`（退出/重启）不要删除持久化数据，插件重启后会重新加载；只有 `UnloadUninstall`（市场卸载）才清理。
 
 ## 日志规范
 

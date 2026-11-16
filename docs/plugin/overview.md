@@ -31,13 +31,15 @@ func NewPlugin() *MyPlugin {
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `Name` | `string` | 插件名，也用于存储命名空间隔离 |
+| `Name` | `string` | 插件名，全局唯一（重复加载会 panic），也用于存储命名空间隔离 |
 | `HelpWords` | `string` | `/help` 命令显示的帮助文本 |
 | `AdminOnly` | `bool` | 为 `true` 时仅管理员能在 `/help` 中看到 |
-| `ShowFor` | `ShowFor` | 显示范围：`ShowForGroup` / `ShowForFriend` / `ShowForNone`，可按位或 |
+| `ShowFor` | `ShowFor` | 显示范围：`ShowForGroup` / `ShowForFriend` / `ShowForNone`，可按位或。**应显式设置**：零值不会报错，但插件不会出现在 `/help` |
 | `Order` | `int` | 执行顺序，从小到大 |
-| `Platforms` | `[]string` | 插件支持的平台列表（如 `[]string{"qq"}`、`[]string{"qq","feishu"}`、`[]string{"qq","feishu","telegram"}`）；**空 = 支持全部平台**（默认）。core 按事件来源平台过滤，不匹配的插件收不到该平台事件 |
+| `Platforms` | `[]string` | 插件支持的平台列表（如 `[]string{"qq"}`、`[]string{"qq","feishu"}`）；**空 = 支持全部平台**（默认）。core 按事件来源平台过滤，不匹配的插件收不到该平台事件 |
 | `Author` / `Version` | `string` | 作者与版本信息 |
+
+`ShowFor` 是位掩码：`plugininfo.ShowForGroup=2`、`ShowForFriend=4`、`ShowForNone=8`，可按位或组合。零值虽然能加载，但不会出现在群聊/私聊的 `/help` 中；后台拦截器类插件显式写 `plugininfo.ShowForNone`。平台标识与能力探测见 [平台能力与优雅降级](/plugin/platforms)。
 
 ## 执行顺序（Order）
 
@@ -73,7 +75,13 @@ func (p *MyPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.Comm
 ## 生命周期
 
 ```
-AddPlugin() 注册
+AddPlugin() 注册（校验 Name 唯一、ShowFor 哨兵，按 Order 排序）
+    │
+    ▼
+ConfigSchema() / ConfigFields() ← 声明配置（依赖注入之前，不能用注入字段）
+    │
+    ▼
+配置中心补齐默认值 → 填充配置结构体 → 依赖注入
     │
     ▼
 Start(ctx, cfg)        ← 插件初始化（声明了 ConfigSchema 的配置结构体此时已自动填充完毕）
@@ -82,17 +90,17 @@ Start(ctx, cfg)        ← 插件初始化（声明了 ConfigSchema 的配置结
 StartCron(ctx, bot, c) ← 注册 cron 定时任务
     │
     ▼
-Awake(ctx, bot)        ← Bot 完全启动完成（此时可以发消息）
+Awake(ctx, bot)        ← 启动约 1 秒后（首次设置向导未完成时跳过）
     │
     ▼
-OnGroupMsg / OnFriendMsg / OnXxxNotice ...   ← 运行期事件
+OnGroupMsg / OnFriendMsg / OnXxxNotice / OnPlatformEvent / OnInteraction
+/ OnBeforeSendMsg / OnAfterSendMsg ...   ← 运行期事件
     │
     ▼
-OnPanic(ctx, bot, name, err)  ← 任何插件 panic 时触发
-    │
-    ▼
-OnUnload(ctx, reason)  ← 插件被卸载前触发一次（可选接口 UnloadEvent）
+OnUnload(ctx, reason)  ← 插件被卸载前触发一次（可选接口 UnloadEvent，逆序执行）
 ```
+
+运行期任何插件 panic 都不会中断消息链或通知广播（只记日志）；只有 `b.Go` 协程的 panic 会广播 `OnPanic`。完整的阶段顺序、超时与并发语义见 [插件生命周期与依赖注入](/plugin/lifecycle)。
 
 ## 卸载钩子（可选）
 
@@ -120,8 +128,11 @@ type UnloadEvent interface {
 | `Storage` | `storage.Storage` | 缓存层（TTL / 列表语义），已按插件名隔离 |
 | `PersistentStorage` | `storage.PersistentStorage` | 持久化 KV 存储，已按插件名隔离 |
 | `RestyClient` | `*resty.Client` | HTTP 客户端 |
-| `Logger` | `*slog.Logger` | 结构化日志 |
-| `SystemConfig` | `SystemConfig` | 系统级配置（`AdminIds` 管理员列表 / `AdminId` 首位管理员，权限判断用 `IsAdmin`） |
+| `Logger` | `*slog.Logger` | 结构化日志（已带插件名 group） |
+| `SystemConfig` | `SystemConfig` | 系统级配置（`AdminIds` 管理员列表 / `IsAdmin` 鉴权） |
+| `ConfigEditor` | `plugin.ConfigEditor` | 配置中心读写；**可能为 nil，用前判空** |
+
+配置结构体的注册发生在依赖注入之前，详细规则见 [插件配置](/plugin/configuration)；`Start` 的错误处理、`Awake` 时机与卸载钩子见 [插件生命周期与依赖注入](/plugin/lifecycle)。
 
 ## 事件一览
 
@@ -134,9 +145,9 @@ type UnloadEvent interface {
 | Bot 发送 | `OnBeforeSendMsg` / `OnAfterSendMsg`（可选接口 `plugin.SendMsgInterceptor` / `plugin.SendMsgObserver`） | Bot 发出消息（其他插件发送 / 框架内部发送）前可改写或取消，后可知晓发送结果；含合并转发与流式回复 |
 | 启动 | `Start` / `StartCron` / `Awake` | 生命周期钩子 |
 | 卸载 | `OnUnload`（可选接口 `plugin.UnloadEvent`） | 退出/重启或市场卸载前的清理钩子 |
-| 异常 | `OnPanic` | panic 通知 |
+| 异常 | `OnPanic` | `b.Go` 协程 panic 通知（事件回调 panic 只记日志） |
 
-事件字段详见 [API · 事件接口](/api/events)。
+事件字段详见 [API · 事件接口](/api/events)。消息事件默认 5 分钟超时（`bot.msg_event_timeout_sec` 可调），通知/平台事件也按 5 分钟控制，发送前/后事件为 10 秒；超时或 panic 都只影响当前插件。
 
 ## 多平台能力探测
 
@@ -155,9 +166,9 @@ func (p *MyPlugin) OnGroupMsg(ctx context.Context, b bot.Bot, cmd command.Comman
 
 ## 并发模型与 panic 恢复
 
-- 每个插件的每次调用都被 `safeExecute` 包裹 —— 单个插件 panic **不会**影响其他插件或主进程
-- 插件内需要起协程时，使用 `bot.Go(name, f)` 代替裸 `go f()`，同样享有崩溃恢复
-- panic 发生后，所有插件的 `OnPanic` 会被回调，系统插件默认私聊告警管理员
+- 每个插件的每次调用都被 `safeExecute` 包裹 —— 单个插件 panic **不会**影响其他插件或主进程（只记录错误日志，消息链视为放行）
+- 插件内需要起协程时，使用 `b.Go(name, f)` 代替裸 `go f()`：协程 panic 会被恢复，并回调所有插件的 `OnPanic`（系统插件默认私聊告警管理员）
+- 事件回调自身的 panic 不会触发 `OnPanic`，只会记日志；需要告警时把可能失败的工作放进 `b.Go` 或自行 recover 后处理
 
 ## 注册插件
 
@@ -187,9 +198,14 @@ func main() {
 
 启用的平台由配置键 `bot.platform.<name>.enable` 决定（默认仅 QQ），多平台可并存。新增平台只需在 `bot/adapter/` 实现一个 `Adapter` 并在 `init()` 里 `adapter.Register(...)`，然后在此加一行空白导入，框架核心零改动。
 
+插件市场安装的第三方插件由 `tools/plugingen` 生成注册代码（`cmd/marketplace_plugins.go`），无需手工改 `cmd/main.go`。插件市场只做「源码级安装 + 重新编译 + 重启」，不会热加载。
+
 ## 下一步
 
 - [第一个插件](/plugin/first-plugin) —— 动手写代码
+- [插件配置](/plugin/configuration) —— 配置结构体、默认值与面板表单
+- [插件生命周期与依赖注入](/plugin/lifecycle) —— 启动/卸载、超时、并发与测试
+- [平台能力与优雅降级](/plugin/platforms) —— 多平台适配的正确写法
 - [从零开发完整插件](/plugin/tutorial) —— 配置、存储、定时任务与面板服务全流程
 - [面板服务注册](/plugin/panel-services) —— 让你的插件成为面板页面数据源
 - [完整示例](/plugin/examples) —— 看几个真实插件的完整实现

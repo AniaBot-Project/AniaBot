@@ -40,6 +40,13 @@ func TestRegisterPlatformTools(t *testing.T) {
 	if names["time"] {
 		t.Error("不应注入平台清单之外的工具")
 	}
+	// 历史消息工具名按会话登记：播报提示据此给出平台前缀名而不是通用名
+	if got := p.historyToolNameFor(sessionKey(message.FromUint64(888), true)); got != "qq_get_msg_history" {
+		t.Errorf("应登记平台历史消息工具名, got %q", got)
+	}
+	if got := p.historyToolNameFor(sessionKey(message.FromUint64(999), true)); got != "get_msg_history" {
+		t.Errorf("未登记的会话应回退通用工具名, got %q", got)
+	}
 
 	// nil 外观：不注册任何工具
 	session2 := p.toolExecutor.NewSessionExecutor()
@@ -58,6 +65,9 @@ func TestRegisterPlatformTools(t *testing.T) {
 	}
 	if len(names3) != 1 {
 		t.Errorf("非 Provider 平台只应兜底注册历史消息工具, got %v", names3)
+	}
+	if got := p.historyToolNameFor(sessionKey(message.FromUint64(888), true)); got != "get_msg_history" {
+		t.Errorf("非 Provider 平台应登记兜底工具名, got %q", got)
 	}
 }
 

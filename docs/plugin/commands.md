@@ -23,7 +23,7 @@ type Command struct {
 | 用户发送 | Name | Args | Mention |
 | --- | --- | --- | --- |
 | `@机器人 /news` | `news` | `[]` | `true` |
-| `@机器人 /clock add 0 8 * * *` | `clock` | `[add 0 8 * * *]` | `true` |
+| `@机器人 /clock add 0 8 * * *` | `clock` | `["add","0","8","*","*","*"]` | `true` |
 | `/help` | `help` | `[]` | `false` |
 | `@机器人 今天天气如何` | `""` | `nil` | `true` |
 | `随便聊聊` | `""` | `nil` | `false` |
