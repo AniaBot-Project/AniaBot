@@ -1,10 +1,10 @@
 // Package msglog 提供消息日志记录能力。
 //
-// 与 tasklog（持久化执行日志）不同，msglog 面向高频的收消息 / 通知事件，
+// 与 tasklog（持久化执行日志）不同，msglog 面向高频的收消息 / 发消息 / 通知事件，
 // 底层使用缓存存储（storage.Storage）：缓存驱动为 memory 时仅保留在进程内，
 // 重启后清空（与旧版内存环形缓冲行为一致）；驱动为 redis 时日志随 Redis
 // 保存，重启后仍可回看。供 Web 控制面板的「消息日志」页实时展示群消息、
-// 好友消息与通知事件。
+// 好友消息、Bot 发出的消息与通知事件。
 //
 // 存储结构刻意拆分为多个键，避免「一个大 JSON 塞一个 key」的读写放大：
 //   - msglog:seq     自增 ID 计数器（十进制字符串）
@@ -102,6 +102,13 @@ type Entry struct {
 	Media     []Media   `json:"media,omitempty"`      // 消息内的图片 / 文件（按出现顺序）
 	MessageId string    `json:"message_id,omitempty"` // 平台消息 ID（媒体地址过期时用于重新拉取消息）
 
+	// Self 是否为 Bot 自己发出的消息（发送后事件记录，由插件日志记录器写入）：
+	// 面板把这类消息右对齐展示，与会话里收到的消息区分。
+	Self bool `json:"self,omitempty"`
+	// Failed 本条是 Bot 发送失败的消息（Self 为 true 时有效）：平台未确认成功，
+	// 面板在气泡上标注「发送失败」，消息 ID 通常为空。
+	Failed bool `json:"failed,omitempty"`
+
 	// Deleted 已删除标记：面板删除单条日志时不移除列表元素（分页游标按
 	// 「偏移 = seq - ID」换算，移除会让之后所有日志整体错位），而是把该位置
 	// 覆盖成墓碑条目，所有读取接口统一过滤。墓碑随容量淘汰自然清理。
@@ -147,21 +154,30 @@ type Session struct {
 	LastKind  Type      `json:"last_type"`            // 最近一条日志类型
 	LastMedia string    `json:"last_media,omitempty"` // 最近一条消息含有的媒体类型
 	Count     int       `json:"count"`                // 当前保留的日志条数
+
+	// LastSelf 最近一条是否为 Bot 发出：侧栏预览据此加「Bot：」前缀，
+	// 且不把 Bot 昵称记成最近发言人。
+	LastSelf bool `json:"last_self,omitempty"`
+	// LastRecvID 最近一条收到（非 Bot 发出）的日志 ID：未读标记只看收到的消息，
+	// 避免 Bot 自己的发言让会话永远显示红点。只保留了 Bot 消息时为 0。
+	LastRecvID uint64 `json:"last_recv_id,omitempty"`
 }
 
 // sessionState 单个会话的内存索引。
 type sessionState struct {
-	kind      string
-	groupId   string
-	userId    string
-	name      string
-	title     string
-	lastText  string
-	lastKind  Type
-	lastID    uint64
-	lastTime  time.Time
-	lastMedia string
-	ids       []uint64 // 日志 ID，升序（旧 → 新）
+	kind       string
+	groupId    string
+	userId     string
+	name       string
+	title      string
+	lastText   string
+	lastKind   Type
+	lastID     uint64
+	lastTime   time.Time
+	lastMedia  string
+	lastSelf   bool
+	lastRecvID uint64
+	ids        []uint64 // 日志 ID，升序（旧 → 新）
 }
 
 // Recorder 消息日志记录器。
@@ -253,8 +269,14 @@ func (r *Recorder) indexLocked(e Entry) {
 	if len(e.Media) > 0 {
 		st.lastMedia = e.Media[0].Kind
 	}
-	// 通知没有昵称：保留最近一次真人发言的昵称，供群名未知时兜底展示
-	if e.Nickname != "" {
+	st.lastSelf = e.Self
+	if !e.Self {
+		// 未读只看收到的消息；Bot 自己的发言不刷新未读游标
+		st.lastRecvID = e.ID
+	}
+	// 通知没有昵称：保留最近一次真人发言的昵称，供群名未知时兜底展示；
+	// Bot 发出的消息同理，不把「Bot」记成最近发言人。
+	if e.Nickname != "" && !e.Self {
 		st.name = e.Nickname
 	}
 	if e.Type == TypeNotice {
@@ -318,18 +340,20 @@ func (r *Recorder) Sessions() []Session {
 			continue
 		}
 		out = append(out, Session{
-			Key:       key,
-			Kind:      st.kind,
-			GroupId:   st.groupId,
-			UserId:    st.userId,
-			Name:      st.name,
-			Title:     st.title,
-			LastText:  st.lastText,
-			LastTime:  st.lastTime,
-			LastID:    st.lastID,
-			LastKind:  st.lastKind,
-			LastMedia: st.lastMedia,
-			Count:     len(st.ids),
+			Key:        key,
+			Kind:       st.kind,
+			GroupId:    st.groupId,
+			UserId:     st.userId,
+			Name:       st.name,
+			Title:      st.title,
+			LastText:   st.lastText,
+			LastTime:   st.lastTime,
+			LastID:     st.lastID,
+			LastKind:   st.lastKind,
+			LastMedia:  st.lastMedia,
+			Count:      len(st.ids),
+			LastSelf:   st.lastSelf,
+			LastRecvID: st.lastRecvID,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

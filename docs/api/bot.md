@@ -22,6 +22,10 @@ SendFriendMsg(userId message.QID, chain msgchain.FriendChain) (msgId message.QID
 
 消息链的构造见 [消息构造器](/plugin/message-builder)。
 
+::: tip 发送事件
+任何插件通过 `bot.Bot` 发送消息时，框架都会广播发送前 / 发送后事件（可改写、取消或记录），见 [事件接口 · Bot 发送消息事件](/api/events#bot-发送消息事件-可选接口)。
+:::
+
 ### 查询消息与资料
 
 ```go

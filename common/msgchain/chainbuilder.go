@@ -86,3 +86,20 @@ func NewGroupChain(segs []message.OB11Segment) GroupChain { return segChain(segs
 
 // NewFriendChain 包装已有段切片为 FriendChain。
 func NewFriendChain(segs []message.OB11Segment) FriendChain { return segChain(segs) }
+
+// forwardChain 已有合并转发内容的链包装（发送前事件被插件改写后重建链用）。
+type forwardChain message.ForwardMessageSegment
+
+func (f forwardChain) GetForwardMsg() message.ForwardMessageSegment {
+	return message.ForwardMessageSegment(f)
+}
+
+// NewGroupForwardChain 包装已有合并转发内容为 GroupForwardChain。
+func NewGroupForwardChain(seg message.ForwardMessageSegment) GroupForwardChain {
+	return forwardChain(seg)
+}
+
+// NewFriendForwardChain 包装已有合并转发内容为 FriendForwardChain。
+func NewFriendForwardChain(seg message.ForwardMessageSegment) FriendForwardChain {
+	return forwardChain(seg)
+}

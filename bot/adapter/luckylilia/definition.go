@@ -64,10 +64,19 @@ func (q *lilBot) SendPokeMsg(userId message.QID, groupId *message.QID) bool {
 }
 
 func (q *lilBot) SendGroupForwardMsg(groupId message.QID, chain msgchain.GroupForwardChain) (message.QID, bool) {
+	// 优先交给 core 的统一发送入口：core 会按 ID 路由并分发插件发送事件
+	// （发送前改写 / 取消、发送后记录）；直接调用适配器会绕过这些事件。
+	if fs, ok := q.Bot.(bot.GroupForwardSender); ok {
+		return fs.SendGroupForwardMsg(groupId, chain)
+	}
 	return q.qq.SendGroupForwardMsg(groupId, chain)
 }
 
 func (q *lilBot) SendFriendForwardMsg(userId message.QID, chain msgchain.FriendForwardChain) (message.QID, bool) {
+	// 同 SendGroupForwardMsg：优先走 core 的 bot.FriendForwardSender 实现。
+	if fs, ok := q.Bot.(bot.FriendForwardSender); ok {
+		return fs.SendFriendForwardMsg(userId, chain)
+	}
 	return q.qq.SendFriendForwardMsg(userId, chain)
 }
 

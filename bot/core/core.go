@@ -205,32 +205,41 @@ func (ania *AniaBot) makeTrigger(e *adapterEntry) adapter.TriggerWrapper {
 	}
 }
 
-// route 按统一 ID 前缀路由到对应平台适配器；未迁移的裸数字 QQ ID
-// 仍回退到 QQ 平台，保证升级期间兼容旧数据。
-func (ania *AniaBot) route(id message.QID) adapter.Adapter {
+// routeEntry 按统一 ID 前缀路由到对应平台适配器条目（含平台标识与事件 bot 外观）。
+// 未迁移的裸数字 QQ ID 仍回退到 QQ 平台，保证升级期间兼容旧数据。
+func (ania *AniaBot) routeEntry(id message.QID) *adapterEntry {
 	if len(ania.adapters) == 0 {
 		return nil
 	}
 	s := string(id)
 	for _, e := range ania.adapters {
 		if e.def.IDPrefix != "" && strings.HasPrefix(s, e.def.IDPrefix) {
-			return e.adapter
+			return e
 		}
 	}
 	// 旧版 QQ 无前缀数字 ID 兼容：未迁移时仍路由到 QQ（NapCat）。
 	if message.NormalizeQQID(string(id)) != string(id) {
 		for _, e := range ania.adapters {
 			if e.def.Platform == "qq" {
-				return e.adapter
+				return e
 			}
 		}
 	}
 	for _, e := range ania.adapters {
 		if e.def.IDPrefix == "" {
-			return e.adapter
+			return e
 		}
 	}
-	return ania.adapters[0].adapter
+	return ania.adapters[0]
+}
+
+// route 按统一 ID 前缀路由到对应平台适配器；未迁移的裸数字 QQ ID
+// 仍回退到 QQ 平台，保证升级期间兼容旧数据。
+func (ania *AniaBot) route(id message.QID) adapter.Adapter {
+	if e := ania.routeEntry(id); e != nil {
+		return e.adapter
+	}
+	return nil
 }
 
 // AdapterStatuses 汇总各已启用适配器的连接状态（供 Web 面板展示）。
@@ -832,65 +841,156 @@ func (ania *AniaBot) Stop() {
 
 // SendGroupMsg 发送群聊消息（按群 ID 前缀路由到对应平台适配器；
 // 平台不支持内联按钮时先剥离 keyboard 段）。
+//
+// 发送前 / 发送后分别广播插件的发送事件（plugin.SendMsgInterceptor /
+// plugin.SendMsgObserver）：发送前事件可改写消息或返回 false 取消本次发送。
 func (ania *AniaBot) SendGroupMsg(groupId message.QID, chain msgchain.GroupChain) (msgId message.QID, success bool) {
-	a := ania.route(groupId)
-	if a == nil {
+	e := ania.routeEntry(groupId)
+	if e == nil {
 		return "", false
 	}
-	chain = msgchain.NewGroupChain(ania.stripUnsupportedKeyboard(a, chain.GetGroupMsg()))
-	ania.checkSegmentSupport(a, chain.GetGroupMsg())
-	return a.SendGroupMsg(groupId, chain)
+	segs := ania.stripUnsupportedKeyboard(e.adapter, chain.GetGroupMsg())
+	ev := message.OutgoingMessage{Kind: message.SendKindGroup, Target: groupId, Segments: cloneSegments(segs)}
+	if !ania.dispatchBeforeSend(e, &ev) {
+		return "", false
+	}
+	// 插件改写后可能新增了当前平台不支持的段类型，发出前再处理一次。
+	segs = ania.stripUnsupportedKeyboard(e.adapter, ev.Segments)
+	ania.checkSegmentSupport(e.adapter, segs)
+	ev.Segments = segs
+
+	msgId, success = e.adapter.SendGroupMsg(groupId, msgchain.NewGroupChain(segs))
+	ania.dispatchAfterSend(e, message.SentMessage{OutgoingMessage: ev, MessageId: msgId, Success: success})
+	return msgId, success
 }
 
 // SendFriendMsg 发送私聊消息（按用户 ID 前缀路由到对应平台适配器；
-// 平台不支持内联按钮时先剥离 keyboard 段）。
+// 平台不支持内联按钮时先剥离 keyboard 段）。发送事件的语义同 SendGroupMsg。
 func (ania *AniaBot) SendFriendMsg(userID message.QID, chain msgchain.FriendChain) (msgId message.QID, success bool) {
-	a := ania.route(userID)
-	if a == nil {
+	e := ania.routeEntry(userID)
+	if e == nil {
 		return "", false
 	}
-	chain = msgchain.NewFriendChain(ania.stripUnsupportedKeyboard(a, chain.GetFriendMsg()))
-	ania.checkSegmentSupport(a, chain.GetFriendMsg())
-	return a.SendFriendMsg(userID, chain)
+	segs := ania.stripUnsupportedKeyboard(e.adapter, chain.GetFriendMsg())
+	ev := message.OutgoingMessage{Kind: message.SendKindFriend, Target: userID, Segments: cloneSegments(segs)}
+	if !ania.dispatchBeforeSend(e, &ev) {
+		return "", false
+	}
+	segs = ania.stripUnsupportedKeyboard(e.adapter, ev.Segments)
+	ania.checkSegmentSupport(e.adapter, segs)
+	ev.Segments = segs
+
+	msgId, success = e.adapter.SendFriendMsg(userID, msgchain.NewFriendChain(segs))
+	ania.dispatchAfterSend(e, message.SentMessage{OutgoingMessage: ev, MessageId: msgId, Success: success})
+	return msgId, success
 }
 
 // SendGroupForwardMsg 实现 bot.GroupForwardSender：按群 ID 前缀路由到对应适配器；
 // 合并转发是 QQ 平台专属能力（NapCat/Luckylilia），其余适配器返回 false
 // （调用方退化为逐条发送，与 SendGroupStream 的语义一致）。
+// 发送事件的载荷使用 OutgoingMessage.Forward（合并转发内容）。
 func (ania *AniaBot) SendGroupForwardMsg(groupId message.QID, chain msgchain.GroupForwardChain) (msgId message.QID, success bool) {
-	a := ania.route(groupId)
-	if a == nil {
+	e := ania.routeEntry(groupId)
+	if e == nil {
 		return "", false
 	}
-	qq, ok := a.(adapter.QQExt)
+	qq, ok := e.adapter.(adapter.QQExt)
 	if !ok {
 		return "", false
 	}
-	return qq.SendGroupForwardMsg(groupId, chain)
+	// 取一份内容副本：发送前事件可以直接改写 ev.Forward，不影响调用方持有的链。
+	forward := chain.GetForwardMsg()
+	ev := message.OutgoingMessage{Kind: message.SendKindGroup, Target: groupId, Forward: &forward}
+	if !ania.dispatchBeforeSend(e, &ev) {
+		return "", false
+	}
+	if ev.Forward == nil {
+		return "", false // 插件清空了转发内容，按取消处理
+	}
+	msgId, success = qq.SendGroupForwardMsg(groupId, msgchain.NewGroupForwardChain(*ev.Forward))
+	ania.dispatchAfterSend(e, message.SentMessage{OutgoingMessage: ev, MessageId: msgId, Success: success})
+	return msgId, success
+}
+
+// SendFriendForwardMsg 实现 bot.FriendForwardSender：语义同 SendGroupForwardMsg，
+// 私聊合并转发同样只有 QQ 平台支持。
+func (ania *AniaBot) SendFriendForwardMsg(userID message.QID, chain msgchain.FriendForwardChain) (msgId message.QID, success bool) {
+	e := ania.routeEntry(userID)
+	if e == nil {
+		return "", false
+	}
+	qq, ok := e.adapter.(adapter.QQExt)
+	if !ok {
+		return "", false
+	}
+	forward := chain.GetForwardMsg()
+	ev := message.OutgoingMessage{Kind: message.SendKindFriend, Target: userID, Forward: &forward}
+	if !ania.dispatchBeforeSend(e, &ev) {
+		return "", false
+	}
+	if ev.Forward == nil {
+		return "", false
+	}
+	msgId, success = qq.SendFriendForwardMsg(userID, msgchain.NewFriendForwardChain(*ev.Forward))
+	ania.dispatchAfterSend(e, message.SentMessage{OutgoingMessage: ev, MessageId: msgId, Success: success})
+	return msgId, success
 }
 
 // SendGroupStream 实现 bot.StreamSender：按群 ID 前缀路由，适配器不支持时返回 false。
+//
+// 流式回复同样分发发送事件：创建时触发发送前事件（可改写 / 取消初始内容），
+// 流结束时以最终文本触发一次发送后事件（见 sendEventStreamHandle）。
 func (ania *AniaBot) SendGroupStream(groupId message.QID, chain msgchain.GroupChain) (bot.StreamHandle, bool) {
-	a := ania.route(groupId)
-	if a == nil {
+	e := ania.routeEntry(groupId)
+	if e == nil {
 		return nil, false
 	}
-	if se, ok := a.(adapter.StreamSenderExt); ok {
-		return se.SendGroupStream(groupId, chain)
+	se, ok := e.adapter.(adapter.StreamSenderExt)
+	if !ok {
+		return nil, false
 	}
-	return nil, false
+	segs := ania.stripUnsupportedKeyboard(e.adapter, chain.GetGroupMsg())
+	ev := message.OutgoingMessage{Kind: message.SendKindGroup, Target: groupId, Segments: cloneSegments(segs)}
+	if !ania.dispatchBeforeSend(e, &ev) {
+		return nil, false
+	}
+	segs = ania.stripUnsupportedKeyboard(e.adapter, ev.Segments)
+	ania.checkSegmentSupport(e.adapter, segs)
+	ev.Segments = segs
+
+	handle, ok := se.SendGroupStream(groupId, msgchain.NewGroupChain(segs))
+	if !ok || handle == nil {
+		ania.dispatchAfterSend(e, message.SentMessage{OutgoingMessage: ev, Success: false})
+		return handle, ok
+	}
+	return newSendEventStreamHandle(handle, ania, e, ev), true
 }
 
-// SendFriendStream 实现 bot.StreamSender：按用户 ID 前缀路由，适配器不支持时返回 false。
+// SendFriendStream 实现 bot.StreamSender：按用户 ID 前缀路由，语义同 SendGroupStream。
 func (ania *AniaBot) SendFriendStream(userID message.QID, chain msgchain.FriendChain) (bot.StreamHandle, bool) {
-	a := ania.route(userID)
-	if a == nil {
+	e := ania.routeEntry(userID)
+	if e == nil {
 		return nil, false
 	}
-	if se, ok := a.(adapter.StreamSenderExt); ok {
-		return se.SendFriendStream(userID, chain)
+	se, ok := e.adapter.(adapter.StreamSenderExt)
+	if !ok {
+		return nil, false
 	}
-	return nil, false
+	segs := ania.stripUnsupportedKeyboard(e.adapter, chain.GetFriendMsg())
+	ev := message.OutgoingMessage{Kind: message.SendKindFriend, Target: userID, Segments: cloneSegments(segs)}
+	if !ania.dispatchBeforeSend(e, &ev) {
+		return nil, false
+	}
+	segs = ania.stripUnsupportedKeyboard(e.adapter, ev.Segments)
+	ania.checkSegmentSupport(e.adapter, segs)
+	ev.Segments = segs
+
+	handle, ok := se.SendFriendStream(userID, msgchain.NewFriendChain(segs))
+	if !ok || handle == nil {
+		ania.dispatchAfterSend(e, message.SentMessage{OutgoingMessage: ev, Success: false})
+		return handle, ok
+	}
+	return newSendEventStreamHandle(handle, ania, e, ev), true
 }
 
 // GetMsgDetail 获取消息详情（按消息 ID 前缀路由到对应平台适配器）。

@@ -280,6 +280,7 @@ AddPlugin() → 按 Order 排序
   → StartCron(ctx, bot, c) 注册框架共享 cron
   → Awake(ctx, bot)        启动完成 1 秒后（首次向导未完成时跳过）
   → OnGroupMsg / OnFriendMsg / OnXxxNotice / OnPlatformEvent  运行期事件
+  → OnBeforeSendMsg / OnAfterSendMsg  Bot 发送消息前后（可选接口，见发送事件）
   → OnPanic(ctx, bot, name, err)  任何插件或 bot.Go 协程 panic 时
   → OnUnload(ctx, reason)  插件卸载前一次（可选接口 UnloadEvent，逆序执行）
 ```

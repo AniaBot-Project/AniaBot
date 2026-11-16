@@ -143,7 +143,7 @@
           <div v-if="!sessions.length" class="conv-empty">
             <span class="conv-empty-ico"><Icon name="Inbox" :size="22" /></span>
             还没有任何会话
-            <small>Bot 收到消息或通知后会在这里出现</small>
+            <small>Bot 收发消息或通知后会在这里出现</small>
           </div>
           <div v-else-if="!visibleSessions.length" class="conv-empty">
             <span class="conv-empty-ico"><Icon name="Search" :size="20" /></span>
@@ -211,7 +211,7 @@
             <span class="empty-ico"><Icon name="Chat" :size="30" /></span>
             <p>{{ isAll ? '暂无消息记录' : '这个会话还没有消息' }}</p>
             <small v-if="isAll">日志保存在缓存存储中（memory 驱动重启后清空，Redis 驱动可持久化，最多保留最近 5000 条）</small>
-            <small v-else>收到新消息后会自动出现在这里</small>
+            <small v-else>收发消息后会自动出现在这里</small>
           </div>
 
           <div v-else class="chat-inner">
@@ -426,15 +426,18 @@ const rows = computed(() => {
     }
     const sameSender = !!prev &&
       prev.type === log.type &&
+      !!prev.self === !!log.self &&
       prev.user_id === log.user_id &&
       prev.nickname === log.nickname &&
       time - lastTime <= 3 * 60 * 1000
+    // 发送失败的消息强制显示头像与名称行，保证「发送失败」标签始终可见
+    const showHeader = !sameSender || !!log.failed
     out.push({
       kind: 'msg',
       key: 'msg-' + (log.id || i),
       log,
-      showAvatar: !sameSender || log.type === 'notice',
-      showName: !sameSender && log.type !== 'notice',
+      showAvatar: showHeader || log.type === 'notice',
+      showName: showHeader && log.type !== 'notice',
       context: isAll.value && typeFilter.value !== 'friend' ? contextForLog(log) : '',
     })
     prev = log
@@ -453,7 +456,7 @@ const headName = computed(() => {
   return sessionName(activeSession.value)
 })
 const headSubtitle = computed(() => {
-  if (isAll.value) return '全部会话 · 实时收信流水'
+  if (isAll.value) return '全部会话 · 实时收发流水'
   const s = activeSession.value
   if (!s) return ''
   const parts = [s.kind === 'group' ? '群聊' : s.kind === 'friend' ? '私聊' : '系统通知']
@@ -486,13 +489,13 @@ const allPreview = computed(() => {
     if (s.last_type === 'notice') {
       return head + ([s.title, friendlyPreview(s.last_text, 50)].filter(Boolean).join(' · ') || '通知')
     }
-    const who = s.kind === 'group' && s.name ? s.name + '：' : ''
+    const who = s.last_self ? 'Bot：' : (s.kind === 'group' && s.name ? s.name + '：' : '')
     return head + who + friendlyPreview(s.last_text, 60)
   }
   const log = allLogs.value[0]
   if (!log) return '暂无消息'
   if (log.type === 'notice') return [log.title, friendlyPreview(log.text, 50)].filter(Boolean).join(' · ')
-  const who = log.nickname || shortId(log.user_id)
+  const who = log.self ? 'Bot' : (log.nickname || shortId(log.user_id))
   return (who ? who + '：' : '') + friendlyPreview(log.text, 60)
 })
 const lastUpdatedText = computed(() => (lastUpdated.value ? clock(lastUpdated.value) : '—'))
@@ -551,6 +554,10 @@ function sessionPreview(s) {
   else if (tag && !preview.startsWith('[')) preview = tag + ' ' + preview
   if (s.last_type === 'notice') {
     return [s.title, preview].filter(Boolean).join(' · ') || '通知'
+  }
+  // Bot 发的最新一条：加「Bot：」前缀，与群成员发言区分
+  if (s.last_self) {
+    return 'Bot：' + (preview || '（无内容）')
   }
   // 群聊预览带上最后一位发言人，未解析出群名时也能快速认出上下文
   if (s.kind === 'group' && s.name && preview && !preview.startsWith(s.name + '：')) {
@@ -613,13 +620,14 @@ function readSeen() {
   }
 }
 function isUnread(s) {
-  return (s.last_id || 0) > (seen[s.key] || 0)
+  // 只看收到的消息（last_recv_id）：Bot 自己发消息不应把会话标成未读
+  return (s.last_recv_id || 0) > (seen[s.key] || 0)
 }
 function markSeen(key) {
   const s = sessions.value.find((x) => x.key === key)
   if (!s) return
-  if ((s.last_id || 0) > (seen[key] || 0)) {
-    seen[key] = s.last_id
+  if ((s.last_recv_id || 0) > (seen[key] || 0)) {
+    seen[key] = s.last_recv_id
     try {
       localStorage.setItem(SEEN_KEY, JSON.stringify(seen))
     } catch { /* 隐私模式下忽略 */ }
@@ -643,7 +651,8 @@ function seedSeen() {
   let changed = false
   for (const s of sessions.value) {
     if (seen[s.key] === undefined) {
-      seen[s.key] = s.last_id
+      // 只把已收到的消息记为已读：Bot 自己的发送不产生未读
+      seen[s.key] = s.last_recv_id || 0
       changed = true
     }
   }
@@ -806,7 +815,7 @@ async function refreshAll() {
   if (!fresh.length || gen !== refreshGen) return
   allLogs.value = keepLatest([...fresh, ...allLogs.value])
   if (!isAll.value) return // 请求期间已切到会话视图：只更新缓存，不改动当前视图的滚动
-  await afterIncoming(fresh.length, stick)
+  await afterIncoming(countReceived(fresh), stick)
 }
 
 async function refreshSession(key) {
@@ -822,12 +831,21 @@ async function refreshSession(key) {
   // 一次来了超过一页的新消息：直接重载最新一页，避免中间出现空洞
   if (items.length >= PAGE && page.has_more) {
     await loadSession(key)
-    if (key === activeKey.value) await afterIncoming(PAGE, stick)
+    if (key === activeKey.value) await afterIncoming(items.length, stick)
     return
   }
   store.items = keepLatest([...items, ...store.items])
   if (key !== activeKey.value) return
-  await afterIncoming(items.length, stick)
+  await afterIncoming(countReceived(items), stick)
+}
+
+// countReceived 「N 条新消息」只统计收到的消息：Bot 自己发出的消息不计入。
+function countReceived(list) {
+  let n = 0
+  for (const item of list) {
+    if (!item.self) n++
+  }
+  return n
 }
 
 async function afterIncoming(count, stick) {
@@ -1003,6 +1021,7 @@ const contextMenuLabel = computed(() => {
   const log = menu.log
   if (!log) return ''
   if (log.type === 'notice') return log.title || '通知'
+  if (log.self) return log.failed ? 'Bot（发送失败）' : 'Bot'
   return log.nickname || shortId(log.user_id) || '消息'
 })
 
@@ -1088,7 +1107,7 @@ async function deleteLog(log) {
   if (!log || !log.id) return
   const who = log.type === 'notice'
     ? (log.title || '通知')
-    : (log.nickname || shortId(log.user_id) || '未知用户')
+    : (log.self ? 'Bot' : (log.nickname || shortId(log.user_id) || '未知用户'))
   const preview = friendlyPreview(log.text, 60)
   const ok = await confirmAction({
     title: '删除消息记录',

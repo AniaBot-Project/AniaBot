@@ -192,8 +192,12 @@ function buildMsgLogSessions() {
       s.last_type = log.type
       s.last_media = log.media && log.media[0] ? log.media[0].kind : ''
       s.title = log.title || ''
+      s.last_self = !!log.self
+      s.last_recv_id = 0
     }
-    if (!s.name && log.nickname) s.name = log.nickname
+    // 列表新在前：首次遇到的非 Bot 日志就是最近一条收到的消息（未读标记只看它）
+    if (!log.self && !s.last_recv_id) s.last_recv_id = log.id
+    if (!s.name && log.nickname && !log.self) s.name = log.nickname
     if (!s.title && log.title) s.title = log.title
   }
   return [...map.values()].sort((a, b) => b.last_id - a.last_id)

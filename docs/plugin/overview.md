@@ -131,6 +131,7 @@ type UnloadEvent interface {
 | 通知 | `OnGroupUpload` `OnGroupAdmin` `OnGroupDecrease` `OnGroupIncrease` `OnGroupBan` `OnFriendAdd` `OnGroupRecall` `OnFriendRecall` `OnPoke` `OnLuckyKing` `OnHonor` `OnGroupMsgEmojiLike` `OnEssence` `OnGroupCard` | 14 种通知，广播制；戳一戳/运气王/荣誉/精华/名片/禁言/上传等为 QQ 专属，非 QQ 平台不触发 |
 | 平台特定 | `OnPlatformEvent`（可选接口 `plugin.PlatformEventHandler`） | 无法映射为公共事件/通知的平台自有事件（如飞书卡片回调、机器人入群），广播制 |
 | 交互 | `OnInteraction`（可选接口 `plugin.InteractionHandler`） | 内联按钮点击回调 |
+| Bot 发送 | `OnBeforeSendMsg` / `OnAfterSendMsg`（可选接口 `plugin.SendMsgInterceptor` / `plugin.SendMsgObserver`） | Bot 发出消息（其他插件发送 / 框架内部发送）前可改写或取消，后可知晓发送结果；含合并转发与流式回复 |
 | 启动 | `Start` / `StartCron` / `Awake` | 生命周期钩子 |
 | 卸载 | `OnUnload`（可选接口 `plugin.UnloadEvent`） | 退出/重启或市场卸载前的清理钩子 |
 | 异常 | `OnPanic` | panic 通知 |

@@ -88,6 +88,11 @@ export function buildMsgLogs(now) {
     add(minutesAgo, { type: 'group', group_id: groupId, user_id: userId, nickname, text, ...(media ? { media } : {}) })
   const friend = (minutesAgo, userId, nickname, text, media) =>
     add(minutesAgo, { type: 'friend', user_id: userId, nickname, text, ...(media ? { media } : {}) })
+  // Bot 自己发出的消息（与真实日志一致：Self 标记、昵称固定为 Bot）
+  const selfGroup = (minutesAgo, groupId, text, media) =>
+    add(minutesAgo, { type: 'group', group_id: groupId, nickname: 'Bot', text, self: true, ...(media ? { media } : {}) })
+  const selfFriend = (minutesAgo, userId, text, media) =>
+    add(minutesAgo, { type: 'friend', user_id: userId, nickname: 'Bot', text, self: true, ...(media ? { media } : {}) })
 
   const G1 = 'qq:123456' // AniaBot 交流群
   const G2 = 'qq:7891011' // 摸鱼打字机
@@ -100,10 +105,12 @@ export function buildMsgLogs(now) {
   group(140, G1, 'qq:10001', '星野', '问下大佬，插件热更新是怎么实现的呀')
   group(138, G1, 'qq:10000', '管理员',
     '<reply>\n  [nickname:星野 id:qq:10001]: 问下大佬，插件热更新是怎么实现的呀\n</reply>\n插件市场那边是重新编译 + 重启，安装完就生效')
+  selfGroup(137, G1, '插件市场安装完成后会自动重新编译并重启，看到「安装成功」就可以用了')
   group(136, G1, 'qq:10001', '星野', '懂了，谢谢～')
   group(128, G1, 'qq:10005', '深夜程序员', '[at:id:qq:10000] 帮我看下这个报错：MCP 的 SSE 端点一直 401')
   group(125, G1, 'qq:10000', '管理员',
     '<reply>\n  [nickname:深夜程序员 id:qq:10005]: [at:id:qq:10000] 帮我看下这个报错：MCP 的 SSE 端点一直 401\n</reply>\n先检查 mcp_json 里的 headers 有没有过期，401 一般是 token 失效')
+  selfGroup(124, G1, '先检查 mcp_json 里的 headers 是否过期，401 一般是 token 失效；改完记得 /reboot 让配置生效')
   group(123, G1, 'qq:10005', '深夜程序员', '确实是 token 过期了，改了 [QQ表情:捂脸]')
   group(110, G1, 'qq:10006', '咕咕鸟', '我也踩过，还以为是被墙了')
   group(96, G1, 'qq:10001', '星野', '[图片]', [{
@@ -121,8 +128,8 @@ export function buildMsgLogs(now) {
   })
   group(58, G1, 'qq:10001', '星野',
     '<reply>\n  [nickname:阿白 id:qq:10002]: 收到，正好下周要重装\n</reply>\n同求 +1')
-  group(44, G1, 'qq:10000', '管理员',
-    '\n<合并转发消息>\n  [nickname:管理员 id:qq:10000]: 周末活动安排：周六晚 8 点组队开黑，语音频道见\n  [nickname:星野 id:qq:10001]: 收到，带我一个\n  [nickname:咕咕鸟 id:qq:10006]: +1\n</合并转发消息>\n')
+  selfGroup(44, G1,
+    '\n<合并转发消息>\n  [nickname:AniaBot id:qq:99999]: 周末活动安排：周六晚 8 点组队开黑，语音频道见\n  [nickname:星野 id:qq:10001]: 收到，带我一个\n  [nickname:咕咕鸟 id:qq:10006]: +1\n</合并转发消息>\n')
   // 嵌套合并转发（转发节点自己又是一条转发）：文本格式与 FriendlyText 一致，
   // 内层块整体多缩进两个空格；引用它的消息同样把整段内容缩进一层。转发内部的
   // 图片以 in_forward 媒体记录，面板会按 [图片] 占位顺序填回对应节点。
@@ -138,7 +145,7 @@ export function buildMsgLogs(now) {
     + '\n    [nickname:林然 id:qq:10003]: 孩子们'
     + '\n  </合并转发消息>'
     + '\n</合并转发消息>'
-  group(43, G1, 'qq:10000', '管理员', '\n' + nestedForward + '\n', [
+  selfGroup(43, G1, '\n' + nestedForward + '\n', [
     { kind: 'image', name: '联机房间.png', url: PHOTO_SEA, in_forward: true },
     { kind: 'image', name: '套娃.png', url: PHOTO_MENU, in_forward: true },
   ])
@@ -157,6 +164,11 @@ export function buildMsgLogs(now) {
   group(1, G1, 'qq:10000', '管理员',
     '[文件:周末活动安排.xlsx fileId:fid-demo-2 url:]',
     [{ kind: 'file', name: '周末活动安排.xlsx', size: 20312, file_id: 'fid-demo-2' }])
+  // 发送失败示例：平台未确认成功，面板在气泡上标注「发送失败」
+  add(0.5, {
+    type: 'group', group_id: G1, nickname: 'Bot',
+    text: '（演示）这条消息因为风控被平台拒绝，发送失败', self: true, failed: true,
+  })
 
   /* ------- 群 2：摸鱼打字机 ------- */
   group(118, G2, 'qq:10007', 'Neko', '这周有人打羽毛球吗')
@@ -175,10 +187,12 @@ export function buildMsgLogs(now) {
   group(92, G3, 'qq:10003', '林然', '这个新特性我还没用过')
   group(68, G3, 'qq:10008', '夜航西飞',
     '<reply>\n  [nickname:林然 id:qq:10003]: 这个新特性我还没用过\n</reply>\n类型推断那块值得试试，写起来省不少样板代码')
+  selfGroup(67, G3, '类型推断那块值得试试，能省不少样板代码；需要的话我可以整理一份示例')
 
   /* ------- 私聊：同事-K / 夜航西飞 ------- */
   friend(135, 'qq:10004', '同事-K', '下班一起去吃饭？')
   friend(133, 'qq:10004', '同事-K', '楼下新开了家面馆')
+  selfFriend(132, 'qq:10004', '好呀，六点半楼下等你')
   friend(60, 'qq:10004', '同事-K', '[图片]', [{ kind: 'image', name: '菜单.png', url: PHOTO_MENU }])
   friend(35, 'qq:10004', '同事-K', '那个服务器日志我发你邮箱了')
   add(18, {
@@ -187,6 +201,7 @@ export function buildMsgLogs(now) {
   })
   friend(90, 'qq:10008', '夜航西飞', '周末去爬山吗')
   friend(84, 'qq:10008', '夜航西飞', '路线我发你，全程大概四小时')
+  selfFriend(83, 'qq:10008', '好呀，周六早上八点山脚集合？')
 
   // 先按时间排序再分配 ID：真实日志的 ID 就是到达顺序，会话摘要按 ID 排序
   raw.sort((a, b) => b.minutesAgo - a.minutesAgo)

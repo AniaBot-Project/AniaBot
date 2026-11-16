@@ -503,3 +503,41 @@ func TestDeletePersistsAcrossRestart(t *testing.T) {
 		t.Fatalf("重启后 Get(3) = %+v, %v", e, ok)
 	}
 }
+
+// TestSessionsWithSelfMessages Bot 自己发出的消息单独标记：会话摘要保留最近真人
+// 发言人昵称、LastSelf 标记最新一条是发送、LastRecvID 只记录收到的消息（未读
+// 标记不会因 Bot 发言而出现红点）。
+func TestSessionsWithSelfMessages(t *testing.T) {
+	r := msglog.New(newStore(), 0)
+	r.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", UserId: "qq:10", Nickname: "小明", Text: "在吗"})
+	r.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", Nickname: "Bot", Text: "在的", Self: true})
+	r.Add(msglog.Entry{Type: msglog.TypeFriend, UserId: "qq:20", Nickname: "Bot", Text: "主动私聊", Self: true})
+
+	sessions := r.Sessions()
+	if len(sessions) != 2 {
+		t.Fatalf("会话数 = %d, want 2: %+v", len(sessions), sessions)
+	}
+	var group, friend msglog.Session
+	for _, s := range sessions {
+		if s.Key == "g:qq:1" {
+			group = s
+		} else if s.Key == "f:qq:20" {
+			friend = s
+		}
+	}
+	if !group.LastSelf || group.LastRecvID != 1 || group.Name != "小明" || group.LastText != "在的" {
+		t.Fatalf("群会话摘要错误: %+v", group)
+	}
+	// 只有 Bot 发送的私聊会话：没有收到过消息，LastRecvID 应为 0
+	if !friend.LastSelf || friend.LastRecvID != 0 || friend.Name != "" {
+		t.Fatalf("纯发送会话摘要错误: %+v", friend)
+	}
+
+	// 追加一条收到的消息后，LastSelf 复位、LastRecvID 指向该条
+	r.Add(msglog.Entry{Type: msglog.TypeGroup, GroupId: "qq:1", UserId: "qq:11", Nickname: "小红", Text: "收到"})
+	for _, s := range r.Sessions() {
+		if s.Key == "g:qq:1" && (s.LastSelf || s.LastRecvID != 4 || s.Name != "小红") {
+			t.Fatalf("收到消息后摘要未复位: %+v", s)
+		}
+	}
+}

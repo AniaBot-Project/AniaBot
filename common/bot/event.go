@@ -76,6 +76,14 @@ type GroupForwardSender interface {
 	SendGroupForwardMsg(groupId message.QID, chain msgchain.GroupForwardChain) (msgId message.QID, success bool)
 }
 
+// FriendForwardSender 私聊合并转发能力，可选接口（与 bot.GroupForwardSender 同模式）。
+// core 实现后，平台外观（如 QQ 的 qqBot）把 bot.QQ.SendFriendForwardMsg 转发给
+// core，使后台路径与事件回调路径都能经过统一的发送事件分发。
+type FriendForwardSender interface {
+	// SendFriendForwardMsg 发送私聊合并转发消息
+	SendFriendForwardMsg(userId message.QID, chain msgchain.FriendForwardChain) (msgId message.QID, success bool)
+}
+
 // MsgEditor 消息编辑能力，可选接口（与 bot.QQ 同模式）。
 // 平台支持「先发后改」（如 Telegram editMessageText、Discord 消息编辑、
 // 飞书卡片 Patch）时，事件回调收到的 bot.Bot 可断言为 bot.MsgEditor，

@@ -34,12 +34,15 @@ type LogPlugin struct {
 	mentions mentionNamer
 }
 
+// 编译期断言：消息日志插件通过发送后事件记录 Bot 发出的消息。
+var _ plugin.SendMsgObserver = (*LogPlugin)(nil)
+
 func NewPlugin() *LogPlugin {
 	p := &LogPlugin{}
 	p.Name = "日志打印插件"
 	p.HelpWords = "用于在控制台打印日志信息"
 	p.Author = "jeanhua"
-	p.Version = "1.0.0"
+	p.Version = "1.1.0"
 	p.AdminOnly = true
 	p.Order = plugin.LevelLog
 	p.ShowFor = plugininfo.ShowForNone
@@ -213,6 +216,79 @@ func (p *LogPlugin) OnFriendMsg(ctx context.Context, b bot.Bot, cmd command.Comm
 		MessageId: msg.MessageId.String(),
 	})
 	return true, nil
+}
+
+// selfNickname Bot 自己发出的消息在日志 / 面板里的显示名。
+const selfNickname = "Bot"
+
+// OnAfterSendMsg 实现 plugin.SendMsgObserver：记录 Bot（其他插件或框架自身）
+// 通过 bot.Bot 发出的消息，面板「消息日志」里以右对齐气泡展示发送内容。
+//
+// 合并转发按节点还原成带昵称的文本（与收到的转发同格式）；流式回复在结束时
+// 触发本事件，内容为最终文本。平台返回失败时仍记录，并标记 Failed 供面板提示。
+func (p *LogPlugin) OnAfterSendMsg(ctx context.Context, b bot.Bot, ev message.SentMessage) error {
+	segs := outgoingSegments(ev)
+	text := message.Message{Message: segs}.FriendlyText(false, message.WithNoSenderPrefix())
+	media := extractMedia(segs)
+	if strings.TrimSpace(text) == "" && len(media) == 0 {
+		return nil // 空内容（如流式消息没有任何文本）不产生日志
+	}
+
+	isGroup := ev.Kind == message.SendKindGroup
+	if isGroup && strings.Contains(text, "[at:id:") {
+		// Bot 发消息 @ 了群成员：顺手预热昵称缓存，面板回看时显示昵称而非 QQ 号
+		p.warmMentionNames(ev.Target)
+	}
+
+	if isGroup {
+		if ev.Success {
+			p.Logger.Info("[发->群]: "+text, "groupId", ev.Target, "messageId", ev.MessageId)
+		} else {
+			p.Logger.Warn("[发->群]: "+text+"（发送失败）", "groupId", ev.Target)
+		}
+	} else {
+		if ev.Success {
+			p.Logger.Info("[发->好友]: "+text, "userId", ev.Target, "messageId", ev.MessageId)
+		} else {
+			p.Logger.Warn("[发->好友]: "+text+"（发送失败）", "userId", ev.Target)
+		}
+	}
+
+	e := msglog.Entry{
+		GroupId:   "",
+		Nickname:  selfNickname,
+		Text:      text,
+		Media:     media,
+		MessageId: ev.MessageId.String(),
+		Self:      true,
+		Failed:    !ev.Success,
+	}
+	if isGroup {
+		e.Type = msglog.TypeGroup
+		e.GroupId = ev.Target.String()
+	} else {
+		e.Type = msglog.TypeFriend
+		e.UserId = ev.Target.String()
+	}
+	p.add(e)
+	return nil
+}
+
+// outgoingSegments 把发送后事件还原成可复用 FriendlyText / 媒体提取的消息段：
+// 合并转发包装成内联 content 的 forward 段（与 NapCat 下发的格式一致），
+// 普通消息直接使用最终消息段。
+func outgoingSegments(ev message.SentMessage) []message.OB11Segment {
+	if ev.Forward != nil {
+		msgs := ev.Forward.ToMessages()
+		if len(msgs) == 0 {
+			return nil
+		}
+		return []message.OB11Segment{{
+			Type: message.SegmentForward,
+			Data: map[string]any{"content": msgs},
+		}}
+	}
+	return ev.Segments
 }
 
 // resolvePrivateFileURLs 私聊文件消息通常只带 file_id：向平台换一个临时下载

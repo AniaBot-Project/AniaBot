@@ -10,10 +10,17 @@
     </div>
   </div>
 
-  <div v-else class="msg-row" :class="{ 'is-continued': !showAvatar }" @contextmenu="onContextMenu">
-    <div v-if="showAvatar" class="msg-avatar" :style="avatarStyle" :title="displayName">
+  <div v-else class="msg-row" :class="{ 'is-continued': !showAvatar, 'is-self': isSelf }" @contextmenu="onContextMenu">
+    <div
+      v-if="showAvatar"
+      class="msg-avatar"
+      :class="{ 'is-self-avatar': isSelf }"
+      :style="isSelf ? undefined : avatarStyle"
+      :title="displayName"
+    >
+      <Icon v-if="isSelf" name="Send" :size="18" />
       <img
-        v-if="avatarSrc && !avatarBroken"
+        v-else-if="avatarSrc && !avatarBroken"
         class="msg-avatar-img"
         :src="avatarSrc"
         alt=""
@@ -27,7 +34,9 @@
 
     <div class="msg-main">
       <div v-if="showName" class="msg-head">
-        <span class="msg-name" :title="userId ? '用户 ID：' + userId : displayName">{{ displayName }}</span>
+        <span class="msg-name" :class="{ 'is-self-name': isSelf }" :title="userId ? '用户 ID：' + userId : displayName">{{ displayName }}</span>
+        <span v-if="isSelf" class="msg-tag">发送</span>
+        <span v-if="log.failed" class="msg-failed">发送失败</span>
         <span v-if="context && context !== displayName" class="msg-context">{{ context }}</span>
         <span class="msg-stamp">{{ clock }}</span>
       </div>
@@ -158,6 +167,9 @@ function onContextMenu(e) {
 }
 
 const isNotice = computed(() => props.log.type === 'notice')
+// Bot 自己发出的消息（后端 Entry.Self）：右对齐展示，头像用发送图标，
+// 避免与会话里收到的消息混在一起看不出是谁说的。
+const isSelf = computed(() => !!props.log.self)
 const clock = computed(() => fmtClock(props.log.time))
 const preview = computed(() => friendlyPreview(props.log.text, 140))
 
@@ -179,6 +191,7 @@ const imageLayout = computed(() => {
 })
 
 const displayName = computed(() => {
+  if (isSelf.value) return 'Bot'
   if (props.log.nickname) return props.log.nickname
   if (props.log.user_id) return '用户 ' + shortId(props.log.user_id)
   return '未知用户'
@@ -460,6 +473,16 @@ function fileBadge(name) {
 .msg-row.is-continued {
   margin-top: 4px;
 }
+/* Bot 自己发出的消息：整体右对齐，气泡换到右侧朝向 */
+.msg-row.is-self {
+  flex-direction: row-reverse;
+}
+.msg-row.is-self .msg-main {
+  align-items: flex-end;
+}
+.msg-row.is-self .msg-head {
+  justify-content: flex-end;
+}
 .msg-avatar,
 .msg-avatar-gap {
   width: 38px;
@@ -489,6 +512,14 @@ function fileBadge(name) {
   object-fit: cover;
   border-radius: inherit;
 }
+/* Bot 头像：主题色描边的发送图标，与真人头像区分 */
+.msg-avatar.is-self-avatar {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+  border: 2px solid var(--accent);
+  box-shadow: 0 2px 0 0 rgb(17 168 155 / 0.22), inset 0 1px 0 rgb(255 255 255 / 0.7);
+  text-shadow: none;
+}
 .msg-avatar-gap {
   width: 38px;
   height: 38px;
@@ -515,6 +546,32 @@ function fileBadge(name) {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 180px;
+}
+.msg-name.is-self-name {
+  color: var(--accent-strong);
+}
+/* 「发送」小标签：Bot 发出的消息与收到的消息一眼区分 */
+.msg-tag {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+  font-size: 9.5px;
+  line-height: 15px;
+  font-weight: 700;
+}
+.msg-failed {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px dashed #e5b23a;
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+  font-size: 9.5px;
+  line-height: 15px;
+  font-weight: 700;
 }
 .msg-context {
   max-width: 160px;
@@ -551,6 +608,13 @@ function fileBadge(name) {
   font-size: 13.5px;
   line-height: 1.68;
   overflow-wrap: anywhere;
+}
+/* Bot 发出的消息：右侧气泡 + 主题色浅底 */
+.msg-row.is-self .msg-bubble {
+  border-radius: 17px 6px 17px 17px;
+  background: var(--accent-tint);
+  border-color: #b9ece5;
+  box-shadow: 0 2px 0 0 rgb(17 168 155 / 0.16);
 }
 .msg-bubble.has-media {
   padding-bottom: 11px;
