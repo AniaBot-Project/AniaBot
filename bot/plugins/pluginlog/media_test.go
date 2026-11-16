@@ -2,6 +2,7 @@ package pluginlog
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/jeanhua/AniaBot/bot/component/msglog"
@@ -205,6 +206,135 @@ func TestForwardMediaOrderMatchesText(t *testing.T) {
 	}
 }
 
+// TestExtractMediaForwardByID 收消息事件里的转发段通常只带 id（NapCat /
+// Luckylilia 都是如此）：节点里的图片要按 id 拉到内容后才能收集，顺序必须与
+// FriendlyText 写出的 [图片] 占位一致。
+func TestExtractMediaForwardByID(t *testing.T) {
+	content := []message.Message{
+		{Sender: message.MessageSender{Nickname: "小明"}, Message: []message.OB11Segment{
+			{Type: message.SegmentText, Data: map[string]any{"text": "齐齐哈尔"}},
+			{Type: message.SegmentImage, Data: map[string]any{"url": "https://cdn.example.com/1.png"}},
+			{Type: message.SegmentImage, Data: map[string]any{
+				"url": "https://cdn.example.com/2.png", "file_id": "fid-2",
+			}},
+		}},
+	}
+	msg := message.Message{Message: []message.OB11Segment{
+		{Type: message.SegmentForward, Data: map[string]any{"id": "qq:fwd"}},
+	}}
+	// 文本渲染按 id 展开（与收消息路径一致），占位数量应与收集到的图片一致
+	text := msg.FriendlyText(false,
+		message.WithGetForwardMsgFunc(func(id message.QID) (*[]message.Message, bool) {
+			return &content, id == "qq:fwd"
+		}),
+		message.WithNoSenderPrefix(),
+	)
+	if !strings.Contains(text, "齐齐哈尔") || strings.Count(text, "[图片]") != 2 {
+		t.Fatalf("转发文本渲染错误: %q", text)
+	}
+
+	media := extractMediaWithFetch(msg.Message, func(id message.QID) ([]message.Message, bool) {
+		if id != "qq:fwd" {
+			t.Fatalf("按错误的转发 id 拉取: %q", id)
+		}
+		return content, true
+	})
+	if len(media) != 2 {
+		t.Fatalf("转发内图片数量 = %d, want 2: %+v", len(media), media)
+	}
+	for i, want := range []string{"https://cdn.example.com/1.png", "https://cdn.example.com/2.png"} {
+		if media[i].Kind != msglog.MediaImage || media[i].URL != want || !media[i].InForward {
+			t.Fatalf("第 %d 张转发内图片 = %+v, want %s 且 InForward", i, media[i], want)
+		}
+	}
+	if media[1].FileId != "fid-2" {
+		t.Fatalf("转发内图片应保留文件 ID 供续期: %+v", media[1])
+	}
+}
+
+// TestExtractMediaForwardInlinePrefersContent 有内联内容时不再按 id 拉取：
+// 发送路径的转发载荷自带内容，再请求一次既浪费又可能与文本渲染时的内容不一致。
+func TestExtractMediaForwardInlinePrefersContent(t *testing.T) {
+	segs := []message.OB11Segment{{Type: message.SegmentForward, Data: map[string]any{
+		"id": "qq:fwd",
+		"content": []message.Message{{Message: []message.OB11Segment{
+			{Type: message.SegmentImage, Data: map[string]any{"url": "https://cdn.example.com/inline.png"}},
+		}}},
+	}}}
+	media := extractMediaWithFetch(segs, func(message.QID) ([]message.Message, bool) {
+		t.Fatal("有内联内容时不应再按 id 拉取")
+		return nil, false
+	})
+	if len(media) != 1 || !media[0].InForward || media[0].URL != "https://cdn.example.com/inline.png" {
+		t.Fatalf("内联内容解析错误: %+v", media)
+	}
+}
+
+// TestExtractMediaForwardUnavailable 拉不到转发内容（非 QQ 平台、转发被删除或
+// 权限不足）时不产生媒体，节点里的「图片」保留为文字占位。
+func TestExtractMediaForwardUnavailable(t *testing.T) {
+	segs := []message.OB11Segment{{Type: message.SegmentForward, Data: map[string]any{"id": "qq:fwd"}}}
+	if media := extractMedia(segs); len(media) != 0 {
+		t.Fatalf("没有内联内容且无拉取能力时不应有媒体: %+v", media)
+	}
+	if media := extractMediaWithFetch(segs, func(message.QID) ([]message.Message, bool) {
+		return nil, false
+	}); len(media) != 0 {
+		t.Fatalf("拉取失败时不应有媒体: %+v", media)
+	}
+}
+
+// fakeForwardSource 合并转发展开的测试桩，记录按 id 拉取的次数。
+type fakeForwardSource struct {
+	msgs  map[string][]message.Message
+	calls []message.QID
+}
+
+func (f *fakeForwardSource) GetForwardMsg(msgId message.QID) (*[]message.Message, bool) {
+	f.calls = append(f.calls, msgId)
+	msgs, ok := f.msgs[msgId.String()]
+	if !ok {
+		return nil, false
+	}
+	return &msgs, true
+}
+
+// TestForwardContentCacheReusesFetch 收消息路径上文本展开与媒体提取共用同一次
+// 按 id 拉取：一条只带 id 的转发只请求协议端一次，图片顺序与文本占位一致。
+func TestForwardContentCacheReusesFetch(t *testing.T) {
+	src := &fakeForwardSource{msgs: map[string][]message.Message{
+		"qq:fwd": {{Message: []message.OB11Segment{
+			{Type: message.SegmentImage, Data: map[string]any{"url": "https://cdn.example.com/a.png"}},
+			{Type: message.SegmentImage, Data: map[string]any{"url": "https://cdn.example.com/b.png"}},
+		}}},
+	}}
+	msg := message.Message{Message: []message.OB11Segment{
+		{Type: message.SegmentForward, Data: map[string]any{"id": "qq:fwd"}},
+	}}
+	cache := newForwardContentCache(src)
+	text := msg.FriendlyText(false, message.WithGetForwardMsgFunc(cache.get), message.WithNoSenderPrefix())
+	media := extractMediaWithFetch(msg.Message, cache.fetch)
+
+	if len(src.calls) != 1 || src.calls[0] != "qq:fwd" {
+		t.Fatalf("同一条转发应只拉取一次, calls=%v", src.calls)
+	}
+	if got := strings.Count(text, "[图片]"); got != 2 || len(media) != 2 {
+		t.Fatalf("文本占位 %d / 媒体 %d，应都是 2\ntext=%q", got, len(media), text)
+	}
+	for i, want := range []string{"https://cdn.example.com/a.png", "https://cdn.example.com/b.png"} {
+		if media[i].URL != want || !media[i].InForward {
+			t.Fatalf("第 %d 张图片顺序错误: %+v", i, media[i])
+		}
+	}
+
+	// 没有 QQ 能力时 cache 为 nil：fetch 只返回空，不 panic
+	var nilCache *forwardContentCache
+	if _, ok := nilCache.fetch("qq:fwd"); ok {
+		t.Fatal("nil 缓存不应返回内容")
+	}
+}
+
+// TestIsHTTPURL 只接受能直接交给浏览器 / 代理访问的 http(s) 地址。
 func TestIsHTTPURL(t *testing.T) {
 	for _, s := range []string{"https://a.com/x.png", "http://a.com/x"} {
 		if !isHTTPURL(s) {

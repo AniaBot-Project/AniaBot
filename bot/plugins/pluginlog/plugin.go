@@ -168,15 +168,9 @@ func senderName(msg message.Message) string {
 }
 
 func (p *LogPlugin) OnGroupMsg(ctx context.Context, b bot.Bot, cmd command.Command, msg message.Message) (bool, error) {
-	// 合并转发展开属 QQ 平台能力：仅事件来源为 QQ 时挂载，其余平台回退占位符
-	opts := []message.MsgOptFunc{
-		message.WithGetMsgFunc(b.GetMsgDetail),
-		message.WithNoSenderPrefix(),
-	}
-	if qb, ok := b.(bot.QQ); ok {
-		opts = append(opts, message.WithGetForwardMsgFunc(qb.GetForwardMsg))
-	}
-	text := msg.FriendlyText(false, opts...)
+	// 合并转发展开属 QQ 平台能力：仅事件来源为 QQ 时挂载，其余平台回退占位符；
+	// 文本与图片共用同一次按 id 拉取的结果（转发段通常只带 id）
+	text, media := msgLogTextAndMedia(b, msg)
 	// 消息里 @ 了别人：顺手预热本群成员昵称缓存（后台查询，不阻塞收消息），
 	// 面板打开「消息日志」时就能直接显示昵称而不是 QQ 号。
 	if strings.Contains(text, "[at:id:") {
@@ -189,23 +183,15 @@ func (p *LogPlugin) OnGroupMsg(ctx context.Context, b bot.Bot, cmd command.Comma
 		UserId:    msg.Sender.UserId.String(),
 		Nickname:  senderName(msg),
 		Text:      text,
-		Media:     extractMedia(msg.Message),
+		Media:     media,
 		MessageId: msg.MessageId.String(),
 	})
 	return true, nil
 }
 
 func (p *LogPlugin) OnFriendMsg(ctx context.Context, b bot.Bot, cmd command.Command, msg message.Message) (bool, error) {
-	opts := []message.MsgOptFunc{
-		message.WithGetMsgFunc(b.GetMsgDetail),
-		message.WithNoSenderPrefix(),
-	}
-	if qb, ok := b.(bot.QQ); ok {
-		opts = append(opts, message.WithGetForwardMsgFunc(qb.GetForwardMsg))
-	}
-	text := msg.FriendlyText(false, opts...)
+	text, media := msgLogTextAndMedia(b, msg)
 	p.Logger.Info("[收<-好友]: "+text, "userId", msg.Sender.UserId)
-	media := extractMedia(msg.Message)
 	resolvePrivateFileURLs(b, msg.Sender.UserId, media)
 	p.add(msglog.Entry{
 		Type:      msglog.TypeFriend,
@@ -220,6 +206,63 @@ func (p *LogPlugin) OnFriendMsg(ctx context.Context, b bot.Bot, cmd command.Comm
 
 // selfNickname Bot 自己发出的消息在日志 / 面板里的显示名。
 const selfNickname = "Bot"
+
+// forwardMsgSource 合并转发展开的最小能力（QQ 平台外观实现 bot.QQ 即满足）。
+type forwardMsgSource interface {
+	GetForwardMsg(msgId message.QID) (*[]message.Message, bool)
+}
+
+// forwardContentCache 收消息展开合并转发时按 id 拉到的内容：事件里的 forward 段
+// 通常只带 id，媒体提取也要从同一份内容里取图，缓存下来既能省掉重复请求，也保证
+// 图片顺序与文本里的 [图片] 占位完全对应（两次拉取的内容若不同会张冠李戴）。
+type forwardContentCache struct {
+	src  forwardMsgSource
+	msgs map[message.QID][]message.Message
+}
+
+func newForwardContentCache(src forwardMsgSource) *forwardContentCache {
+	return &forwardContentCache{src: src, msgs: make(map[message.QID][]message.Message)}
+}
+
+// get 是 FriendlyText 的合并转发展开函数：拉到内容后记进缓存。
+func (c *forwardContentCache) get(id message.QID) (*[]message.Message, bool) {
+	msgs, ok := c.src.GetForwardMsg(id)
+	if !ok || msgs == nil {
+		// 返回 nil 内容时必须同时返回 false：FriendlyText 会解引用拿到的内容
+		return nil, false
+	}
+	if _, exists := c.msgs[id]; !exists {
+		c.msgs[id] = *msgs
+	}
+	return msgs, true
+}
+
+// fetch 供媒体提取使用：只读缓存，不再请求协议端（文本渲染时已按 id 拉过）。
+// 因此只带 id 的内层转发不会额外产生一次失败的请求。
+func (c *forwardContentCache) fetch(id message.QID) ([]message.Message, bool) {
+	if c == nil {
+		return nil, false
+	}
+	msgs, ok := c.msgs[id]
+	return msgs, ok
+}
+
+// msgLogTextAndMedia 生成一条消息的日志文本与媒体列表。合并转发展开按 id 拉取时
+// 顺带缓存内容，媒体提取复用同一份内容：事件里的转发段只有 id 时，日志文本能
+// 展开，节点里的图片也能照常显示（面板按 [图片] 占位顺序填回缩略图）。
+func msgLogTextAndMedia(b bot.Bot, msg message.Message) (string, []msglog.Media) {
+	opts := []message.MsgOptFunc{
+		message.WithGetMsgFunc(b.GetMsgDetail),
+		message.WithNoSenderPrefix(),
+	}
+	var cache *forwardContentCache
+	if src, ok := b.(forwardMsgSource); ok {
+		cache = newForwardContentCache(src)
+		opts = append(opts, message.WithGetForwardMsgFunc(cache.get))
+	}
+	text := msg.FriendlyText(false, opts...)
+	return text, extractMediaWithFetch(msg.Message, cache.fetch)
+}
 
 // OnAfterSendMsg 实现 plugin.SendMsgObserver：记录 Bot（其他插件或框架自身）
 // 通过 bot.Bot 发出的消息，面板「消息日志」里以右对齐气泡展示发送内容。

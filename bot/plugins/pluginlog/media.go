@@ -18,14 +18,27 @@ const maxMediaPerMessage = 12
 // 挤占顶层图片 / 文件的额度（两批媒体各自有序，面板分别消费）。
 const maxForwardMediaPerMessage = 12
 
+// forwardFetchFunc 按消息 ID 拉取合并转发内容（QQ 平台能力）。收消息事件里的
+// forward 段通常只带 id、没有内联内容，节点里的图片必须靠它拿到；非 QQ 平台与
+// 发送路径（事件载荷自带内联内容）传 nil 即可。
+type forwardFetchFunc func(msgId message.QID) ([]message.Message, bool)
+
 // extractMedia 从消息段中提取图片 / 文件 / 语音 / 视频，供面板在聊天气泡内联
 // 展示图片、提供文件下载。只保留 http(s) 地址：data:/base64: 内联负载体积
 // 可达 MB 级，塞进每条日志会让缓存存储迅速膨胀（详见 msglog.Media 注释）。
 //
+// 只认转发段内联携带的 content：发送路径的载荷本身就带内容，不需要再向平台
+// 请求；收消息路径用 extractMediaWithFetch 按 id 展开。
+func extractMedia(segs []message.OB11Segment) []msglog.Media {
+	return extractMediaWithFetch(segs, nil)
+}
+
+// extractMediaWithFetch 同 extractMedia，额外支持按 id 展开只带 id 的合并转发段。
+//
 // 合并转发记录内部（含多层嵌套）的图片另取一批追加在后面并标记 InForward：
 // 面板按出现顺序把它们填回对应转发节点里的 [图片] 占位，让聊天记录里的图片
 // 也能直接看到。内部的文件 / 语音 / 视频不取，节点里保留文字占位。
-func extractMedia(segs []message.OB11Segment) []msglog.Media {
+func extractMediaWithFetch(segs []message.OB11Segment, fetch forwardFetchFunc) []msglog.Media {
 	var out []msglog.Media
 	for _, seg := range segs {
 		if len(out) >= maxMediaPerMessage {
@@ -57,7 +70,7 @@ func extractMedia(segs []message.OB11Segment) []msglog.Media {
 		}
 	}
 	left := maxForwardMediaPerMessage
-	appendForwardImages(&out, segs, &left)
+	appendForwardImages(&out, segs, &left, fetch)
 	return out
 }
 
@@ -65,7 +78,10 @@ func extractMedia(segs []message.OB11Segment) []msglog.Media {
 // （含多层嵌套）的图片，与 FriendlyText 写出 [图片] 占位的顺序一致，面板
 // 据此逐个匹配。只收图片（含以 file 段发来的图片），其他类型在转发节点里
 // 保留文字占位；整条日志最多 left 张，每张都标记 InForward。
-func appendForwardImages(out *[]msglog.Media, segs []message.OB11Segment, left *int) {
+//
+// fetch 用于展开只带 id 的转发段（收消息事件里就是这样）：调用方传入的通常
+// 是「文本渲染时按 id 拉过的内容」的只读缓存，因此不会重复请求协议端。
+func appendForwardImages(out *[]msglog.Media, segs []message.OB11Segment, left *int, fetch forwardFetchFunc) {
 	for _, seg := range segs {
 		if *left <= 0 {
 			return
@@ -73,14 +89,14 @@ func appendForwardImages(out *[]msglog.Media, segs []message.OB11Segment, left *
 		if seg.Type != message.SegmentForward {
 			continue
 		}
-		collectForwardMedia(out, seg, left)
+		collectForwardMedia(out, seg, left, fetch)
 	}
 }
 
-// collectForwardMedia 收集一条转发记录内联内容里的图片：逐条消息、逐个段按
-// 文档顺序处理，转发段继续递归（内层 id 无处可查，只认内联 content）。
-func collectForwardMedia(out *[]msglog.Media, seg message.OB11Segment, left *int) {
-	content, ok := message.ParseForwardContent(seg)
+// collectForwardMedia 收集一条转发记录里的图片：逐条消息、逐个段按文档顺序
+// 处理，转发段继续递归（内层 id 无处可查，通常只认内联 content）。
+func collectForwardMedia(out *[]msglog.Media, seg message.OB11Segment, left *int, fetch forwardFetchFunc) {
+	content, ok := forwardContentOf(seg, fetch)
 	if !ok {
 		return
 	}
@@ -100,10 +116,26 @@ func collectForwardMedia(out *[]msglog.Media, seg message.OB11Segment, left *int
 					*left--
 				}
 			case message.SegmentForward:
-				collectForwardMedia(out, inner, left)
+				collectForwardMedia(out, inner, left, fetch)
 			}
 		}
 	}
+}
+
+// forwardContentOf 取转发段的内容：优先内联 content，没有时再按 id 拉取
+// （收消息事件里的 forward 段通常只带 id，NapCat / Luckylilia 都是如此）。
+func forwardContentOf(seg message.OB11Segment, fetch forwardFetchFunc) ([]message.Message, bool) {
+	if content, ok := message.ParseForwardContent(seg); ok {
+		return content, true
+	}
+	if fetch == nil {
+		return nil, false
+	}
+	var fwd message.ForwardMessage
+	if !message.ParseForward(seg, &fwd) {
+		return nil, false
+	}
+	return fetch(fwd.Id)
 }
 
 // imageMediaOf 把一个「图片」段解析成媒体：image 段直接取，file 段里能判定为

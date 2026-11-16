@@ -21,6 +21,8 @@ type fakeMediaBot struct {
 	lastGroupID  string
 	lastUserID   string
 	msg          *message.Message
+	forwardMsgs  *[]message.Message
+	forwardCalls int
 }
 
 func (f *fakeMediaBot) RefreshMediaURL(kind, fileId, groupId, userId string) (string, bool) {
@@ -34,6 +36,14 @@ func (f *fakeMediaBot) GetMsgDetail(msgId message.QID) (*message.Message, bool) 
 		return nil, false
 	}
 	return f.msg, true
+}
+
+func (f *fakeMediaBot) GetForwardMsg(msgId message.QID) (*[]message.Message, bool) {
+	f.forwardCalls++
+	if f.forwardMsgs == nil {
+		return nil, false
+	}
+	return f.forwardMsgs, true
 }
 
 // newMediaTestPlugin 构造带记录器与 bot 的插件实例：写入一条含图片 / 文件的群消息日志。
@@ -128,6 +138,44 @@ func TestMsgLogMediaURLSameURLFallsThrough(t *testing.T) {
 	got, ok := p.MsgLogMediaURL(id, 0)
 	if !ok || got != "https://cdn.example.com/fresh.png?rkey=fresh" {
 		t.Fatalf("同地址时应回退到消息回捞, got %q, %v", got, ok)
+	}
+}
+
+// TestMsgLogMediaURLForwardImage 合并转发里的图片在回捞到的消息里只剩转发 id：
+// 续期要先按 id 展开转发内容，才能按记录日志时的顺序定位到同一张图片。
+func TestMsgLogMediaURLForwardImage(t *testing.T) {
+	fwd := []message.Message{{Message: []message.OB11Segment{
+		{Type: message.SegmentImage, Data: map[string]any{"url": "https://cdn.example.com/fwd-fresh.png?rkey=fresh"}},
+	}}}
+	fb := &fakeMediaBot{
+		forwardMsgs: &fwd,
+		msg: &message.Message{Message: []message.OB11Segment{
+			{Type: message.SegmentImage, Data: map[string]any{"url": "https://cdn.example.com/top-fresh.png?rkey=fresh"}},
+			{Type: message.SegmentForward, Data: map[string]any{"id": "qq:fwd"}},
+		}},
+	}
+	p := NewPlugin()
+	p.Logger = slog.Default()
+	p.recorder = msglog.New(core.NewAniaMemoryStorage(slog.Default()), 0)
+	p.bot = fb
+	// 顶层图片 + 转发内图片：下标 1 对应转发节点里的那张
+	p.recorder.Add(msglog.Entry{
+		Type:      msglog.TypeGroup,
+		GroupId:   "qq:123",
+		UserId:    "qq:456",
+		MessageId: "qq:789",
+		Media: []msglog.Media{
+			{Kind: msglog.MediaImage, URL: "https://cdn.example.com/top-old.png?rkey=old"},
+			{Kind: msglog.MediaImage, URL: "https://cdn.example.com/fwd-old.png?rkey=old", InForward: true},
+		},
+	})
+
+	got, ok := p.MsgLogMediaURL(1, 1)
+	if !ok || got != "https://cdn.example.com/fwd-fresh.png?rkey=fresh" {
+		t.Fatalf("转发内图片续期失败: %q, %v", got, ok)
+	}
+	if fb.forwardCalls != 1 {
+		t.Fatalf("应按转发 id 展开一次, calls=%d", fb.forwardCalls)
 	}
 }
 

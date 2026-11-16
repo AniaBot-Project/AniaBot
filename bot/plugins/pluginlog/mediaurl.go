@@ -64,15 +64,34 @@ func (p *LogPlugin) MsgLogMediaURL(entryID uint64, index int) (string, bool) {
 
 	// 2) 退化为重新拉取原消息：适配器把消息重新编码时会带上新签发的地址
 	//    （NapCat 文档明确 get_msg 可刷新过期 URL），按文件 ID 匹配同一条媒体。
+	//    合并转发里的图片在消息里只剩转发 id，需要再展开一次转发内容，才能按
+	//    与记录日志时相同的顺序还原媒体列表（否则下标对不上、换不到地址）。
 	if entry.MessageId != "" {
 		if msg, ok := b.GetMsgDetail(message.QID(entry.MessageId)); ok && msg != nil {
-			if u := matchMediaURL(extractMedia(msg.Message), entry.Media, index); u != "" {
+			if u := matchMediaURL(extractMediaWithFetch(msg.Message, forwardFetcher(b)), entry.Media, index); u != "" {
 				p.cacheMediaURL(entryID, index, u)
 				return u, true
 			}
 		}
 	}
 	return "", false
+}
+
+// forwardFetcher 返回按 id 展开合并转发的函数（平台不支持合并转发时为 nil）。
+// 续期路径没有文本渲染阶段的缓存可复用，只能直接向平台请求；拿不到内容的内层
+// 转发按占位保留，与记录日志时的行为一致。
+func forwardFetcher(b bot.Bot) forwardFetchFunc {
+	src, ok := b.(forwardMsgSource)
+	if !ok {
+		return nil
+	}
+	return func(id message.QID) ([]message.Message, bool) {
+		msgs, ok := src.GetForwardMsg(id)
+		if !ok || msgs == nil {
+			return nil, false
+		}
+		return *msgs, true
+	}
 }
 
 // mediaBot 返回媒体续期用的 bot 外观：Awake 注入的 core 级外观按 ID 前缀
