@@ -4,7 +4,12 @@
       <div v-if="saved" class="bg-[#34c759]/10 border border-[#34c759]/40 text-[#248a3d] text-sm rounded-xl px-4 py-3" v-html="savedHint" />
     </Transition>
 
-    <div class="flex flex-wrap items-start justify-between gap-2">
+    <!-- 首次加载：先显示加载中，避免配置尚未返回时显示空表单 /「暂无」 -->
+    <Card v-if="loading">
+      <LoadingState text="正在加载扩展配置…" :rows="2" />
+    </Card>
+
+    <div v-else class="flex flex-wrap items-start justify-between gap-2">
       <Tabs
         :model-value="current"
         :items="tabItems"
@@ -189,6 +194,7 @@ import { confirmAction } from '../ui/confirm'
 import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue'
 import { Button, Card, Input, Modal, Select, Tabs } from 'animal-island-vue'
 import { api } from '../api.js'
+import LoadingState from '../components/LoadingState.vue'
 
 const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow'
 const labelClass = 'block text-xs font-medium text-slate-600 mb-1.5'
@@ -253,6 +259,8 @@ const saved = ref(false)
 const saving = ref(false)
 const rawMode = ref(false)
 const rawText = ref('')
+// 首次加载期间为 true：此时表单为空不代表没有配置
+const loading = ref(true)
 
 // 图形化表单模型
 const mcpServers = ref([])
@@ -514,21 +522,27 @@ async function persistPrompt() {
 
 async function load() {
   error.value = ''
-  const data = await api.getFile(current.value)
-  rawText.value = data.content || ''
-  if (!hasForm.value) return // hooks/commands 为纯源码模式，无需解析表单
   try {
-    if (current.value === 'mcp') {
-      mcpServers.value = parseMcp(rawText.value)
-    } else {
-      const { groups, friends } = parsePrompt(rawText.value)
-      promptGroups.value = groups
-      promptFriends.value = friends
+    const data = await api.getFile(current.value)
+    rawText.value = data.content || ''
+    if (!hasForm.value) return // hooks/commands 为纯源码模式，无需解析表单
+    try {
+      if (current.value === 'mcp') {
+        mcpServers.value = parseMcp(rawText.value)
+      } else {
+        const { groups, friends } = parsePrompt(rawText.value)
+        promptGroups.value = groups
+        promptFriends.value = friends
+      }
+    } catch {
+      // 已有内容不是合法 JSON，回退到源码模式让用户修复
+      rawMode.value = true
+      error.value = '现有内容不是合法 JSON，已切换到源码模式'
     }
-  } catch {
-    // 已有内容不是合法 JSON，回退到源码模式让用户修复
-    rawMode.value = true
-    error.value = '现有内容不是合法 JSON，已切换到源码模式'
+  } catch (e) {
+    error.value = e?.message || '加载失败'
+  } finally {
+    loading.value = false
   }
 }
 

@@ -28,7 +28,15 @@
       <ul ref="listEl" class="h-[60vh] overflow-y-auto px-4 py-3 font-mono text-[11px] leading-relaxed" @scroll="onScroll">
         <li v-if="loadingMore" class="py-1 text-zinc-600 text-center list-none">加载更早的日志…</li>
         <li v-else-if="!hasMore && logs.length" class="py-1 text-zinc-700 text-center list-none">没有更早的日志了</li>
-        <li v-if="filtered.length === 0" class="py-12 text-zinc-500 text-center list-none">
+        <!-- 首次加载：先显示加载中，避免请求返回前误判为没有日志 -->
+        <li v-if="loading && !logs.length" class="py-2 list-none">
+          <LoadingState variant="dark" text="正在加载控制台日志…" :rows="2" />
+        </li>
+        <li v-else-if="loadError && !logs.length" class="py-12 text-zinc-500 text-center list-none">
+          日志加载失败：{{ loadError }}
+          <button type="button" class="ml-2 underline underline-offset-2 hover:text-zinc-300" @click="load">重试</button>
+        </li>
+        <li v-else-if="filtered.length === 0" class="py-12 text-zinc-500 text-center list-none">
           暂无日志（日志保存在内存中，重启后清空，最多保留最近 2000 条）
         </li>
         <li v-for="log in filtered" :key="log.id" class="flex gap-2 py-px">
@@ -61,6 +69,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { Button, Switch } from 'animal-island-vue'
 import { api } from '../api.js'
+import LoadingState from '../components/LoadingState.vue'
 
 const levelTabs = [
   { value: 'all', label: '全部' },
@@ -95,6 +104,9 @@ const filter = ref('all')
 const autoRefresh = ref(true)
 const listEl = ref(null)
 const hasNew = ref(false)
+// 首次加载期间为 true：空列表不代表没有日志
+const loading = ref(true)
+const loadError = ref('')
 const hasMore = ref(false) // 是否还有更早的日志可加载
 const loadingMore = ref(false)
 let timer = null
@@ -133,7 +145,15 @@ async function load() {
   const stick = nearBottom()
   const prevLatest = logs.value[0]?.id
   let page
-  try { page = await api.getConsoleLogs({ limit: PAGE }) } catch { return }
+  try {
+    page = await api.getConsoleLogs({ limit: PAGE })
+    loadError.value = ''
+  } catch (e) {
+    loadError.value = e?.message || '请求失败'
+    return
+  } finally {
+    loading.value = false
+  }
   const items = page.items || []
   if (!logs.value.length) {
     logs.value = items

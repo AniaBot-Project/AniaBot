@@ -4,7 +4,12 @@
       <p class="text-sm">{{ error }}</p>
     </Card>
 
-    <Card v-if="!sources.length && loaded" class="text-center">
+    <!-- 首次加载：先显示加载中，避免误判为没有可用的通讯录 -->
+    <Card v-if="!loaded" class="text-center">
+      <LoadingState text="正在加载通讯录…" :rows="2" />
+    </Card>
+
+    <Card v-else-if="!sources.length" class="text-center">
       <div class="text-sm text-slate-500">当前没有已启用的适配器支持通讯录</div>
       <p class="mt-1 text-xs text-slate-400">Telegram、QQ 官方等平台没有联系人枚举接口，故不提供群/好友列表</p>
     </Card>
@@ -36,7 +41,8 @@
               row-key="group_id"
               :pagination="false"
               :scroll="{ x: '100%' }"
-              empty-text="该平台暂无群聊"
+              :loading="listLoading"
+              :empty-text="listLoading ? '正在加载群列表…' : '该平台暂无群聊'"
             >
               <template #cell-group_id="{ value }">
                 <span class="font-mono text-xs">{{ value }}</span>
@@ -58,7 +64,8 @@
               row-key="user_id"
               :pagination="false"
               :scroll="{ x: '100%' }"
-              empty-text="该平台无好友列表（平台不支持枚举私聊对端）"
+              :loading="listLoading"
+              :empty-text="listLoading ? '正在加载好友列表…' : '该平台无好友列表（平台不支持枚举私聊对端）'"
             >
               <template #cell-user_id="{ value }">
                 <span class="font-mono text-xs">{{ value }}</span>
@@ -81,6 +88,7 @@
 import { onMounted, ref } from 'vue'
 import { Button, Card, Table, Tabs } from 'animal-island-vue'
 import { api } from '../api.js'
+import LoadingState from '../components/LoadingState.vue'
 
 const PLATFORM_LABELS = {
   qq: 'QQ',
@@ -113,6 +121,8 @@ const groups = ref([])
 const friends = ref([])
 const error = ref('')
 const loaded = ref(false)
+// 切换平台 / 页签后的列表请求未返回时为 true
+const listLoading = ref(false)
 
 function platformLabel(platform) {
   return PLATFORM_LABELS[platform] || platform
@@ -126,6 +136,7 @@ function memberText(g) {
 async function load() {
   if (!adapter.value) return
   error.value = ''
+  listLoading.value = true
   try {
     if (current.value === 'groups') {
       groups.value = await api.getContacts(adapter.value, 'groups')
@@ -134,6 +145,8 @@ async function load() {
     }
   } catch (e) {
     error.value = e.message
+  } finally {
+    listLoading.value = false
   }
 }
 

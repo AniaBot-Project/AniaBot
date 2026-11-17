@@ -6,7 +6,22 @@
         <span class="tlabel text-zinc-800">Overview · 总览</span>
         <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">历史留存 + 今日</span>
       </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <!-- 首次加载：先显示骨架屏，避免概览数字短暂显示为 0 -->
+      <div v-if="overviewLoading" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <Card v-for="n in 4" :key="n" class="flex flex-col">
+          <div class="flex items-center justify-between">
+            <Skeleton loading variant="text" width="42%" />
+            <Skeleton loading variant="text" width="24%" />
+          </div>
+          <div class="flex-1 py-4">
+            <Skeleton loading variant="text" width="68%" :height-value="34" />
+          </div>
+          <div class="border-t border-dotted border-zinc-300 pt-2.5">
+            <Skeleton loading variant="text" width="100%" />
+          </div>
+        </Card>
+      </div>
+      <div v-else class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <!-- TOTAL -->
         <Card class="flex flex-col">
           <div class="flex items-center justify-between">
@@ -252,7 +267,10 @@
             <h2 class="tlabel text-zinc-800">Top Targets</h2>
             <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">Top {{ topTargets.length }} by Tokens</span>
           </div>
+          <!-- 首次加载且还没有数据时先显示加载中，避免误判为「暂无消耗记录」 -->
+          <LoadingState v-if="detailLoading && !topTargets.length" text="正在加载 Token 统计…" :rows="2" compact />
           <Table
+            v-else
             :columns="targetColumns"
             :data-source="topTargets"
             :row-key="r => r.chat_type + ':' + r.target_id"
@@ -297,10 +315,11 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Button, Card, DatePicker, Divider, Progress, Table, Tag, Tooltip } from 'animal-island-vue'
+import { Button, Card, DatePicker, Divider, Progress, Skeleton, Table, Tag, Tooltip } from 'animal-island-vue'
 import TokenChart from '../ui/TokenChart.vue'
 import { fmtInt, fmtPct } from '../utils/format.js'
 import { api } from '../api.js'
+import LoadingState from '../components/LoadingState.vue'
 
 // 时间维度筛选选项（与后端 resolveTokenRange 对应）
 const RANGE_OPTIONS = [
@@ -335,6 +354,9 @@ const HOURLY_SERIES = [{ key: 'total', label: 'Tokens', tone: 'primary' }]
 
 const overview = ref({})
 const detail = ref({})
+// 首次加载状态：接口返回前概览 / 排行先显示骨架屏，而不是 0 与「暂无消耗记录」
+const overviewLoading = ref(true)
+const detailLoading = ref(true)
 const range = ref('all')
 const customStart = ref('')
 const customEnd = ref('')
@@ -373,7 +395,7 @@ const oSummary = computed(() => overview.value.summary || {})
 const oToday = computed(() => overview.value.today || {})
 
 async function loadOverview() {
-  try { overview.value = await api.getTokenStatsDetail({ range: 'all' }) } catch { /* 忽略轮询错误 */ }
+  try { overview.value = await api.getTokenStatsDetail({ range: 'all' }) } catch { /* 忽略轮询错误 */ } finally { overviewLoading.value = false }
 }
 
 // ---- 细节（按筛选窗口） ----
@@ -390,11 +412,14 @@ const singleDay = computed(() => daily.value.length === 1)
 async function loadDetail() {
   const params = { range: range.value }
   if (range.value === 'custom') {
-    if (!appliedCustom.value) return
+    if (!appliedCustom.value) {
+      detailLoading.value = false
+      return
+    }
     params.start = appliedCustom.value.start
     params.end = appliedCustom.value.end
   }
-  try { detail.value = await api.getTokenStatsDetail(params) } catch { /* 忽略轮询错误 */ }
+  try { detail.value = await api.getTokenStatsDetail(params) } catch { /* 忽略轮询错误 */ } finally { detailLoading.value = false }
 }
 
 function applyCustom() {

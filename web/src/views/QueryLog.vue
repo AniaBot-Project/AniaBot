@@ -88,7 +88,19 @@
 
     <!-- 日志列表（新在上，滚动到底部自动加载更早的记录） -->
     <section class="space-y-3">
-      <Card v-if="logs.length === 0" style="padding: 0">
+      <!-- 首次加载 / 切换筛选：先显示加载中，避免请求返回前误判为没有数据 -->
+      <Card v-if="loading && !logs.length" style="padding: 0">
+        <LoadingState text="正在加载 Query 日志…" :rows="3" />
+      </Card>
+
+      <Card v-else-if="loadError && !logs.length" style="padding: 0">
+        <div class="py-12 text-sm text-slate-400 text-center">
+          加载失败：{{ loadError }}
+          <Button class="ml-2" type="text" size="small" @click="load">重试</Button>
+        </div>
+      </Card>
+
+      <Card v-else-if="logs.length === 0" style="padding: 0">
         <div class="py-12 text-sm text-slate-400 text-center">
           暂无符合条件的 Query 记录（@ 机器人、私聊或面板试聊触发 AI 回复、或主动互动发言后在此展示）
         </div>
@@ -262,6 +274,7 @@ import { confirmAction } from '../ui/confirm'
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { Button, Card, Input, Modal, Notification, Switch, Tag, Tooltip } from 'animal-island-vue'
 import { api } from '../api.js'
+import LoadingState from '../components/LoadingState.vue'
 
 const typeTabs = [
   { value: '', label: '全部' },
@@ -291,6 +304,9 @@ const logs = ref([]) // 新在前
 const autoRefresh = ref(true)
 const exporting = ref(false)
 const clearing = ref(false)
+// 首次加载 / 切换筛选后的请求未返回时为 true：此时列表为空不代表没有数据
+const loading = ref(true)
+const loadError = ref('')
 // 工具结果超过该字符数时折叠展示，点击可展开（后端记录完整内容）
 const FOLD_CHARS = 1000
 const expandedResults = reactive(new Set())
@@ -310,6 +326,8 @@ const sentinel = ref(null)
 let timer = null
 let tickTimer = null
 let observer = null
+// 请求代次：切换筛选后，旧请求的响应不再改动列表与加载状态
+let loadToken = 0
 
 const hasFilter = computed(() => Object.values(applied).some((v) => v !== ''))
 
@@ -330,6 +348,10 @@ function resetList() {
   logs.value = []
   hasMore.value = false
   loadedOlder.value = false
+  // 条件已变化：重新拉取期间显示加载中，而不是「暂无记录」
+  loadToken += 1
+  loading.value = true
+  loadError.value = ''
 }
 
 // 按当前筛选条件导出 Query 日志（后端返回 JSON 附件，含完整工具结果）
@@ -467,8 +489,18 @@ function statusColor(s) {
 // 刷新：拉取最新一页，新条目插入头部、已有条目原地更新（执行中 → 完成），
 // 已加载的更早分页保留
 async function load() {
+  const token = ++loadToken
   let page
-  try { page = await api.getQueryLogs({ ...applied, limit: PAGE }) } catch { return }
+  try {
+    page = await api.getQueryLogs({ ...applied, limit: PAGE })
+    if (token !== loadToken) return
+    loadError.value = ''
+  } catch (e) {
+    if (token === loadToken) loadError.value = e?.message || '请求失败'
+    return
+  } finally {
+    if (token === loadToken) loading.value = false
+  }
   mergeHead(page.items || [])
   if (!loadedOlder.value) hasMore.value = page.has_more
 }

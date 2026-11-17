@@ -9,7 +9,11 @@
           <Button type="primary" size="small" @click="openCreate">新建任务</Button>
         </div>
       </div>
-      <p v-if="clocks.length === 0" class="px-6 py-8 text-xs text-zinc-400 text-center tracking-wide">暂无定时任务，点击右上角「新建任务」创建（也可在群聊/私聊中使用 /clock）</p>
+      <!-- 首次加载：先显示加载中，避免请求返回前误判为没有任务 -->
+      <div v-if="clocksLoading && !clocks.length" class="px-6 py-6">
+        <LoadingState text="正在加载定时任务…" :rows="2" compact />
+      </div>
+      <p v-else-if="clocks.length === 0" class="px-6 py-8 text-xs text-zinc-400 text-center tracking-wide">暂无定时任务，点击右上角「新建任务」创建（也可在群聊/私聊中使用 /clock）</p>
       <template v-else>
         <Table
           :columns="clockColumns"
@@ -155,7 +159,19 @@
 
     <!-- 日志列表（新在上，滚动到底部自动加载更早的记录） -->
     <section class="space-y-3">
-      <Card v-if="logs.length === 0" style="padding: 0">
+      <!-- 首次加载 / 切换筛选：先显示加载中，避免请求返回前误判为没有数据 -->
+      <Card v-if="loading && !logs.length" style="padding: 0">
+        <LoadingState text="正在加载执行记录…" :rows="3" />
+      </Card>
+
+      <Card v-else-if="loadError && !logs.length" style="padding: 0">
+        <div class="py-12 text-sm text-slate-400 text-center">
+          加载失败：{{ loadError }}
+          <Button class="ml-2" type="text" size="small" @click="load">重试</Button>
+        </div>
+      </Card>
+
+      <Card v-else-if="logs.length === 0" style="padding: 0">
         <div class="py-12 text-sm text-slate-400 text-center">暂无符合条件的执行记录（定时任务触发后在此展示）</div>
       </Card>
 
@@ -375,6 +391,7 @@ import {
   Tag,
 } from 'animal-island-vue'
 import { api } from '../api.js'
+import LoadingState from '../components/LoadingState.vue'
 
 const typeTabs = [
   { value: '', label: '全部' },
@@ -420,9 +437,11 @@ const expanded = ref(new Set())
 const clockForm = ref(null) // 非 null 时显示弹窗；id 为空表示新建
 const clockFormError = ref('')
 const clockSaving = ref(false)
+// 首次加载任务列表期间为 true：空列表不代表没有任务
+const clocksLoading = ref(true)
 
 async function loadClocks() {
-  try { clocks.value = await api.getClocks() } catch { /* 忽略 */ }
+  try { clocks.value = await api.getClocks() } catch { /* 忽略 */ } finally { clocksLoading.value = false }
 }
 
 function toggleExpand(id) {
@@ -566,6 +585,9 @@ const logs = ref([]) // 新在前
 const autoRefresh = ref(true)
 const exporting = ref(false)
 const clearing = ref(false)
+// 首次加载 / 切换筛选后的请求未返回时为 true：此时列表为空不代表没有数据
+const loading = ref(true)
+const loadError = ref('')
 // detail 为当前弹窗展示的日志（null 表示弹窗关闭）
 const detail = ref(null)
 const hasMore = ref(false) // 是否还有更早的日志可加载
@@ -574,6 +596,8 @@ const loadedOlder = ref(false) // 是否已加载过更早分页（是则刷新�
 const sentinel = ref(null)
 let timer = null
 let observer = null
+// 请求代次：切换筛选后，旧请求的响应不再改动列表与加载状态
+let loadToken = 0
 
 const hasFilter = computed(() => Object.values(applied).some((v) => v !== ''))
 
@@ -594,6 +618,10 @@ function resetList() {
   logs.value = []
   hasMore.value = false
   loadedOlder.value = false
+  // 条件已变化：重新拉取期间显示加载中，而不是「暂无记录」
+  loadToken += 1
+  loading.value = true
+  loadError.value = ''
 }
 
 // 按当前筛选条件导出执行日志（后端返回 JSON 附件）
@@ -714,8 +742,18 @@ function statusColor(s) {
 // 刷新：拉取最新一页，新条目插入头部、已有条目原地更新（执行中 → 完成），
 // 已加载的更早分页保留
 async function load() {
+  const token = ++loadToken
   let page
-  try { page = await api.getTaskLogs({ ...applied, limit: PAGE }) } catch { return }
+  try {
+    page = await api.getTaskLogs({ ...applied, limit: PAGE })
+    if (token !== loadToken) return
+    loadError.value = ''
+  } catch (e) {
+    if (token === loadToken) loadError.value = e?.message || '请求失败'
+    return
+  } finally {
+    if (token === loadToken) loading.value = false
+  }
   mergeHead(page.items || [])
   if (!loadedOlder.value) hasMore.value = page.has_more
 }

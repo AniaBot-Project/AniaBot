@@ -202,9 +202,17 @@
 
       <div class="chat-body">
         <div ref="listEl" class="chat-scroll" @scroll.passive="onScroll">
-          <div v-if="loading" class="chat-empty">
+          <!-- 首次加载 / 切换会话：请求未返回前显示加载中，避免误判为没有消息 -->
+          <div v-if="viewLoading" class="chat-empty">
             <span class="empty-spinner" />
             <p>正在加载消息…</p>
+          </div>
+
+          <div v-else-if="viewError" class="chat-empty">
+            <span class="empty-ico"><Icon name="Chat" :size="30" /></span>
+            <p>消息加载失败</p>
+            <small>{{ viewError }}</small>
+            <Button type="text" size="small" @click="retryActive">重试</Button>
           </div>
 
           <div v-else-if="!rows.length" class="chat-empty">
@@ -339,7 +347,7 @@
 
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { Icon, Input, Notification, Switch } from 'animal-island-vue'
+import { Icon, Input, Notification, Switch, Button } from 'animal-island-vue'
 import { api, msgMediaUrl } from '../api.js'
 import { confirmAction } from '../ui/confirm'
 import { avatarGradient, avatarInitials, sessionAvatarKey, sessionAvatarUrl } from '../utils/avatar.js'
@@ -370,6 +378,7 @@ const search = ref('')
 const autoRefresh = ref(true)
 const loading = ref(true)
 const loadingMore = ref(false)
+const allError = ref('') // 「全部消息」首次加载失败原因
 const hasMoreAll = ref(false)
 const pendingNew = ref(0)
 const lastUpdated = ref(0)
@@ -451,6 +460,26 @@ const hasMoreActive = computed(() => {
   return !!sessionStore[activeKey.value]?.hasMore
 })
 
+// 当前会话的本地缓存（全部消息视图为 null）
+const activeStore = computed(() => (isAll.value ? null : sessionStore[activeKey.value] || null))
+
+// 视图级加载中：首屏 / 切到尚未加载过的会话时，列表为空不代表没有消息
+const viewLoading = computed(() => {
+  if (loading.value) return true
+  if (isAll.value) return false
+  const store = activeStore.value
+  if (!store) return true
+  if (store.loaded) return false
+  return !store.error
+})
+
+// 仅在没有任何可展示数据时提示加载失败，刷新失败不应清空已看到的消息
+const viewError = computed(() => {
+  if (isAll.value) return allLogs.value.length ? '' : allError.value
+  if (rows.value.length) return ''
+  return activeStore.value?.error || ''
+})
+
 const headName = computed(() => {
   if (isAll.value) return '全部消息'
   return sessionName(activeSession.value)
@@ -493,7 +522,7 @@ const allPreview = computed(() => {
     return head + who + friendlyPreview(s.last_text, 60)
   }
   const log = allLogs.value[0]
-  if (!log) return '暂无消息'
+  if (!log) return loading.value ? '加载中…' : '暂无消息'
   if (log.type === 'notice') return [log.title, friendlyPreview(log.text, 50)].filter(Boolean).join(' · ')
   const who = log.self ? 'Bot' : (log.nickname || shortId(log.user_id))
   return (who ? who + '：' : '') + friendlyPreview(log.text, 60)
@@ -696,6 +725,7 @@ async function loadAll({ initial = false } = {}) {
   const gen = refreshGen
   try {
     const page = await api.getMsgLogs({ limit: PAGE })
+    allError.value = ''
     if (gen !== refreshGen) return // 期间删过消息：旧响应会把已删的条目写回来
     const items = page.items || []
     if (initial || !allLogs.value.length) {
@@ -706,7 +736,10 @@ async function loadAll({ initial = false } = {}) {
     const latest = allLogs.value[0]?.id || 0
     const fresh = items.filter((x) => x.id > latest)
     if (fresh.length) allLogs.value = keepLatest([...fresh, ...allLogs.value])
-  } catch { /* 保持上一次数据 */ } finally {
+  } catch (e) {
+    // 保持上一次数据；列表为空时由 viewError 展示失败原因
+    allError.value = e?.message || '请求失败'
+  } finally {
     lastUpdated.value = Date.now()
   }
 }
@@ -718,14 +751,15 @@ function keepLatest(list, n = MAX_KEEP) {
 
 function ensureStore(key) {
   if (!sessionStore[key]) {
-    sessionStore[key] = { items: [], hasMore: true, loaded: false, loading: false }
+    sessionStore[key] = { items: [], hasMore: true, loaded: false, loading: false, error: '' }
   }
   return sessionStore[key]
 }
 
-async function loadSession(key) {
+async function loadSession(key, { clearError = false } = {}) {
   const store = ensureStore(key)
   if (store.loading) return
+  if (clearError) store.error = ''
   const gen = refreshGen
   store.loading = true
   try {
@@ -734,8 +768,12 @@ async function loadSession(key) {
     store.items = keepLatest(page.items || [])
     store.hasMore = !!page.has_more
     store.loaded = true
+    store.error = ''
     lastUpdated.value = Date.now()
-  } catch { /* 保留旧数据 */ } finally {
+  } catch (e) {
+    // 保留旧数据；从未加载成功时由 viewError 展示失败原因
+    store.error = e?.message || '请求失败'
+  } finally {
     store.loading = false
   }
 }
@@ -956,7 +994,14 @@ async function selectSession(key) {
   mobileChat.value = true
   persistActive()
   if (key === 'all') {
-    await loadAll({ initial: !allLogs.value.length })
+    const first = !allLogs.value.length
+    // 首次拉取「全部消息」时先显示加载中，避免空列表被当成没有消息
+    if (first) loading.value = true
+    try {
+      await loadAll({ initial: first })
+    } finally {
+      loading.value = false
+    }
   } else {
     const store = ensureStore(key)
     if (!store.loaded) await loadSession(key)
@@ -965,6 +1010,24 @@ async function selectSession(key) {
   }  await nextTick()
   scrollToBottom()
   maybeFill()
+}
+
+// 加载失败后重试当前视图
+async function retryActive() {
+  if (isAll.value) {
+    const first = !allLogs.value.length
+    loading.value = true
+    try {
+      await loadAll({ initial: first })
+    } finally {
+      loading.value = false
+    }
+    await nextTick()
+    scrollToBottom()
+    maybeFill()
+    return
+  }
+  await loadSession(activeKey.value, { clearError: true })
 }
 
 // 首屏 / 消息较少时内容撑不满滚动区，自动补一页更早的消息（最多 3 页）。

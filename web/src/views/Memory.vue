@@ -32,7 +32,11 @@
           </div>
         </div>
         <ul class="divide-y divide-slate-100 max-h-[32rem] overflow-y-auto">
-          <li v-if="filteredScopes.length === 0" class="py-10 text-xs text-slate-400 text-center list-none px-4">
+          <!-- 首次加载：先显示加载中，避免请求返回前误判为没有记忆 -->
+          <li v-if="loading && !scopes.length" class="list-none">
+            <LoadingState text="正在加载记忆列表…" :rows="2" compact />
+          </li>
+          <li v-else-if="filteredScopes.length === 0" class="py-10 text-xs text-slate-400 text-center list-none px-4">
             暂无记忆。AI 在对话中会自行记录，也可点击右上角手动新增
           </li>
           <li
@@ -58,11 +62,17 @@
             <span class="text-sm font-semibold text-slate-800">{{ displayName(current) }}</span>
             <span class="ml-2 text-[11px] font-mono text-slate-400">{{ current.scope }}</span>
           </div>
-          <span class="text-xs text-slate-400 shrink-0">{{ entries.length }} 条记忆</span>
+          <span class="text-xs text-slate-400 shrink-0">{{ entriesLoading ? '加载中…' : entries.length + ' 条记忆' }}</span>
         </div>
         <ul class="divide-y divide-slate-100">
-          <li v-if="!current" class="py-12 text-sm text-slate-400 text-center list-none">
+          <li v-if="!current && loading" class="list-none">
+            <LoadingState text="正在加载记忆…" :rows="2" compact />
+          </li>
+          <li v-else-if="!current" class="py-12 text-sm text-slate-400 text-center list-none">
             从左侧选择一个会话查看其记忆
+          </li>
+          <li v-else-if="entriesLoading" class="list-none">
+            <LoadingState text="正在加载记忆…" :rows="2" compact />
           </li>
           <li v-else-if="entries.length === 0" class="py-12 text-sm text-slate-400 text-center list-none">
             该会话暂无记忆
@@ -127,6 +137,7 @@ import { confirmAction } from '../ui/confirm'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Button, Card, Input, Modal, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
+import LoadingState from '../components/LoadingState.vue'
 
 const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow'
 
@@ -139,6 +150,9 @@ const kindTabs = [
 const scopes = ref([])
 const entries = ref([])
 const current = ref(null)
+// 首次加载 / 切换会话时显示加载中，而不是「暂无记忆」
+const loading = ref(true)
+const entriesLoading = ref(false)
 const kindFilter = ref('all')
 const names = ref({})
 const msg = ref('')
@@ -187,6 +201,8 @@ async function load() {
   } catch (e) {
     msgOk.value = false
     msg.value = e.message
+  } finally {
+    loading.value = false
   }
 }
 
@@ -197,11 +213,17 @@ async function selectScope(s) {
 
 async function loadEntries() {
   if (!current.value) return
+  const scope = current.value.scope
+  entriesLoading.value = true
+  // 切换会话时先清空旧条目，避免把上一个会话的记忆显示在新会话下
+  entries.value = []
   try {
-    entries.value = (await api.getMemories(current.value.scope)) || []
+    entries.value = (await api.getMemories(scope)) || []
   } catch (e) {
     msgOk.value = false
     msg.value = e.message
+  } finally {
+    entriesLoading.value = false
   }
 }
 

@@ -33,7 +33,11 @@
     <!-- Skill 列表 -->
     <Card style="padding: 0" class="overflow-hidden">
       <ul class="divide-y divide-slate-100">
-        <li v-if="skills.length === 0" class="py-12 text-sm text-slate-400 text-center list-none">
+        <!-- 首次加载：先显示加载中，避免请求返回前误判为没有 skill -->
+        <li v-if="loading && !skills.length" class="list-none">
+          <LoadingState text="正在加载 Skill 列表…" :rows="2" />
+        </li>
+        <li v-else-if="skills.length === 0" class="py-12 text-sm text-slate-400 text-center list-none">
           暂无已加载的 skill，点击右上角上传 zip 压缩包（需包含 SKILL.md）
         </li>
         <li v-for="s in skills" :key="s.name" class="px-5 py-4 flex items-start gap-4 transition-opacity" :class="s.disabled ? 'opacity-60' : ''">
@@ -151,10 +155,13 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { Button, Card, Modal, Tag, Tooltip } from 'animal-island-vue'
 import { api } from '../api.js'
+import LoadingState from '../components/LoadingState.vue'
 
 const skills = ref([])
 const dir = ref('')
 const whitelist = ref([])
+// 首次加载期间为 true：空列表不代表没有 skill
+const loading = ref(true)
 const fileInput = ref(null)
 const uploading = ref(false)
 const msg = ref('')
@@ -211,6 +218,8 @@ async function load() {
   } catch (e) {
     msgOk.value = false
     msg.value = e.message
+  } finally {
+    loading.value = false
   }
 }
 

@@ -52,7 +52,13 @@
 
     <!-- 日志列表（新在上，滚动到底部自动加载更早的记录） -->
     <Card style="padding: 0" class="overflow-hidden">
-      <div v-if="logs.length === 0" class="py-12 text-sm text-slate-400 text-center">
+      <!-- 首次加载 / 切换筛选：先显示加载中，避免请求返回前误判为没有数据 -->
+      <LoadingState v-if="loading && !logs.length" text="正在加载操作日志…" :rows="3" />
+      <div v-else-if="loadError && !logs.length" class="py-12 text-sm text-slate-400 text-center">
+        加载失败：{{ loadError }}
+        <Button class="ml-2" type="text" size="small" @click="load">重试</Button>
+      </div>
+      <div v-else-if="logs.length === 0" class="py-12 text-sm text-slate-400 text-center">
         暂无符合条件的操作日志（登录、配置修改、内容管理、AI 工具操作等在此展示）
       </div>
       <ul v-else class="divide-y divide-zinc-100">
@@ -80,6 +86,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { Button, Card, Input, Switch, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
+import LoadingState from '../components/LoadingState.vue'
 
 const categoryTabs = [
   { value: '', label: '全部' },
@@ -110,12 +117,17 @@ const PAGE = 50 // 每页条数
 
 const logs = ref([]) // 新在前
 const autoRefresh = ref(true)
+// 首次加载 / 切换筛选后的请求未返回时为 true：此时列表为空不代表没有数据
+const loading = ref(true)
+const loadError = ref('')
 const hasMore = ref(false) // 是否还有更早的日志可加载
 const loadingMore = ref(false)
 const loadedOlder = ref(false) // 是否已加载过更早分页（是则刷新不再重置 hasMore）
 const sentinel = ref(null)
 let timer = null
 let observer = null
+// 请求代次：切换筛选后，旧请求的响应不再改动列表与加载状态
+let loadToken = 0
 
 const hasFilter = computed(() => Object.values(applied).some((v) => v !== ''))
 
@@ -136,6 +148,10 @@ function resetList() {
   logs.value = []
   hasMore.value = false
   loadedOlder.value = false
+  // 条件已变化：重新拉取期间显示加载中，而不是「暂无记录」
+  loadToken += 1
+  loading.value = true
+  loadError.value = ''
 }
 
 function fmtTime(t) {
@@ -164,8 +180,18 @@ function categoryColor(c) {
 
 // 刷新：拉取最新一页，仅把新出现的条目合并到头部，已加载的更早分页保留
 async function load() {
+  const token = ++loadToken
   let page
-  try { page = await api.getOpLogs({ ...applied, limit: PAGE }) } catch { return }
+  try {
+    page = await api.getOpLogs({ ...applied, limit: PAGE })
+    if (token !== loadToken) return
+    loadError.value = ''
+  } catch (e) {
+    if (token === loadToken) loadError.value = e?.message || '请求失败'
+    return
+  } finally {
+    if (token === loadToken) loading.value = false
+  }
   mergeHead(page.items || [])
   if (!loadedOlder.value) hasMore.value = page.has_more
 }

@@ -14,8 +14,13 @@
     <!-- 操作反馈 -->
     <p v-if="msg" class="text-xs" :class="msgOk ? 'text-[#34c759]' : 'text-[#ff3b30]'">{{ msg }}</p>
 
+    <!-- 首次加载：先显示加载中，避免请求返回前显示 0 用量 -->
+    <Card v-if="loading" style="padding: 0">
+      <LoadingState text="正在加载配额数据…" :rows="2" />
+    </Card>
+
     <!-- 未启用 -->
-    <Card v-if="notEnabled" style="padding: 48px 24px" class="text-center">
+    <Card v-else-if="notEnabled" style="padding: 48px 24px" class="text-center">
       <div class="tlabel mb-2">Quota · 配额限制</div>
       <p class="text-sm text-zinc-500">
         配额功能未启用，请在「配置管理」中设置 plugin.ai_chat_bot.quota.enable=true 并重启 Bot 后使用
@@ -99,9 +104,12 @@ import { confirmAction } from '../ui/confirm'
 import { computed, onMounted, ref } from 'vue'
 import { Button, Card, Progress, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
+import LoadingState from '../components/LoadingState.vue'
 
 const data = ref({})
 const notEnabled = ref(false)
+// 首次加载期间为 true：避免把「还没返回」当成 0 用量 / 没有会话
+const loading = ref(true)
 const msg = ref('')
 const msgOk = ref(true)
 
@@ -130,6 +138,8 @@ async function load() {
   } catch {
     data.value = {}
     notEnabled.value = true
+  } finally {
+    loading.value = false
   }
 }
 

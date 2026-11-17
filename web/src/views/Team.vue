@@ -31,7 +31,11 @@
           </div>
         </div>
         <ul class="divide-y divide-slate-100 max-h-128 overflow-y-auto">
-          <li v-if="filteredScopes.length === 0" class="py-10 text-xs text-slate-400 text-center list-none px-4">
+          <!-- 首次加载：先显示加载中，避免请求返回前误判为没有团队 -->
+          <li v-if="loading && !scopes.length" class="list-none">
+            <LoadingState text="正在加载团队列表…" :rows="2" compact />
+          </li>
+          <li v-else-if="filteredScopes.length === 0" class="py-10 text-xs text-slate-400 text-center list-none px-4">
             暂无团队。可让 AI 在对话中调用 team_create 创建，也可点击右上角手动新增
           </li>
           <li
@@ -57,11 +61,17 @@
             <span class="text-sm font-semibold text-slate-800">{{ displayName(current) }}</span>
             <span class="ml-2 text-[11px] font-mono text-slate-400">{{ current.scope }}</span>
           </div>
-          <span class="text-xs text-slate-400 shrink-0">{{ teams.length }} 个团队</span>
+          <span class="text-xs text-slate-400 shrink-0">{{ teamsLoading ? '加载中…' : teams.length + ' 个团队' }}</span>
         </div>
         <ul class="divide-y divide-slate-100">
-          <li v-if="!current" class="py-12 text-sm text-slate-400 text-center list-none">
+          <li v-if="!current && loading" class="list-none">
+            <LoadingState text="正在加载团队…" :rows="2" compact />
+          </li>
+          <li v-else-if="!current" class="py-12 text-sm text-slate-400 text-center list-none">
             从左侧选择一个会话查看其团队
+          </li>
+          <li v-else-if="teamsLoading" class="list-none">
+            <LoadingState text="正在加载团队…" :rows="2" compact />
           </li>
           <li v-else-if="teams.length === 0" class="py-12 text-sm text-slate-400 text-center list-none">
             该会话暂无团队
@@ -164,6 +174,7 @@ import { confirmAction } from '../ui/confirm'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Button, Card, Input, Modal, Select } from 'animal-island-vue'
 import { api } from '../api.js'
+import LoadingState from '../components/LoadingState.vue'
 
 const kindTabs = [
   { value: 'all', label: '全部' },
@@ -175,6 +186,9 @@ const kindTabs = [
 const scopes = ref([])
 const teams = ref([])
 const current = ref(null)
+// 首次加载 / 切换会话时显示加载中，而不是「暂无团队」
+const loading = ref(true)
+const teamsLoading = ref(false)
 const kindFilter = ref('all')
 const names = ref({})
 const roles = ref([])
@@ -245,6 +259,8 @@ async function load() {
   } catch (e) {
     msgOk.value = false
     msg.value = e.message
+  } finally {
+    loading.value = false
   }
 }
 
@@ -255,11 +271,17 @@ async function selectScope(s) {
 
 async function loadTeams() {
   if (!current.value) return
+  const scope = current.value.scope
+  teamsLoading.value = true
+  // 切换会话时先清空旧团队，避免把上一个会话的团队显示在新会话下
+  teams.value = []
   try {
-    teams.value = (await api.getTeams(current.value.scope)) || []
+    teams.value = (await api.getTeams(scope)) || []
   } catch (e) {
     msgOk.value = false
     msg.value = e.message
+  } finally {
+    teamsLoading.value = false
   }
 }
 

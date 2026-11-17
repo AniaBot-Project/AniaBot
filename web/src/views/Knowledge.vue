@@ -33,7 +33,11 @@
           </div>
         </div>
         <ul class="divide-y divide-slate-100 max-h-128 overflow-y-auto">
-          <li v-if="filteredScopes.length === 0" class="py-10 text-xs text-slate-400 text-center list-none px-4">
+          <!-- 首次加载：先显示加载中，避免请求返回前误判为没有文档 -->
+          <li v-if="loading && !scopes.length" class="list-none">
+            <LoadingState text="正在加载知识库…" :rows="2" compact />
+          </li>
+          <li v-else-if="filteredScopes.length === 0" class="py-10 text-xs text-slate-400 text-center list-none px-4">
             暂无文档。可在面板手动新增，或点击右上角导入 URL
           </li>
           <li
@@ -59,11 +63,17 @@
             <span class="text-sm font-semibold text-slate-800">{{ displayName(current) }}</span>
             <span class="ml-2 text-[11px] font-mono text-slate-400">{{ current.scope }}</span>
           </div>
-          <span class="text-xs text-slate-400 shrink-0">{{ docs.length }} 篇文档</span>
+          <span class="text-xs text-slate-400 shrink-0">{{ docsLoading ? '加载中…' : docs.length + ' 篇文档' }}</span>
         </div>
         <ul class="divide-y divide-slate-100">
-          <li v-if="!current" class="py-12 text-sm text-slate-400 text-center list-none">
+          <li v-if="!current && loading" class="list-none">
+            <LoadingState text="正在加载文档…" :rows="2" compact />
+          </li>
+          <li v-else-if="!current" class="py-12 text-sm text-slate-400 text-center list-none">
             从左侧选择一个作用域查看其文档
+          </li>
+          <li v-else-if="docsLoading" class="list-none">
+            <LoadingState text="正在加载文档…" :rows="2" compact />
           </li>
           <li v-else-if="docs.length === 0" class="py-12 text-sm text-slate-400 text-center list-none">
             该作用域暂无文档
@@ -162,6 +172,7 @@ import { confirmAction } from '../ui/confirm'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Button, Card, Input, Modal, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
+import LoadingState from '../components/LoadingState.vue'
 
 const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow'
 
@@ -175,6 +186,9 @@ const kindTabs = [
 const scopes = ref([])
 const docs = ref([])
 const current = ref(null)
+// 首次加载 / 切换作用域时显示加载中，而不是「暂无文档」
+const loading = ref(true)
+const docsLoading = ref(false)
 const kindFilter = ref('all')
 const msg = ref('')
 const msgOk = ref(false)
@@ -233,6 +247,8 @@ async function load() {
   } catch (e) {
     msgOk.value = false
     msg.value = e.message
+  } finally {
+    loading.value = false
   }
 }
 
@@ -243,11 +259,17 @@ async function selectScope(s) {
 
 async function loadDocs() {
   if (!current.value) return
+  const scope = current.value.scope
+  docsLoading.value = true
+  // 切换作用域时先清空旧文档，避免把上一个作用域的内容显示在新作用域下
+  docs.value = []
   try {
-    docs.value = (await api.getKnowledgeDocs(current.value.scope)) || []
+    docs.value = (await api.getKnowledgeDocs(scope)) || []
   } catch (e) {
     msgOk.value = false
     msg.value = e.message
+  } finally {
+    docsLoading.value = false
   }
 }
 
