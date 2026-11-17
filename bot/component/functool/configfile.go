@@ -129,8 +129,10 @@ func (t *ConfigFileSetTool) Execute(ctx context.Context, params any, _ llmtool.C
 	}
 	oplog.Record(oplog.CategoryAI, "config_file_set", fmt.Sprintf("AI 修改扩展配置 %s（%d 字符）", key, len([]rune(p.Content))))
 
+	// 与面板保存的提示保持一致：prompt/hooks/commands 由 AI 插件按 TTL 热重读，
+	// 保存后数秒内生效；只有 mcp 需要重启（服务器在启动时连接）。
 	effective := "保存后数秒内生效"
-	if name == "mcp" || name == "prompt" {
+	if name == "mcp" {
 		effective = "重启后生效，请提醒用户由管理员发送 /reboot 重启使配置生效"
 	}
 	return fmt.Sprintf("已更新扩展配置 %s，%s", key, effective), nil

@@ -76,4 +76,16 @@ func TestConfigFileSet(t *testing.T) {
 	if _, err := tool.Execute(context.Background(), &ConfigFileSetParams{Name: "bogus", Content: "{}"}, llmtool.CallBackFuncs{}); err == nil {
 		t.Fatal("未知文件名应报错")
 	}
+
+	// 生效时机提示与面板一致：prompt/hooks/commands 热重读，mcp 需重启
+	if out, err := tool.Execute(context.Background(), &ConfigFileSetParams{Name: "prompt", Content: `{"groups":{}}`}, llmtool.CallBackFuncs{}); err != nil {
+		t.Fatalf("Execute error: %v", err)
+	} else if strings.Contains(out, "重启后生效") || !strings.Contains(out, "数秒内生效") {
+		t.Fatalf("prompt 保存后应提示数秒内生效，got: %s", out)
+	}
+	if out, err := tool.Execute(context.Background(), &ConfigFileSetParams{Name: "mcp", Content: `{"servers":[]}`}, llmtool.CallBackFuncs{}); err != nil {
+		t.Fatalf("Execute error: %v", err)
+	} else if !strings.Contains(out, "重启后生效") {
+		t.Fatalf("mcp 保存后应提示重启生效，got: %s", out)
+	}
 }

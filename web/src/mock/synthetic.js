@@ -543,6 +543,17 @@ const SKILLS = [
     ],
   },
   {
+    name: 'aniabot', description: 'AniaBot 自身说明书（配置项与生效时机、Web 面板、聊天指令、排障）',
+    location: '.builtin/aniabot/SKILL.md', builtin: true,
+    refs: ['reference/config.md', 'reference/panel.md', 'reference/troubleshooting.md'], extras: [],
+    content: '---\nname: aniabot\ndescription: AniaBot 自身说明书（配置项与生效时机、Web 面板、聊天指令、排障）\n---\n\n# AniaBot 自身说明书\n\n你跑在 AniaBot 上。全部配置存在数据库里，改完重启生效；重启由管理员发送 /reboot 或面板点重启。\n\n- 查配置用 config_get（需开启配置管理工具），改配置用 config_set（需管理员审批，重启生效）\n- 扩展配置 config_file_get/set 管理 mcp / prompt / hooks / commands 四份 JSON，prompt/hooks/commands 数秒生效，mcp 需重启\n- 详细键表见 reference/config.md，面板页面见 reference/panel.md，排障见 reference/troubleshooting.md\n',
+    files: [
+      { name: 'reference/config.md', kind: 'reference', size: 13041, content: '# AniaBot 配置全景\n\n配置全部存在数据库（ania_kv 表），修改后重启生效。详见 reference/config.md 的键表。\n' },
+      { name: 'reference/panel.md', kind: 'reference', size: 3270, content: '# Web 控制面板地图\n\n默认 http://127.0.0.1:7700，页面：状态总览、控制台日志、Query 日志、技能管理、配置管理、扩展配置、插件市场……\n' },
+      { name: 'reference/troubleshooting.md', kind: 'reference', size: 5570, content: '# 排障手册\n\n先看面板「控制台日志」，再区分是没连上、没配置、被拦住、超时还是外部接口报错。\n' },
+    ],
+  },
+  {
     name: 'daily-news', description: '按主题抓取 RSS 与搜索结果，生成每日新闻早报',
     location: 'daily-news', refs: ['sources.md'], extras: ['render.py'],
     content: '---\nname: daily-news\ndescription: 按主题抓取 RSS 与搜索结果，生成每日新闻早报\n---\n\n# 每日早报技能\n\n## 步骤\n\n1. 读取 `sources.md` 中的订阅源列表\n2. 使用内置 web 技能搜索补充当日热点\n3. 挑选 5 条，用 `render.py` 渲染为 Markdown 早报\n4. 发送到目标群聊\n\n## 注意\n\n- 每条新闻附原文链接\n- 早报开头写一句轻松的问候语\n',

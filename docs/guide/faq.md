@@ -82,6 +82,12 @@ Discord 同理：防撤回不生效；成员进出走平台事件（不触发公
 
 内置 `web` 技能不能删除、不能禁用；如需接入其他搜索平台，可自行添加外置 skill 与 CLI（参考内置技能的 `webctl.py`，在 `PROVIDERS` 中注册新平台）。外置技能可在面板「技能管理」页随时禁用/启用。
 
+### AI 知道怎么配置自己吗？
+
+知道。内置 `aniabot` 技能是 AI 了解自身框架的说明书，覆盖配置项与生效时机、Web 面板各页、会话指令、插件/技能/MCP 机制和常见故障排查。直接问「XX 功能怎么开」「改了配置为什么没生效」之类的即可，它会给出页面路径、配置键和是否需要重启。
+
+想让 AI 直接帮你读改配置，还需要在「配置管理 → AI 对话 · 工具」开启 **启用配置管理工具**（`plugin.ai_chat_bot.config_tool.enable`）并重启：之后 AI 可用 `config_get` / `config_set` 查看和修改框架配置（敏感字段自动掩码，写入需管理员审批，改完仍要管理员发送 `/reboot` 重启生效），用 `config_file_get` / `config_file_set` 管理 MCP、Prompt 覆盖、AI 钩子与自定义命令。
+
 ### 对话历史能保存多久？
 
 历史持久化在 `PersistentStorage`（默认 SQLite），重启不丢。超过 `max_context_tokens` 的 80% 时会自动让 LLM 总结压缩。发送带 `#新对话` 的消息可手动清空。

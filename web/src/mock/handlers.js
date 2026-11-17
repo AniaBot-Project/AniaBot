@@ -708,7 +708,7 @@ const routes = [
   {
     m: 'POST', re: /^\/api\/skills\/([^/]+)\/toggle$/, h: (c) => {
       const name = decodeURIComponent(c.params[0])
-      const builtin = ['web'].includes(name)
+      const builtin = ['web', 'aniabot'].includes(name)
       if (builtin) return { status: 400, body: { error: '内置 skill 不能禁用' } }
       const enabled = !!(c.body && c.body.enabled)
       if (enabled) state.skillDisabled.delete(name)
