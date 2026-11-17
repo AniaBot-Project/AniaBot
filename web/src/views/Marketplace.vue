@@ -17,8 +17,8 @@
       </div>
     </Card>
 
-    <Card v-else-if="!info && !listError" class="flex items-center justify-center">
-      <Skeleton loading variant="paragraph" :rows="2" />
+    <Card v-else-if="!info && !listError">
+      <LoadingState text="正在加载插件市场…" :rows="2" />
     </Card>
 
     <!-- 错误提示 -->
@@ -202,12 +202,12 @@
       <Card style="padding: 0" class="overflow-hidden">
         <Tabs v-model="tab" :items="tabs">
           <template #[tab]>
-            <div class="flex items-center justify-between gap-3 flex-wrap">
+            <div v-if="!listLoading || plugins.length" class="flex items-center justify-between gap-3 flex-wrap">
               <div class="w-full sm:w-72">
                 <Input v-model="keyword" size="small" allow-clear placeholder="搜索名称 / 描述 / 作者 / 标签" />
               </div>
             </div>
-            <div class="mt-3 flex items-center justify-between gap-3 flex-wrap text-[11px]">
+            <div v-if="!listLoading || plugins.length" class="mt-3 flex items-center justify-between gap-3 flex-wrap text-[11px]">
               <div class="flex items-center gap-3 flex-wrap">
                 <p class="text-zinc-400">显示 {{ filtered.length }} / {{ plugins.length }} 个插件</p>
                 <label class="flex items-center gap-1.5 text-zinc-500 cursor-pointer select-none">
@@ -224,9 +224,12 @@
               <Button v-if="selectedCount > 0" type="text" size="small" :disabled="busy" @click="clearSelection">已选 {{ selectedCount }} 个 · 清空选择</Button>
             </div>
 
-            <div v-if="filtered.length === 0" class="py-14 text-center text-xs text-zinc-400">
-              <template v-if="loading">正在加载插件...</template>
-              <template v-else-if="keyword">没有匹配「{{ keyword }}」的插件</template>
+            <!-- 首次加载 / 刷新空列表：先显示加载中，避免「显示 0 / 0 个插件」被误判为空 -->
+            <div v-if="listLoading && !plugins.length" class="py-8">
+              <LoadingState text="正在加载插件列表…" :rows="3" />
+            </div>
+            <div v-else-if="filtered.length === 0" class="py-14 text-center text-xs text-zinc-400">
+              <template v-if="keyword">没有匹配「{{ keyword }}」的插件</template>
               <template v-else-if="tab === 'installed'">还没有安装任何插件，点击插件卡片「安装」试试</template>
               <template v-else-if="tab === 'updatable'">所有插件都已是最新版本</template>
               <template v-else>暂无插件</template>
@@ -416,6 +419,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { Button, Card, Input, Modal, Notification, Skeleton, Tabs, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
+import LoadingState from '../components/LoadingState.vue'
 
 const phases = [
   { key: 'env', label: '环境检查' },
@@ -465,6 +469,8 @@ let oauthTimer = null
 
 const areaReady = computed(() => !!info.value && info.value.mode === 'binary' && info.value.configured)
 const busy = computed(() => status.running || status.restarting || rebooting.value)
+// 插件列表首次加载或空列表刷新中：显示加载中，而不是「0 / 0 个插件」
+const listLoading = computed(() => loading.value || refreshing.value)
 const canBrowse = computed(() => areaReady.value && !busy.value)
 const canOperate = computed(() => areaReady.value && !busy.value)
 const showLogin = computed(() => info.value?.oauth_configured && !info.value?.token_valid && areaReady.value)
