@@ -237,3 +237,46 @@ func TestFriendlyTextStrippedSegmentPlaceholder(t *testing.T) {
 		}
 	}
 }
+
+// TestFriendlyTextNoInlinePayload 内联 base64 负载（Bot 用 file 工具发送文件时的
+// base64:// 源、微信/飞书等的 data: 图片）不得写进文本标记：体积可达 MB 级，
+// 会随消息进入 LLM 上下文、落盘历史与面板消息日志。
+func TestFriendlyTextNoInlinePayload(t *testing.T) {
+	const b64 = "QUJDREVGR0g="
+	m := Message{
+		Message: []OB11Segment{
+			{Type: SegmentImage, Data: ImageMessage{File: "base64://" + b64, Url: "base64://" + b64}.Marshal()},
+			{Type: SegmentImage, Data: ImageMessage{File: "a.png", Url: "data:image/png;base64," + b64}.Marshal()},
+			{Type: SegmentRecord, Data: RecordMessage{URL: "base64://" + b64}.Marshal()},
+			{Type: SegmentVideo, Data: VideoMessage{URL: "data:video/mp4;base64," + b64}.Marshal()},
+			{Type: SegmentFile, Data: FileMessage{File: "base64://" + b64, Name: "报告.pdf"}.Marshal()},
+			{Type: SegmentFile, Data: FileMessage{File: "base64://" + b64}.Marshal()},
+		},
+	}
+	got := m.FriendlyText(true, WithNoSenderPrefix())
+	if strings.Contains(got, "base64") || strings.Contains(got, "data:") {
+		t.Fatalf("内联负载泄漏进文本: %q", got)
+	}
+	// 图片仍以哈希标记保留可加载标识；文件名取 name，缺失时退化为「文件」
+	for _, want := range []string{"[录音]", "[视频]", "[文件:报告.pdf", "[文件:文件"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("缺少 %q: %q", want, got)
+		}
+	}
+	if !strings.Contains(got, "[图片 "+ImageHash("base64://"+b64)+"]") {
+		t.Fatalf("base64 图片应只保留哈希标记: %q", got)
+	}
+}
+
+// TestFriendlyTextFileURL 文件标记仍带可访问地址（面板据此提供下载），
+// fileId 为空时保持占位格式不变。
+func TestFriendlyTextFileURL(t *testing.T) {
+	m := Message{Message: []OB11Segment{{
+		Type: SegmentFile,
+		Data: FileMessage{File: "a.zip", FileId: "fid-1", dataMessage: dataMessage{URL: "https://cdn.example.com/a.zip"}}.Marshal(),
+	}}}
+	got := m.FriendlyText(true, WithNoSenderPrefix())
+	if want := "[文件:a.zip fileId:fid-1 url:https://cdn.example.com/a.zip]"; got != want {
+		t.Fatalf("文件标记 = %q, want %q", got, want)
+	}
+}

@@ -208,13 +208,18 @@ func matchMediaURL(fresh []msglog.Media, old []msglog.Media, index int) string {
 
 // fileMedia 解析 file 段：文件名优先 name，其次 file 源；大小读 file_size（
 // OneBot 协议字段，数值或字符串均见得到）。
+//
+// file 源可能是 base64:// 内联负载（Bot 用 file 工具发送时就是这样）：不能拿它
+// 当文件名，否则 MB 级 base64 会随日志条目进入缓存与面板响应。此时退回「文件」，
+// 并按 base64 长度估算真实文件大小（不实际解码）。
 func fileMedia(seg message.OB11Segment) (msglog.Media, bool) {
 	var f message.FileMessage
 	if !message.ParseFile(seg, &f) {
 		return msglog.Media{}, false
 	}
+	inline := strings.HasPrefix(f.File, "base64://") || strings.HasPrefix(f.File, "data:")
 	name := f.Name
-	if name == "" {
+	if name == "" && !inline {
 		name = f.File
 	}
 	if name != "" {
@@ -224,10 +229,14 @@ func fileMedia(seg message.OB11Segment) (msglog.Media, bool) {
 	if name == "" || name == "." {
 		name = "文件"
 	}
+	size := segmentSize(seg)
+	if size == 0 && inline {
+		size = inlinePayloadSize(f.File)
+	}
 	m := msglog.Media{
 		Kind:   msglog.MediaFile,
 		Name:   name,
-		Size:   segmentSize(seg),
+		Size:   size,
 		FileId: f.FileId,
 	}
 	if isHTTPURL(f.URL) {
@@ -236,6 +245,35 @@ func fileMedia(seg message.OB11Segment) (msglog.Media, bool) {
 		m.URL = f.File
 	}
 	return m, true
+}
+
+// inlinePayloadSize 估算内联负载的原始字节数（base64:// 或 data:*;base64,）：
+// 只做长度换算，不解码内容，避免为了显示文件大小而复制 MB 级数据。
+// 非 base64 的 data: 负载（百分比编码等）无法估算时返回 0。
+func inlinePayloadSize(src string) int64 {
+	var b64 string
+	switch {
+	case strings.HasPrefix(src, "base64://"):
+		b64 = strings.TrimPrefix(src, "base64://")
+	case strings.HasPrefix(src, "data:"):
+		if i := strings.Index(src, ";base64,"); i >= 0 {
+			b64 = src[i+len(";base64,"):]
+		}
+	}
+	if b64 == "" {
+		return 0
+	}
+	size := int64(len(b64)/4) * 3
+	switch {
+	case strings.HasSuffix(b64, "=="):
+		size -= 2
+	case strings.HasSuffix(b64, "="):
+		size--
+	}
+	if size < 0 {
+		return 0
+	}
+	return size
 }
 
 // segmentSize 读取段数据里的文件大小（OneBot 的 file_size，部分适配器写 size）。

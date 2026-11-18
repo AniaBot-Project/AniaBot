@@ -630,6 +630,8 @@ func truncateRunes(s string, max int) string {
 }
 
 // decodeEntries 把存储层按 any 解码的列表元素（map）经 JSON 往返还原为 Entry。
+// 读出的条目统一做一次净化：旧版本曾把内联 base64 负载写进 Text / Media，
+// 存量数据不应继续拖慢面板分页（见 sanitizeEntry）。
 func decodeEntries(items []any) []Entry {
 	out := make([]Entry, 0, len(items))
 	for _, item := range items {
@@ -641,6 +643,7 @@ func decodeEntries(items []any) []Entry {
 		if err := json.Unmarshal(data, &e); err != nil {
 			continue
 		}
+		sanitizeEntry(&e)
 		out = append(out, e)
 	}
 	return out

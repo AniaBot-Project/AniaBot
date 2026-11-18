@@ -397,3 +397,35 @@ func TestMatchMediaURL(t *testing.T) {
 		t.Fatalf("越界下标应返回空, got %q", got)
 	}
 }
+
+// TestExtractMediaInlineFilePayload Bot 用 file 工具发送文件时 file 源是
+// base64:// 内联负载：文件名不能取成 payload（否则 MB 级 base64 进日志与面板
+// 响应），大小按 base64 长度估算，且解析过程不解码内容。
+func TestExtractMediaInlineFilePayload(t *testing.T) {
+	// "hello world" 的 base64，长度 16（含一个 = 补位）→ 原始 11 字节
+	payload := "aGVsbG8gd29ybGQ="
+	segs := []message.OB11Segment{
+		{Type: message.SegmentFile, Data: map[string]any{
+			"file": "base64://" + payload, "name": "报告.pdf",
+		}},
+		{Type: message.SegmentFile, Data: map[string]any{
+			"file": "base64://" + payload,
+		}},
+	}
+	media := extractMedia(segs)
+	if len(media) != 2 {
+		t.Fatalf("媒体数量 = %d, want 2: %+v", len(media), media)
+	}
+	if media[0].Name != "报告.pdf" || media[0].Size != int64(len("hello world")) {
+		t.Fatalf("内联文件元信息错误: %+v", media[0])
+	}
+	// 没有 name 时不能退化成 base64 内容
+	if media[1].Name != "文件" || media[1].Size != int64(len("hello world")) {
+		t.Fatalf("缺 name 的内联文件解析错误: %+v", media[1])
+	}
+	for _, m := range media {
+		if strings.Contains(m.Name, "base64") || m.URL != "" {
+			t.Fatalf("内联负载泄漏进媒体字段: %+v", m)
+		}
+	}
+}

@@ -67,6 +67,41 @@ func indentLines(text, indent string) string {
 	return strings.Join(lines, "\n")
 }
 
+// mediaMark 生成录音 / 视频的文本标记。地址是内联负载（base64:// / data:）时
+// 只留类型名：这类内容体积可达 MB 级，写进消息文本会随 LLM 上下文、落盘历史与
+// 消息日志一起膨胀（与图片只保留哈希的处理一致）。
+func mediaMark(kind, url string) string {
+	if isInlinePayload(url) {
+		return "[" + kind + "]"
+	}
+	return "[" + kind + ":" + url + "]"
+}
+
+// publicURL 返回可写进文本标记的地址：内联负载与本地路径都退化为空，
+// 避免把 MB 级 base64 或宿主机路径塞进消息文本。
+func publicURL(url string) string {
+	if isInlinePayload(url) {
+		return ""
+	}
+	return url
+}
+
+// fileDisplayName 从 file 源推导展示用文件名：内联负载与空值返回空，
+// 其余（URL / 本地路径）取最后一段。用于发送时未填 name 的 file 段。
+func fileDisplayName(file string) string {
+	if file == "" || isInlinePayload(file) {
+		return ""
+	}
+	if i := strings.IndexAny(file, "?#"); i >= 0 {
+		file = file[:i]
+	}
+	file = strings.TrimRight(file, "/")
+	if i := strings.LastIndexAny(file, `/\`); i >= 0 {
+		file = file[i+1:]
+	}
+	return file
+}
+
 // IndentLines 给多行文本的每一行（空行除外）加上单层缩进（indentUnit），
 // 供其他模块生成与 FriendlyText 同风格的层级文本（如工具结果里的图片识别内容）。
 func IndentLines(text string) string {
@@ -114,10 +149,11 @@ func (raw Message) friendlyText(showUrl bool, msgFuncs msgHandleOpt) string {
 					if showUrl {
 						// 同时输出短哈希与 URL：哈希用于 load_images 按需加载，
 						// URL 供 AI 下载图片到本地（如 bash/file 工具）。
-						// data URI（微信/飞书/Telegram/Discord 的内联图片）是 MB 级
-						// base64，写进标记会随消息文本进入 LLM 上下文与落盘历史，
-						// 只保留哈希（load_images 注册表仍持有完整 URI，按哈希可加载）
-						if msg.Url != "" && !strings.HasPrefix(msg.Url, "data:") {
+						// 内联负载（data: / base64://，微信/飞书/Telegram/Discord 的
+						// 内联图片与 Bot 自己发出的图片）是 MB 级 base64，写进标记会随
+						// 消息文本进入 LLM 上下文、落盘历史与消息日志，只保留哈希
+						//（load_images 注册表仍持有完整 URI，按哈希可加载）
+						if msg.Url != "" && !isInlinePayload(msg.Url) {
 							result.WriteString(fmt.Sprintf("[图片 %s url:%s]", msg.Hash(), msg.Url))
 						} else {
 							result.WriteString(fmt.Sprintf("[图片 %s]", msg.Hash()))
@@ -135,7 +171,7 @@ func (raw Message) friendlyText(showUrl bool, msgFuncs msgHandleOpt) string {
 			var msg RecordMessage
 			if ok := ParseRecord(s, &msg); ok {
 				if showUrl {
-					result.WriteString(fmt.Sprintf("[录音:%s]", msg.URL))
+					result.WriteString(mediaMark("录音", msg.URL))
 				} else {
 					result.WriteString("[录音]")
 				}
@@ -146,7 +182,7 @@ func (raw Message) friendlyText(showUrl bool, msgFuncs msgHandleOpt) string {
 			var msg VideoMessage
 			if ok := ParseVideo(s, &msg); ok {
 				if showUrl {
-					result.WriteString(fmt.Sprintf("[视频:%s]", msg.URL))
+					result.WriteString(mediaMark("视频", msg.URL))
 				} else {
 					result.WriteString("[视频]")
 				}
@@ -211,7 +247,18 @@ func (raw Message) friendlyText(showUrl bool, msgFuncs msgHandleOpt) string {
 		case SegmentFile:
 			var msg FileMessage
 			if ok := ParseFile(s, &msg); ok {
-				result.WriteString(fmt.Sprintf("[文件:%s fileId:%s url:%s]", msg.File, msg.FileId, msg.URL))
+				// 文本里只放文件名与可访问地址：file 字段是上传源（Bot 用 file 工具
+				// 发送文件时是 base64:// 内联负载），原样写进标记会让整段文件内容
+				// 进入消息文本、LLM 上下文与消息日志，一条日志可达数 MB
+				name := msg.Name
+				if name == "" {
+					name = fileDisplayName(msg.File)
+				}
+				if name == "" {
+					name = "文件"
+				}
+				result.WriteString(fmt.Sprintf("[文件:%s fileId:%s url:%s]",
+					name, msg.FileId, publicURL(msg.URL)))
 			} else {
 				result.WriteString("[文件消息]")
 			}
