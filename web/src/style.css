@@ -79,7 +79,8 @@
     color: var(--ink-body);
     font-weight: 500;
     letter-spacing: 0.01em;
-    min-height: 100vh;
+    /* dvh：移动端浏览器工具栏收放时按实际可视高度计算，避免 100vh 把底部内容压到工具栏下 */
+    min-height: 100dvh;
     background-color: var(--page-bg);
     background-image:
       radial-gradient(60rem 40rem at 2% -12%, rgb(25 200 185 / 0.12), transparent 58%),
@@ -260,6 +261,14 @@
 .fade-enter-from {
   opacity: 0;
   transform: translateY(8px);
+}
+
+/* 底部安全区：移动端手势条 / 浏览器工具栏会盖住视口最下方，
+   主内容区额外留出安全距离，滚到底时最后一行不会被压住 */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-bottom {
+    padding-bottom: calc(2.5rem + env(safe-area-inset-bottom));
+  }
 }
 
 /* ============================================================================
@@ -943,6 +952,13 @@
   border-radius: 999px;
   background: var(--surface);
   border: 2px solid var(--line);
+  /* 窄屏放不下时自身横向滚动，避免把整页撑出横向滚动条 */
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.app-shell .filter-group::-webkit-scrollbar {
+  display: none;
 }
 
 /* ---- 焦点环：统一鹅黄（主题库的 focus 色） ---- */

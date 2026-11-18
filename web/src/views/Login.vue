@@ -1,5 +1,5 @@
 <template>
-  <div class="app-shell relative min-h-screen flex items-center justify-center overflow-hidden select-none p-4">
+  <div class="app-shell relative min-h-dvh flex items-center justify-center overflow-hidden select-none p-4">
     <!-- 背景装饰：薄荷青绿 / 鹅黄柔光斑（页面底色与点阵由全局提供） -->
     <div class="absolute -top-44 -left-44 w-125 h-125 rounded-full bg-[#19c8b9]/10 blur-[110px] pointer-events-none" />
     <div class="absolute -bottom-44 -right-44 w-125 h-125 rounded-full bg-[#f7cd67]/16 blur-[110px] pointer-events-none" />

@@ -99,6 +99,9 @@ function placementFor(i) {
 <style scoped>
 .token-chart {
   width: 100%;
+  /* 悬停气泡按列宽居中定位，最右列的提示会悬到绘图区右侧之外。
+     这里裁掉横向溢出，避免撑出整页横向滚动条（纵向气泡向上弹出，不受影响） */
+  overflow-x: clip;
 }
 
 .token-chart__plot {

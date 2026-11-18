@@ -1,5 +1,5 @@
 <template>
-  <div v-if="!auth.checked" class="app-shell min-h-screen flex items-center justify-center">
+  <div v-if="!auth.checked" class="app-shell min-h-dvh flex items-center justify-center">
     <div class="flex items-center gap-2 text-slate-400 text-sm">
       <span class="w-4 h-4 border-2 border-black/10 border-t-[#0071e3] rounded-full animate-spin" />
       加载中...
@@ -10,7 +10,7 @@
 
   <Wizard v-else-if="auth.setupRequired" />
 
-  <div v-else class="app-shell min-h-screen flex">
+  <div v-else class="app-shell min-h-dvh flex">
     <!-- 移动端抽屉遮罩 -->
     <Transition name="fade">
       <div v-if="mobileOpen" class="fixed inset-0 bg-black/30 backdrop-blur-[2px] z-40 md:hidden" @click="mobileOpen = false" />
@@ -18,7 +18,7 @@
 
     <!-- 侧边导航：奶油小岛侧栏，移动端为抽屉，桌面端常驻 -->
     <aside
-      class="sidebar-island fixed inset-y-0 left-0 z-50 w-64 h-screen flex flex-col shrink-0 transition-transform duration-200 md:sticky md:top-0 md:inset-auto md:z-auto md:w-64"
+      class="sidebar-island fixed inset-y-0 left-0 z-50 w-64 h-dvh flex flex-col shrink-0 transition-transform duration-200 md:sticky md:top-0 md:inset-auto md:z-auto md:w-64"
       :class="mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'"
     >
       <div class="px-5 pt-6 pb-5 flex items-center gap-3">
@@ -92,7 +92,7 @@
           <span class="w-1.5 h-1.5 rounded-full bg-white/90 pulse-dot" />Bot Online
         </Tag>
       </header>
-      <div class="px-3 sm:px-5 xl:px-7 py-4 sm:py-5 flex-1">
+      <div class="px-3 sm:px-5 xl:px-7 pt-4 sm:pt-5 pb-10 safe-bottom flex-1">
         <RouterView v-slot="{ Component }">
           <Transition name="fade" mode="out-in">
             <component :is="Component" />

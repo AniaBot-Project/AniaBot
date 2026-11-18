@@ -148,10 +148,8 @@
           </template>
         </div>
         <Divider type="dashed-brown" class="my-3" />
-        <div class="text-[10px] tracking-[0.14em] uppercase text-zinc-500 truncate">
-          Source: query / proactive / cron logs (retained, capped)
-          <span class="mx-2 text-zinc-300">//</span>
-          Cache metrics depend on upstream API
+        <div class="block w-full min-w-0 text-[10px] tracking-[0.14em] uppercase text-zinc-500 truncate">
+          Source: query / proactive / cron logs (retained, capped) // Cache metrics depend on upstream API
         </div>
       </Card>
 
@@ -281,7 +279,7 @@
               <span class="text-zinc-400">{{ index + 1 }}</span>
             </template>
             <template #cell-target_id="{ record }">
-              <span class="text-zinc-800 font-medium whitespace-nowrap">
+              <span class="text-zinc-800 font-medium whitespace-nowrap block max-w-[42vw] truncate sm:max-w-none">
                 <Tag variant="outlined" size="small" class="mr-2">{{ chatTypeGlyph(record.chat_type) }}</Tag>
                 {{ record.target_id }}
               </span>
