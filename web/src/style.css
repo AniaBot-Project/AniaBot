@@ -943,6 +943,24 @@
   text-align: center;
 }
 
+/* 表格：列宽合计超过容器宽度时（窄屏 / 列多的页）横向滚动。
+   主题库 Table 只有传 scroll 属性才给容器加 overflow，未传时宽表格会被外层
+   Card 的 overflow:hidden 直接裁掉右侧列（看起来「显示不全」）。这里统一兜底，
+   宽度足够时不会出现滚动条，行为与原来一致。 */
+.app-shell .animal-table-wrapper {
+  overflow-x: auto;
+  min-width: 0;
+}
+/* 窄屏压缩单元格内边距，同样的屏幕上能看到更多列、行高也不会被挤成一字一行 */
+@media (max-width: 767px) {
+  .app-shell .animal-table__th {
+    padding: 14px 10px;
+  }
+  .app-shell .animal-table__cell {
+    padding: 12px 10px;
+  }
+}
+
 /* 分段筛选按钮组：每组一个奶油小框，多组并排时能看出分组边界 */
 .app-shell .filter-group {
   display: inline-flex;

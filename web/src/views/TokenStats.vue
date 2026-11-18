@@ -300,9 +300,8 @@
               <span class="text-zinc-600 whitespace-nowrap">{{ fmtInt(record.requests) }}</span>
             </template>
             <template #cell-total_tokens="{ record }">
-              <Tooltip :title="targetTip(record)" placement="top-end">
-                <span class="text-zinc-800 font-medium whitespace-nowrap">{{ fmtInt(record.total_tokens) }}</span>
-              </Tooltip>
+              <!-- 用原生 title：表格容器可横向滚动（overflow 会裁掉绝对定位的 Tooltip 气泡） -->
+              <span class="text-zinc-800 font-medium whitespace-nowrap" :title="targetTip(record)">{{ fmtInt(record.total_tokens) }}</span>
             </template>
           </Table>
         </Card>
@@ -313,7 +312,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Button, Card, DatePicker, Divider, Progress, Skeleton, Table, Tag, Tooltip } from 'animal-island-vue'
+import { Button, Card, DatePicker, Divider, Progress, Skeleton, Table, Tag } from 'animal-island-vue'
 import TokenChart from '../ui/TokenChart.vue'
 import { fmtInt, fmtPct } from '../utils/format.js'
 import { api } from '../api.js'
