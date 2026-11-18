@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jeanhua/AniaBot/bot/component/agenthook"
@@ -19,9 +20,63 @@ const historyLoadTimeout = 15 * time.Second
 
 // activeRequest 一个会话当前在跑的请求：取消函数 + 触发者（/stop 权限判定）。
 // 取消函数是整条请求（含后续排队批次）的总开关，/stop 与锁丢失都经它中止。
+//
+// start/stage 供 /status 展示进度：start 为本次事件开始处理的时刻（跨批次的
+// 总起点），stage 为最近一次处理阶段（等待模型回复 / 处理工具调用 <名> 等）。
+// 两者都在请求生命周期内被并发写入（工具门禁在并行工具协程里调用），故加锁。
 type activeRequest struct {
 	cancel    context.CancelFunc
 	requester message.QID
+
+	start time.Time
+
+	mu      sync.Mutex
+	stage   string
+	stageAt time.Time
+}
+
+// newActiveRequest 构造活跃请求记录；start 为零值时取当前时刻。
+// 多批次排空循环里每批新建一条记录，但 start 沿用一个事件的总起点，
+// /status 展示的「已持续」才是整条请求链的时长而非单批时长。
+func newActiveRequest(cancel context.CancelFunc, requester message.QID, start time.Time) *activeRequest {
+	if start.IsZero() {
+		start = time.Now()
+	}
+	return &activeRequest{cancel: cancel, requester: requester, start: start}
+}
+
+// setStage 更新处理阶段（stage 为空或与当前相同时不动，避免高频回调反复取锁写值）。
+func (ar *activeRequest) setStage(stage string) {
+	if ar == nil || stage == "" {
+		return
+	}
+	ar.mu.Lock()
+	if ar.stage == stage {
+		ar.mu.Unlock()
+		return
+	}
+	ar.stage = stage
+	ar.stageAt = time.Now()
+	ar.mu.Unlock()
+}
+
+// stageSnapshot 读取当前处理阶段与更新时刻。
+func (ar *activeRequest) stageSnapshot() (string, time.Time) {
+	if ar == nil {
+		return "", time.Time{}
+	}
+	ar.mu.Lock()
+	defer ar.mu.Unlock()
+	return ar.stage, ar.stageAt
+}
+
+// updateSessionStage 更新指定会话活跃请求的处理阶段（无活跃请求时静默忽略）。
+func (p *AIChatPlugin) updateSessionStage(key, stage string) {
+	if v, ok := p.activeContexts.Load(key); ok {
+		if ar, ok := v.(*activeRequest); ok {
+			ar.setStage(stage)
+		}
+	}
 }
 
 // stopRequest 停止指定会话的 AI 请求。by 为发起停止的用户，isAdmin 表示

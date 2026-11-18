@@ -55,6 +55,21 @@ func (p *AIChatPlugin) drainPending(id message.QID, isGroup bool) []message.Mess
 	return items
 }
 
+// pendingCount 只读统计会话排队消息数（不创建队列，供 /status 展示）。
+func (p *AIChatPlugin) pendingCount(key string) int {
+	v, ok := p.pendingMsgs.Load(key)
+	if !ok {
+		return 0
+	}
+	q, ok := v.(*pendingQueue)
+	if !ok {
+		return 0
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.items)
+}
+
 // isEmpty 当前队列是否为空（加锁读取，供淘汰路径判断）。
 func (q *pendingQueue) isEmpty() bool {
 	q.mu.Lock()

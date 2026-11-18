@@ -177,7 +177,7 @@ func NewAIChatPlugin() *AIChatPlugin {
 	return &AIChatPlugin{
 		Meta: plugin.Meta{
 			Name:      "AI对话插件",
-			HelpWords: "@我聊天哦，带上 #新对话 标签可以创建新对话，发送 /stop 可以停止 AI 响应",
+			HelpWords: "@我聊天哦，带上 #新对话 标签可以创建新对话，发送 /stop 可以停止 AI 响应，/status 查看当前响应状态",
 			Order:     plugin.LevelPostHandle,
 			ShowFor:   plugininfo.ShowForGroup | plugininfo.ShowForFriend,
 			Author:    "jeanhua",
@@ -260,6 +260,10 @@ func (p *AIChatPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 		return p.handlePlanCommand(ctx, bot, cmd, msg)
 	}
 
+	if cmd.Name == "status" {
+		return p.handleStatusCommand(bot, msg)
+	}
+
 	if cmd.Name == "cmd" {
 		return p.handleCmdCommand(ctx, bot, cmd, msg)
 	}
@@ -320,8 +324,9 @@ func (p *AIChatPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 	// 先取出可能遗留的排队消息（上一响应结束瞬间到达、未来及处理的），与本次消息合并；
 	// 之后每轮响应结束继续排空队列，直到没有新消息或总预算耗尽
 	batch := append(p.drainPending(msg.GroupId, true), msg)
+	start := time.Now()
 	for len(batch) > 0 {
-		p.setActiveContext(msg.GroupId, true, &activeRequest{cancel: cancelRun, requester: batchRequester(batch)})
+		p.setActiveContext(msg.GroupId, true, newActiveRequest(cancelRun, batchRequester(batch), start))
 		next, ok := p.drainChatBatches(runCtx, eventDeadline, bot, msg.GroupId, true, chat, batch)
 		p.clearActiveContext(msg.GroupId, true)
 		if !ok {
@@ -461,6 +466,10 @@ func (p *AIChatPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command
 		return p.handlePlanCommand(ctx, bot, cmd, msg)
 	}
 
+	if cmd.Name == "status" {
+		return p.handleStatusCommand(bot, msg)
+	}
+
 	if cmd.Name == "cmd" {
 		return p.handleCmdCommand(ctx, bot, cmd, msg)
 	}
@@ -512,8 +521,9 @@ func (p *AIChatPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command
 	// 先取出可能遗留的排队消息（上一响应结束瞬间到达、未来得及处理的），与本次消息合并；
 	// 之后每轮响应结束继续排空队列，直到没有新消息或总预算耗尽（见 drainChatBatches）
 	batch := append(p.drainPending(msg.Sender.UserId, false), msg)
+	start := time.Now()
 	for len(batch) > 0 {
-		p.setActiveContext(msg.Sender.UserId, false, &activeRequest{cancel: cancelRun, requester: batchRequester(batch)})
+		p.setActiveContext(msg.Sender.UserId, false, newActiveRequest(cancelRun, batchRequester(batch), start))
 		next, ok := p.drainChatBatches(runCtx, eventDeadline, bot, msg.Sender.UserId, false, chat, batch)
 		p.clearActiveContext(msg.Sender.UserId, false)
 		if !ok {
@@ -604,6 +614,21 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	chatOpts.PreToolGate = p.buildPreToolGate(sessionKey(id, isGroup), agenthook.AgentKindMain, lastMsg.Sender.UserId,
 		func(text string) { p.sendPlainText(b, id, isGroup, text) },
 		p.buildAdminPromptSender(b))
+
+	// 处理阶段上报（/status 展示）：请求期间活跃请求记录最近一步在做什么。
+	// 门禁在并行工具协程内调用，updateSessionStage 内部按活跃请求加锁写入。
+	// 阶段文案用「工具调用 <名>」而非「执行工具」：门禁里可能正在等待人工审批
+	// （最长数分钟），此时工具尚未真正执行，文案要涵盖这段等待。
+	sKey := sessionKey(id, isGroup)
+	p.updateSessionStage(sKey, stageWaitingModel)
+	gate := chatOpts.PreToolGate
+	chatOpts.PreToolGate = func(ctx context.Context, call llmtool.ToolCall) (bool, string) {
+		p.updateSessionStage(sKey, "工具调用 "+call.Name)
+		if gate == nil {
+			return false, ""
+		}
+		return gate(ctx, call)
+	}
 
 	// 流式回复：平台支持「先发后改」（如飞书卡片/Telegram/Discord 消息 Patch）时逐字展示；
 	// 平台不支持或流式创建失败时自动退化为一次性回复（下方原发送路径）。
@@ -704,6 +729,9 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	// 流式回复收尾：Chat 返回后结束流式消息（幂等）
 	if stream != nil {
 		stream.End()
+	}
+	if err == nil {
+		p.updateSessionStage(sKey, stageSendingReply)
 	}
 	// 待办提醒哈希仅在请求成功后提交：失败轮次不消耗提醒，下一轮仍会注入
 	//（清单未变时恰恰是最需要提醒的时候）

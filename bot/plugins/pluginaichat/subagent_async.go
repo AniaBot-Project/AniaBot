@@ -383,6 +383,7 @@ func (p *AIChatPlugin) processPendingOnceWithDeadline(b bot.Bot, id message.QID,
 	lock.attachCancel(cancelRun)
 
 	batch := p.drainPending(id, isGroup)
+	start := time.Now()
 	for len(batch) > 0 {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
@@ -390,7 +391,7 @@ func (p *AIChatPlugin) processPendingOnceWithDeadline(b bot.Bot, id message.QID,
 			p.Logger.Warn("后台接管总预算耗尽，剩余排队消息留待下次接管", "id", id, "is_group", isGroup, "pending", len(batch))
 			break
 		}
-		p.setActiveContext(id, isGroup, &activeRequest{cancel: cancelRun, requester: batchRequester(batch)})
+		p.setActiveContext(id, isGroup, newActiveRequest(cancelRun, batchRequester(batch), start))
 		batchCtx, cancelBatch := context.WithTimeout(runCtx, min(p.msgEventTimeout, remaining))
 		ok := p.processChatBatch(batchCtx, b, id, isGroup, chat, batch)
 		cancelBatch()

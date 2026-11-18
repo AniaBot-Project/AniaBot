@@ -50,14 +50,7 @@ func (p *AIChatPlugin) touchChat(key string) {
 
 // hasPending 判断会话是否有排队消息（只读探测，不创建队列）。
 func (p *AIChatPlugin) hasPending(key string) bool {
-	v, ok := p.pendingMsgs.Load(key)
-	if !ok {
-		return false
-	}
-	q := v.(*pendingQueue)
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return len(q.items) > 0
+	return p.pendingCount(key) > 0
 }
 
 // startChatJanitor 启动会话回收 goroutine。插件无 Stop 钩子，goroutine 与

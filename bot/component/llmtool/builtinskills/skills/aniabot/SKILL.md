@@ -79,7 +79,7 @@ AniaBot 是一个用 Go 写的插件驱动型多平台机器人框架，**你自
 | `/proactive on` / `/proactive off` | 立即生效，并写回 `plugin.ai_chat_bot.proactive.scopes`；面板手改该键后可用 `/proactive reload` 免重启重读 |
 | `plugin.ai_chat_bot.skills`（白名单） | **重启后**（面板上传/删除技能会自动热重载，但白名单本身在启动时读） |
 | `bot.balance.*`（面板概览的 API 余额） | 修改后即时生效 |
-| `/plan on`、`/plan off`、`#新对话`、`/stop` | 会话内立即生效 |
+| `/plan on`、`/plan off`、`#新对话`、`/stop`、`/status` | 会话内立即生效 |
 
 ## 五、用户能用的指令（群聊里一条都要先 @ 机器人）
 
@@ -87,6 +87,7 @@ AniaBot 是一个用 Go 写的插件驱动型多平台机器人框架，**你自
 | --- | --- | --- |
 | `/help` | 列出已加载插件与各自的用法 | 所有人 |
 | `/stop` | 立刻停止当前会话正在进行的 AI 回复（含排队的消息） | 所有人 |
+| `/status` | 查看当前会话的 AI 状态：响应中 / 等待子代理 / 排队中 / 空闲，含已持续时长、最近阶段与排队消息数 | 所有人 |
 | `/plan on` 或 `/plan off`、`/plan` | 计划模式开关：只分析规划，禁止改文件、跑命令、改配置等副作用操作 | 所有人 |
 | `/clock` | 定时任务：`list` / `add [--once] <cron> \| <标题> \| <内容>` / `del <id>` / `on` 或 `off <id>` / `info <id>` / `timeout <id> <秒>` / `log [n]` / `help`；`list all`、`run <id>` 仅管理员 | 所有人（部分仅管理员） |
 | `/proactive` | 主动互动：`on` / `off` / `reload` / `now [想说的话]` / `list` / `log [n]` / `help` | 查看所有人，修改仅管理员 |

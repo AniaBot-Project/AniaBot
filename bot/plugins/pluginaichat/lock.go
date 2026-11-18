@@ -86,6 +86,19 @@ func (p *AIChatPlugin) tryLockDetailed(id message.QID, isGroup bool) (*sessionLo
 	return l, lockOK
 }
 
+// sessionLockHeld 探测会话锁是否被持有（只读，不获取锁）。供 /status 在
+// activeContexts 尚未登记（建会话/回放历史阶段）时判断会话是否正在处理。
+// lockStorage 未初始化（插件降载模式）或读失败均视为未持有。
+func (p *AIChatPlugin) sessionLockHeld(key string) bool {
+	if p.lockStorage == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, ok := p.lockStorage.GetString(ctx, key)
+	return ok
+}
+
 // tryLock 兼容包装：不关心失败原因（会话正忙 / 并发槽位已满）的调用方使用。
 func (p *AIChatPlugin) tryLock(id message.QID, isGroup bool) *sessionLock {
 	lock, _ := p.tryLockDetailed(id, isGroup)
