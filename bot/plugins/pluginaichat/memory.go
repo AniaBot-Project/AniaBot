@@ -55,6 +55,8 @@ type memoryStore interface {
 	update(scope string, e memoryEntry) bool
 	// remove 按 ID 删除一条记忆；ID 不存在时返回 false。
 	remove(scope, id string) bool
+	// removeMany 按 ID 批量删除记忆（面板多选删除），返回实际删除条数。
+	removeMany(scope string, ids []string) int
 	// scopes 列出已有记忆的全部 scope（排序后返回）。
 	scopes() []string
 }
@@ -328,6 +330,17 @@ func (m *memoryManager) remove(scope, id string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.store.remove(scope, id)
+}
+
+// removeMany 批量删除指定 scope 中的多条记忆，返回实际删除条数
+// （不存在的 ID 忽略）。供面板多选删除使用。
+func (m *memoryManager) removeMany(scope string, ids []string) int {
+	if len(ids) == 0 {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.store.removeMany(scope, ids)
 }
 
 // scopes 列出当前已有记忆的全部会话 scope（g:会话ID / f:用户ID），排序后返回。

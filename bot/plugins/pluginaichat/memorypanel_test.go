@@ -109,6 +109,56 @@ func TestMemoryPanelScopeValidation(t *testing.T) {
 	}
 }
 
+func TestMemoryPanelBatchDelete(t *testing.T) {
+	p := newTestMemoryPlugin()
+
+	ids := make([]string, 0, 3)
+	for _, content := range []string{"记忆一", "记忆二", "记忆三"} {
+		id, err := p.MemoryCreate(plugininfo.MemoryEntryUpsert{Scope: "g:123", Content: content})
+		if err != nil {
+			t.Fatalf("MemoryCreate(%q) 失败: %v", content, err)
+		}
+		ids = append(ids, id)
+	}
+	// 另一个 scope 的条目不应被波及
+	otherID, err := p.MemoryCreate(plugininfo.MemoryEntryUpsert{Scope: "g:456", Content: "别的群"})
+	if err != nil {
+		t.Fatalf("MemoryCreate(其他 scope) 失败: %v", err)
+	}
+
+	// 删除两条 + 一个不存在的 ID + 重复/空 ID：返回实际删除条数
+	deleted, err := p.MemoryDeleteMany("g:123", []string{ids[0], ids[0], "", ids[2], "deadbeef"})
+	if err != nil {
+		t.Fatalf("MemoryDeleteMany 失败: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("应删除 2 条，实际 %d 条", deleted)
+	}
+	entries, err := p.MemoryList("g:123")
+	if err != nil {
+		t.Fatalf("MemoryList 失败: %v", err)
+	}
+	if len(entries) != 1 || entries[0].ID != ids[1] {
+		t.Fatalf("删除后应只剩 1 条，实际 %+v", entries)
+	}
+	// 其他 scope 不受影响
+	if got, _ := p.MemoryList("g:456"); len(got) != 1 || got[0].ID != otherID {
+		t.Fatalf("其他 scope 的记忆被误删: %+v", got)
+	}
+
+	// 再次删除同一批 ID：返回 0 且不报错（面板重复点击/并发删除）
+	if n, err := p.MemoryDeleteMany("g:123", []string{ids[0], ids[2]}); err != nil || n != 0 {
+		t.Fatalf("重复删除应返回 0 且不报错，实际 n=%d err=%v", n, err)
+	}
+	// 空 ID 列表与非法 scope 应拒绝
+	if _, err := p.MemoryDeleteMany("g:123", nil); err == nil {
+		t.Fatal("空 ID 列表应报错")
+	}
+	if _, err := p.MemoryDeleteMany("bad-scope", []string{ids[1]}); err == nil {
+		t.Fatal("非法 scope 应报错")
+	}
+}
+
 func TestMemoryPanelDisabled(t *testing.T) {
 	p := &AIChatPlugin{}
 	p.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -127,5 +177,8 @@ func TestMemoryPanelDisabled(t *testing.T) {
 	}
 	if err := p.MemoryDelete("g:123", "x"); err == nil {
 		t.Fatal("功能未启用时 MemoryDelete 应报错")
+	}
+	if _, err := p.MemoryDeleteMany("g:123", []string{"x"}); err == nil {
+		t.Fatal("功能未启用时 MemoryDeleteMany 应报错")
 	}
 }

@@ -118,3 +118,20 @@ func (p *AIChatPlugin) MemoryDelete(scope, id string) error {
 	p.Logger.Info("记忆已通过 Web 面板删除", "scope", scope, "id", id)
 	return nil
 }
+
+// MemoryDeleteMany 批量删除指定 scope 中的多条记忆，返回实际删除条数。
+// 与单条删除不同，不存在的 ID 直接忽略（面板多选后可能含并发删除的条目）。
+func (p *AIChatPlugin) MemoryDeleteMany(scope string, ids []string) (int, error) {
+	if p.memoryManager == nil {
+		return 0, errMemoryDisabled
+	}
+	if !validScope(scope) {
+		return 0, fmt.Errorf("非法的会话 scope: %s", scope)
+	}
+	if len(ids) == 0 {
+		return 0, fmt.Errorf("id 列表不能为空")
+	}
+	deleted := p.memoryManager.removeMany(scope, ids)
+	p.Logger.Info("记忆已通过 Web 面板批量删除", "scope", scope, "requested", len(ids), "deleted", deleted)
+	return deleted, nil
+}

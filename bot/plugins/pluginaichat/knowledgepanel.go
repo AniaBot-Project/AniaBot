@@ -135,6 +135,23 @@ func (p *AIChatPlugin) KnowledgeDelete(scope, id string) error {
 	return nil
 }
 
+// KnowledgeDeleteMany 批量删除指定 scope 中的多篇文档，返回实际删除条数。
+// 与单条删除不同，不存在的 ID 直接忽略（面板多选后可能含并发删除的文档）。
+func (p *AIChatPlugin) KnowledgeDeleteMany(scope string, ids []string) (int, error) {
+	if p.knowledgeManager == nil {
+		return 0, errKnowledgeDisabled
+	}
+	if !validKbScope(scope) {
+		return 0, fmt.Errorf("非法的知识库作用域: %s", scope)
+	}
+	if len(ids) == 0 {
+		return 0, fmt.Errorf("id 列表不能为空")
+	}
+	deleted := p.knowledgeManager.removeMany(scope, ids)
+	p.Logger.Info("知识库文档已通过 Web 面板批量删除", "scope", scope, "requested", len(ids), "deleted", deleted)
+	return deleted, nil
+}
+
 // KnowledgeImportURL 抓取网页正文导入知识库。复用 Jina Reader API，
 // 抓取结果截断后入库；标题取抓取文本中的一级 Markdown 标题，否则用 URL。
 func (p *AIChatPlugin) KnowledgeImportURL(scope, targetURL string) (string, error) {

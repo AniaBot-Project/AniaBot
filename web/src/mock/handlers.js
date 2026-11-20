@@ -755,6 +755,17 @@ const routes = [
       return { ok: true }
     },
   },
+  {
+    m: 'POST', re: /^\/api\/memory\/batch-delete$/, h: (c) => {
+      const b = c.body || {}
+      const ids = new Set(b.ids || [])
+      const before = state.memories.length
+      state.memories = state.memories.filter((x) => !(x.scope === b.scope && ids.has(x.id)))
+      const deleted = before - state.memories.length
+      addOpLog('memory', 'memory_delete', `面板批量删除记忆 ${b.scope}/${deleted} 条`)
+      return { ok: true, deleted }
+    },
+  },
 
   // Agent 团队
   { m: 'GET', re: /^\/api\/team\/roles$/, h: () => teamRoles },
@@ -832,6 +843,17 @@ const routes = [
       const scope = c.query.get('scope'), id = c.query.get('id')
       state.knowledge = state.knowledge.filter((x) => !(x.scope === scope && x.id === id))
       return { ok: true }
+    },
+  },
+  {
+    m: 'POST', re: /^\/api\/knowledge\/batch-delete$/, h: (c) => {
+      const b = c.body || {}
+      const ids = new Set(b.ids || [])
+      const before = state.knowledge.length
+      state.knowledge = state.knowledge.filter((x) => !(x.scope === b.scope && ids.has(x.id)))
+      const deleted = before - state.knowledge.length
+      addOpLog('knowledge', 'knowledge_delete', `面板批量删除知识库文档 ${b.scope}/${deleted} 篇`)
+      return { ok: true, deleted }
     },
   },
 

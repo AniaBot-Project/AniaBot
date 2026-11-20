@@ -62,7 +62,39 @@
             <span class="text-sm font-semibold text-slate-800">{{ displayName(current) }}</span>
             <span class="ml-2 text-[11px] font-mono text-slate-400">{{ current.scope }}</span>
           </div>
-          <span class="text-xs text-slate-400 shrink-0">{{ entriesLoading ? '加载中…' : entries.length + ' 条记忆' }}</span>
+          <div class="flex items-center gap-3 shrink-0">
+            <label v-if="entries.length" class="flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                :checked="allSelected"
+                :indeterminate.prop="someSelected"
+                :disabled="entriesLoading"
+                @change="toggleAll($event)"
+              />
+              全选
+            </label>
+            <span class="text-xs text-slate-400">{{ entriesLoading ? '加载中…' : entries.length + ' 条记忆' }}</span>
+          </div>
+        </div>
+        <!-- 多选操作栏（有勾选时显示） -->
+        <div
+          v-if="selectedCount > 0"
+          class="px-5 py-2 border-b border-white/50 bg-[#0071e3]/8 flex items-center justify-between gap-3 flex-wrap"
+        >
+          <span class="text-xs text-slate-600">
+            已选 <span class="font-semibold">{{ selectedCount }}</span> 条记忆
+          </span>
+          <div class="flex items-center gap-1.5">
+            <Button type="text" size="small" :disabled="deleting" @click="clearSelection">取消选择</Button>
+            <Button
+              type="default"
+              size="small"
+              danger
+              :disabled="deleting"
+              :loading="deleting"
+              @click="onDeleteSelected"
+            >删除所选</Button>
+          </div>
         </div>
         <ul class="divide-y divide-slate-100">
           <li v-if="!current && loading" class="list-none">
@@ -77,7 +109,15 @@
           <li v-else-if="entries.length === 0" class="py-12 text-sm text-slate-400 text-center list-none">
             该会话暂无记忆
           </li>
-          <li v-for="e in entries" :key="e.id" class="px-5 py-4 flex items-start gap-4">
+          <li v-for="e in entries" :key="e.id" class="px-5 py-4 flex items-start gap-3">
+            <input
+              type="checkbox"
+              class="mt-1 shrink-0 cursor-pointer"
+              :checked="selected.has(e.id)"
+              :aria-label="'选择记忆 ' + e.id"
+              title="选中以批量删除"
+              @change="toggleSelect(e.id)"
+            />
             <div class="min-w-0 flex-1">
               <p class="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap break-words">{{ e.content }}</p>
               <div class="flex items-center gap-1.5 mt-2 flex-wrap">
@@ -157,6 +197,9 @@ const kindFilter = ref('all')
 const names = ref({})
 const msg = ref('')
 const msgOk = ref(false)
+// 多选删除：选中项只在当前会话内有效，切换会话时清空，列表刷新后剔除已删除的 ID
+const selected = ref(new Set())
+const deleting = ref(false)
 
 const showForm = ref(false)
 const form = reactive({ scope: '', id: '', user_id: '', content: '', tagsText: '', msg: '' })
@@ -183,6 +226,33 @@ async function loadNames() {
   names.value = await api.getContactNameMap()
 }
 
+// ---------- 多选删除 ----------
+const selectedCount = computed(() => entries.value.filter((e) => selected.value.has(e.id)).length)
+const allSelected = computed(() => entries.value.length > 0 && entries.value.every((e) => selected.value.has(e.id)))
+const someSelected = computed(() => !allSelected.value && entries.value.some((e) => selected.value.has(e.id)))
+
+function toggleSelect(id) {
+  const next = new Set(selected.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selected.value = next
+}
+
+function toggleAll(e) {
+  selected.value = e.target.checked ? new Set(entries.value.map((e) => e.id)) : new Set()
+}
+
+function clearSelection() {
+  selected.value = new Set()
+}
+
+// 列表刷新后剔除已不存在的选中项（记忆被删除或换了会话）
+function pruneSelection() {
+  const ids = new Set(entries.value.map((e) => e.id))
+  const next = new Set([...selected.value].filter((id) => ids.has(id)))
+  if (next.size !== selected.value.size) selected.value = next
+}
+
 async function load() {
   try {
     scopes.value = (await api.getMemoryScopes()) || []
@@ -197,6 +267,7 @@ async function load() {
       await loadEntries()
     } else {
       entries.value = []
+      clearSelection()
     }
   } catch (e) {
     msgOk.value = false
@@ -207,6 +278,8 @@ async function load() {
 }
 
 async function selectScope(s) {
+  // 选中项只属于当前会话，切换时清空，避免把别的会话的 ID 带过去
+  clearSelection()
   current.value = s
   await loadEntries()
 }
@@ -224,6 +297,7 @@ async function loadEntries() {
     msg.value = e.message
   } finally {
     entriesLoading.value = false
+    pruneSelection()
   }
 }
 
@@ -292,6 +366,27 @@ async function onDelete(e) {
   } catch (err) {
     msgOk.value = false
     msg.value = err.message
+  }
+}
+
+// 批量删除当前会话中勾选的记忆：一次请求删除，返回实际删除条数
+async function onDeleteSelected() {
+  if (!current.value || selectedCount.value === 0 || deleting.value) return
+  const count = selectedCount.value
+  if (!await confirmAction({ title: '批量删除', message: `确定要删除选中的 ${count} 条记忆吗？删除后不可恢复。`, confirmText: '删除' })) return
+  msg.value = ''
+  deleting.value = true
+  try {
+    const res = await api.deleteMemories(current.value.scope, [...selected.value])
+    clearSelection()
+    msgOk.value = true
+    msg.value = `已删除 ${res.deleted ?? count} 条记忆`
+    await load()
+  } catch (err) {
+    msgOk.value = false
+    msg.value = err.message
+  } finally {
+    deleting.value = false
   }
 }
 

@@ -3,6 +3,7 @@ package pluginaichat
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
@@ -80,6 +81,37 @@ func TestSQLMemoryStoreFieldRoundTrip(t *testing.T) {
 		if e.ID == "def67890" && (e.Tags != nil || e.Emb != nil) {
 			t.Fatalf("空 tags/emb 应读回 nil: %+v", e)
 		}
+	}
+}
+
+func TestSQLMemoryStoreRemoveManyChunked(t *testing.T) {
+	s := newSQLMemoryStore(newTestMemoryDB(t), testLogger())
+
+	// 超过单条 SQL 的 ID 上限（sqlDeleteByIDsChunk），验证分批删除与精确计数
+	total := sqlDeleteByIDsChunk + 200
+	ids := make([]string, 0, total)
+	for i := 0; i < total; i++ {
+		id := fmt.Sprintf("id%05d", i)
+		ids = append(ids, id)
+		if !s.insert("g:1", memoryEntry{ID: id, Content: "记忆", CreatedAt: time.Now().UTC()}) {
+			t.Fatalf("insert %s 失败", id)
+		}
+	}
+	// 其他 scope 的同名 ID 不能被误删（scope 必须参与条件）
+	if !s.insert("g:2", memoryEntry{ID: ids[0], Content: "保留", CreatedAt: time.Now().UTC()}) {
+		t.Fatal("insert 失败")
+	}
+
+	// 重复 ID 只算一次
+	batch := append(append([]string{}, ids...), ids[0])
+	if got := s.removeMany("g:1", batch); got != total {
+		t.Fatalf("removeMany = %d, want %d", got, total)
+	}
+	if got := len(s.list("g:1")); got != 0 {
+		t.Fatalf("g:1 应被清空，实际剩 %d 条", got)
+	}
+	if got := len(s.list("g:2")); got != 1 {
+		t.Fatalf("其他 scope 被误删，实际剩 %d 条", got)
 	}
 }
 

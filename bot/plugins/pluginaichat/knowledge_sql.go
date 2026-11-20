@@ -206,6 +206,15 @@ func (s *sqlKbStore) remove(scope, id string) bool {
 	return n > 0
 }
 
+func (s *sqlKbStore) removeMany(scope string, ids []string) int {
+	n, err := sqlDeleteByIDs(s.db, "ania_kb_doc", scope, ids)
+	if err != nil {
+		// 分批删除中途失败时仍返回已删除条数（面板按实际条数提示）
+		s.logger.Error("批量删除知识库文档失败", "scope", scope, "count", len(ids), "deleted", n, "error", err)
+	}
+	return n
+}
+
 func (s *sqlKbStore) scopes() []string {
 	rows, err := s.db.QueryContext(context.Background(),
 		`SELECT DISTINCT scope FROM ania_kb_doc ORDER BY scope ASC`)

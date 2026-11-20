@@ -306,6 +306,9 @@ export const api = {
     request('/api/memory', { method: 'PUT', body: JSON.stringify(entry) }),
   deleteMemory: (scope, id) =>
     request(`/api/memory?scope=${encodeURIComponent(scope)}&id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // 多选删除：一次删除同一 scope 下的多条记忆，返回实际删除条数
+  deleteMemories: (scope, ids) =>
+    request('/api/memory/batch-delete', { method: 'POST', body: JSON.stringify({ scope, ids }) }),
 
   getTeamScopes: () => request('/api/team/scopes'),
   getTeams: (scope) => request(`/api/team/list?scope=${encodeURIComponent(scope)}`),
@@ -325,6 +328,9 @@ export const api = {
     request('/api/knowledge', { method: 'PUT', body: JSON.stringify(entry) }),
   deleteKnowledge: (scope, id) =>
     request(`/api/knowledge?scope=${encodeURIComponent(scope)}&id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // 多选删除：一次删除同一 scope 下的多篇文档，返回实际删除条数
+  deleteKnowledgeDocs: (scope, ids) =>
+    request('/api/knowledge/batch-delete', { method: 'POST', body: JSON.stringify({ scope, ids }) }),
   importKnowledgeURL: (scope, url) =>
     request('/api/knowledge/import-url', { method: 'POST', body: JSON.stringify({ scope, url }) }),
 

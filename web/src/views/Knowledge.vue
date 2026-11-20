@@ -63,7 +63,39 @@
             <span class="text-sm font-semibold text-slate-800">{{ displayName(current) }}</span>
             <span class="ml-2 text-[11px] font-mono text-slate-400">{{ current.scope }}</span>
           </div>
-          <span class="text-xs text-slate-400 shrink-0">{{ docsLoading ? '加载中…' : docs.length + ' 篇文档' }}</span>
+          <div class="flex items-center gap-3 shrink-0">
+            <label v-if="docs.length" class="flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                :checked="allSelected"
+                :indeterminate.prop="someSelected"
+                :disabled="docsLoading"
+                @change="toggleAll($event)"
+              />
+              全选
+            </label>
+            <span class="text-xs text-slate-400">{{ docsLoading ? '加载中…' : docs.length + ' 篇文档' }}</span>
+          </div>
+        </div>
+        <!-- 多选操作栏（有勾选时显示） -->
+        <div
+          v-if="selectedCount > 0"
+          class="px-5 py-2 border-b border-white/50 bg-[#0071e3]/8 flex items-center justify-between gap-3 flex-wrap"
+        >
+          <span class="text-xs text-slate-600">
+            已选 <span class="font-semibold">{{ selectedCount }}</span> 篇文档
+          </span>
+          <div class="flex items-center gap-1.5">
+            <Button type="text" size="small" :disabled="deleting" @click="clearSelection">取消选择</Button>
+            <Button
+              type="default"
+              size="small"
+              danger
+              :disabled="deleting"
+              :loading="deleting"
+              @click="onDeleteSelected"
+            >删除所选</Button>
+          </div>
         </div>
         <ul class="divide-y divide-slate-100">
           <li v-if="!current && loading" class="list-none">
@@ -78,7 +110,15 @@
           <li v-else-if="docs.length === 0" class="py-12 text-sm text-slate-400 text-center list-none">
             该作用域暂无文档
           </li>
-          <li v-for="d in docs" :key="d.id" class="px-5 py-4 flex items-start gap-4">
+          <li v-for="d in docs" :key="d.id" class="px-5 py-4 flex items-start gap-3">
+            <input
+              type="checkbox"
+              class="mt-1 shrink-0 cursor-pointer"
+              :checked="selected.has(d.id)"
+              :aria-label="'选择 ' + (d.title || '文档')"
+              title="选中以批量删除"
+              @change="toggleSelect(d.id)"
+            />
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
                 <span class="text-sm font-semibold text-slate-800 truncate">{{ d.title || '(无标题)' }}</span>
@@ -192,6 +232,9 @@ const docsLoading = ref(false)
 const kindFilter = ref('all')
 const msg = ref('')
 const msgOk = ref(false)
+// 多选删除：选中项只在当前作用域内有效，切换作用域时清空，列表刷新后剔除已删除的 ID
+const selected = ref(new Set())
+const deleting = ref(false)
 
 const showForm = ref(false)
 const form = reactive({ scope: '', id: '', title: '', content: '', tagsText: '', source: '', msg: '' })
@@ -230,6 +273,33 @@ function preview(content) {
   return content.length > 240 ? content.slice(0, 240) + '…' : content
 }
 
+// ---------- 多选删除 ----------
+const selectedCount = computed(() => docs.value.filter((d) => selected.value.has(d.id)).length)
+const allSelected = computed(() => docs.value.length > 0 && docs.value.every((d) => selected.value.has(d.id)))
+const someSelected = computed(() => !allSelected.value && docs.value.some((d) => selected.value.has(d.id)))
+
+function toggleSelect(id) {
+  const next = new Set(selected.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selected.value = next
+}
+
+function toggleAll(e) {
+  selected.value = e.target.checked ? new Set(docs.value.map((d) => d.id)) : new Set()
+}
+
+function clearSelection() {
+  selected.value = new Set()
+}
+
+// 列表刷新后剔除已不存在的选中项（文档被删除或换了作用域）
+function pruneSelection() {
+  const ids = new Set(docs.value.map((d) => d.id))
+  const next = new Set([...selected.value].filter((id) => ids.has(id)))
+  if (next.size !== selected.value.size) selected.value = next
+}
+
 async function load() {
   try {
     scopes.value = (await api.getKnowledgeScopes()) || []
@@ -243,6 +313,7 @@ async function load() {
       await loadDocs()
     } else {
       docs.value = []
+      clearSelection()
     }
   } catch (e) {
     msgOk.value = false
@@ -253,6 +324,8 @@ async function load() {
 }
 
 async function selectScope(s) {
+  // 选中项只属于当前作用域，切换时清空，避免把别的作用域的 ID 带过去
+  clearSelection()
   current.value = s
   await loadDocs()
 }
@@ -270,6 +343,7 @@ async function loadDocs() {
     msg.value = e.message
   } finally {
     docsLoading.value = false
+    pruneSelection()
   }
 }
 
@@ -340,6 +414,27 @@ async function onDelete(d) {
   } catch (err) {
     msgOk.value = false
     msg.value = err.message
+  }
+}
+
+// 批量删除当前作用域中勾选的文档：一次请求删除，返回实际删除条数
+async function onDeleteSelected() {
+  if (!current.value || selectedCount.value === 0 || deleting.value) return
+  const count = selectedCount.value
+  if (!await confirmAction({ title: '批量删除', message: `确定要删除选中的 ${count} 篇文档吗？删除后不可恢复。`, confirmText: '删除' })) return
+  msg.value = ''
+  deleting.value = true
+  try {
+    const res = await api.deleteKnowledgeDocs(current.value.scope, [...selected.value])
+    clearSelection()
+    msgOk.value = true
+    msg.value = `已删除 ${res.deleted ?? count} 篇文档`
+    await load()
+  } catch (err) {
+    msgOk.value = false
+    msg.value = err.message
+  } finally {
+    deleting.value = false
   }
 }
 

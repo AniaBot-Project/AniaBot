@@ -68,6 +68,8 @@ type kbStore interface {
 	update(scope string, d kbDoc) bool
 	// remove 按 ID 删除一篇文档；ID 不存在时返回 false。
 	remove(scope, id string) bool
+	// removeMany 按 ID 批量删除文档（面板多选删除），返回实际删除条数。
+	removeMany(scope string, ids []string) int
 	// count 返回指定 scope 的文档条数（不加载文档内容，供面板统计用）。
 	count(scope string) int
 	// scopes 列出已有文档的全部 scope（排序后返回）。
@@ -329,6 +331,22 @@ func (km *knowledgeManager) remove(scope, id string) bool {
 		km.invalidateCacheLocked(scope)
 	}
 	return ok
+}
+
+// removeMany 批量删除指定 scope 中的多篇文档，返回实际删除条数
+// （不存在的 ID 忽略）。供面板多选删除使用；删除后使该 scope 的检索缓存失效。
+func (km *knowledgeManager) removeMany(scope string, ids []string) int {
+	if len(ids) == 0 {
+		return 0
+	}
+	km.mu.Lock()
+	defer km.mu.Unlock()
+
+	n := km.store.removeMany(scope, ids)
+	if n > 0 {
+		km.invalidateCacheLocked(scope)
+	}
+	return n
 }
 
 // update 按 ID 更新指定 scope 中一条文档的标题、内容、标签与来源；

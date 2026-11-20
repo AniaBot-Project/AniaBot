@@ -179,6 +179,13 @@ type MemorySource interface {
 	MemoryDelete(scope, id string) error
 }
 
+// MemoryBatchDeleteSource 可选接口：在 MemorySource 之外提供多选批量删除能力。
+// 插件未实现时面板逐条调用 MemoryDelete 回退，功能仍可用（只是多几次写入）。
+type MemoryBatchDeleteSource interface {
+	// MemoryDeleteMany 删除指定 scope 下的多条记忆，返回实际删除条数
+	MemoryDeleteMany(scope string, ids []string) (int, error)
+}
+
 // QuotaSource 可选接口：插件实现后，面板「配额管理」页可查看每日 Token 用量
 // 并清零（当前由 AI 对话插件实现）。改动即时生效，无需重启。
 type QuotaSource interface {
@@ -231,6 +238,13 @@ type KnowledgeBaseSource interface {
 	KnowledgeDelete(scope, id string) error
 	// KnowledgeImportURL 抓取网页正文导入知识库，返回生成的 ID
 	KnowledgeImportURL(scope, url string) (string, error)
+}
+
+// KnowledgeBatchDeleteSource 可选接口：在 KnowledgeBaseSource 之外提供多选批量
+// 删除能力。插件未实现时面板逐条调用 KnowledgeDelete 回退，功能仍可用。
+type KnowledgeBatchDeleteSource interface {
+	// KnowledgeDeleteMany 删除指定 scope 下的多篇文档，返回实际删除条数
+	KnowledgeDeleteMany(scope string, ids []string) (int, error)
 }
 
 // Options 面板依赖。
@@ -359,6 +373,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/memory", s.requireAuth(http.HandlerFunc(s.handleMemoryCreate)))
 	s.mux.Handle("PUT /api/memory", s.requireAuth(http.HandlerFunc(s.handleMemoryUpdate)))
 	s.mux.Handle("DELETE /api/memory", s.requireAuth(http.HandlerFunc(s.handleMemoryDelete)))
+	s.mux.Handle("POST /api/memory/batch-delete", s.requireAuth(http.HandlerFunc(s.handleMemoryBatchDelete)))
 
 	s.mux.Handle("GET /api/team/roles", s.requireAuth(http.HandlerFunc(s.handleTeamRoles)))
 	s.mux.Handle("GET /api/team/scopes", s.requireAuth(http.HandlerFunc(s.handleTeamScopes)))
@@ -373,6 +388,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/knowledge", s.requireAuth(http.HandlerFunc(s.handleKnowledgeCreate)))
 	s.mux.Handle("PUT /api/knowledge", s.requireAuth(http.HandlerFunc(s.handleKnowledgeUpdate)))
 	s.mux.Handle("DELETE /api/knowledge", s.requireAuth(http.HandlerFunc(s.handleKnowledgeDelete)))
+	s.mux.Handle("POST /api/knowledge/batch-delete", s.requireAuth(http.HandlerFunc(s.handleKnowledgeBatchDelete)))
 	s.mux.Handle("POST /api/knowledge/import-url", s.requireAuth(http.HandlerFunc(s.handleKnowledgeImportURL)))
 	s.mux.Handle("GET /api/qrlogin/sources", s.requireAuth(http.HandlerFunc(s.handleQRLoginSources)))
 	s.mux.Handle("POST /api/qrlogin/{platform}/start", s.requireAuth(http.HandlerFunc(s.handleQRLoginStart)))
@@ -1925,6 +1941,71 @@ func (s *Server) handleMemoryDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// batchDeleteRequest 是批量删除的请求体（记忆 / 知识库共用），ids 为同 scope 下的条目 ID。
+type batchDeleteRequest struct {
+	Scope string   `json:"scope"`
+	IDs   []string `json:"ids"`
+}
+
+// deleteEach 逐条执行删除（数据源未实现批量接口时的回退），返回成功条数与首个错误。
+// 不存在的条目（并发删除、列表滞后）跳过；只有一条都没删掉且出现错误时才返回该错误
+// （如功能未启用），避免把「已删除一部分」误报为整体失败。
+func deleteEach(ids []string, del func(id string) error) (int, error) {
+	deleted := 0
+	var firstErr error
+	for _, id := range ids {
+		if err := del(id); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		deleted++
+	}
+	if deleted == 0 && firstErr != nil {
+		return 0, firstErr
+	}
+	return deleted, nil
+}
+
+// handleMemoryBatchDelete 批量删除多条记忆（body: {"scope":"g:123","ids":["a","b"]}）。
+func (s *Server) handleMemoryBatchDelete(w http.ResponseWriter, r *http.Request) {
+	if s.opt.Memories == nil {
+		writeError(w, http.StatusNotFound, "记忆功能未启用")
+		return
+	}
+	var req batchDeleteRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	if strings.TrimSpace(req.Scope) == "" {
+		writeError(w, http.StatusBadRequest, "scope 不能为空")
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "ids 不能为空")
+		return
+	}
+	deleted, err := deleteMemories(s.opt.Memories, req.Scope, req.IDs)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	oplog.Record(oplog.CategoryMemory, "memory_delete",
+		fmt.Sprintf("面板批量删除记忆 %s/%d 条", req.Scope, deleted))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "deleted": deleted})
+}
+
+// deleteMemories 批量删除记忆：数据源实现 MemoryBatchDeleteSource 时一次删除，
+// 否则逐条调用 MemoryDelete 回退（兼容只实现基础接口的插件）。
+func deleteMemories(src MemorySource, scope string, ids []string) (int, error) {
+	if batch, ok := src.(MemoryBatchDeleteSource); ok {
+		return batch.MemoryDeleteMany(scope, ids)
+	}
+	return deleteEach(ids, func(id string) error { return src.MemoryDelete(scope, id) })
+}
+
 // ---- team handlers（Agent 团队管理） ----
 
 // handleTeamRoles 返回预置团队成员角色列表（功能未启用时返回空数组）。
@@ -2107,6 +2188,45 @@ func (s *Server) handleKnowledgeDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	oplog.Record(oplog.CategoryKnowledge, "knowledge_delete", "面板删除知识库文档 "+q.Get("scope")+"/"+q.Get("id"))
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleKnowledgeBatchDelete 批量删除多篇知识库文档
+// （body: {"scope":"global","ids":["a","b"]}）。
+func (s *Server) handleKnowledgeBatchDelete(w http.ResponseWriter, r *http.Request) {
+	if s.opt.Knowledge == nil {
+		writeError(w, http.StatusNotFound, "知识库功能未启用")
+		return
+	}
+	var req batchDeleteRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	if strings.TrimSpace(req.Scope) == "" {
+		writeError(w, http.StatusBadRequest, "scope 不能为空")
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "ids 不能为空")
+		return
+	}
+	deleted, err := deleteKnowledgeDocs(s.opt.Knowledge, req.Scope, req.IDs)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	oplog.Record(oplog.CategoryKnowledge, "knowledge_delete",
+		fmt.Sprintf("面板批量删除知识库文档 %s/%d 篇", req.Scope, deleted))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "deleted": deleted})
+}
+
+// deleteKnowledgeDocs 批量删除知识库文档：数据源实现 KnowledgeBatchDeleteSource
+// 时一次删除，否则逐条调用 KnowledgeDelete 回退（兼容只实现基础接口的插件）。
+func deleteKnowledgeDocs(src KnowledgeBaseSource, scope string, ids []string) (int, error) {
+	if batch, ok := src.(KnowledgeBatchDeleteSource); ok {
+		return batch.KnowledgeDeleteMany(scope, ids)
+	}
+	return deleteEach(ids, func(id string) error { return src.KnowledgeDelete(scope, id) })
 }
 
 // handleKnowledgeImportURL 抓取网页正文导入知识库。

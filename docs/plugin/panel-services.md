@@ -158,6 +158,11 @@ type MemorySource interface {
     MemoryUpdate(up plugininfo.MemoryEntryUpsert) error
     MemoryDelete(scope, id string) error
 }
+
+// 可选：多选批量删除（未实现时面板逐条调用 MemoryDelete 回退）
+type MemoryBatchDeleteSource interface {
+    MemoryDeleteMany(scope string, ids []string) (int, error)
+}
 ```
 
 ### KnowledgeBaseSource —— 知识库页
@@ -170,6 +175,11 @@ type KnowledgeBaseSource interface {
     KnowledgeUpdate(up plugininfo.KnowledgeDocUpsert) error
     KnowledgeDelete(scope, id string) error
     KnowledgeImportURL(scope, url string) (string, error)
+}
+
+// 可选：多选批量删除（未实现时面板逐条调用 KnowledgeDelete 回退）
+type KnowledgeBatchDeleteSource interface {
+    KnowledgeDeleteMany(scope string, ids []string) (int, error)
 }
 ```
 

@@ -114,6 +114,56 @@ func TestKnowledgePanelScopeValidation(t *testing.T) {
 	}
 }
 
+func TestKnowledgePanelBatchDelete(t *testing.T) {
+	p := newTestKnowledgePlugin()
+
+	ids := make([]string, 0, 3)
+	for _, title := range []string{"文档一", "文档二", "文档三"} {
+		id, err := p.KnowledgeCreate(plugininfo.KnowledgeDocUpsert{Scope: "global", Title: title, Content: title + " 的正文"})
+		if err != nil {
+			t.Fatalf("KnowledgeCreate(%q) 失败: %v", title, err)
+		}
+		ids = append(ids, id)
+	}
+	// 另一个作用域的文档不应被波及
+	otherID, err := p.KnowledgeCreate(plugininfo.KnowledgeDocUpsert{Scope: "g:123", Title: "群文档", Content: "群里的资料"})
+	if err != nil {
+		t.Fatalf("KnowledgeCreate(其他 scope) 失败: %v", err)
+	}
+
+	// 删除两篇 + 一个不存在的 ID + 重复/空 ID：返回实际删除条数
+	deleted, err := p.KnowledgeDeleteMany("global", []string{ids[0], ids[0], "", ids[2], "deadbeef"})
+	if err != nil {
+		t.Fatalf("KnowledgeDeleteMany 失败: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("应删除 2 篇，实际 %d 篇", deleted)
+	}
+	docs, err := p.KnowledgeList("global")
+	if err != nil {
+		t.Fatalf("KnowledgeList 失败: %v", err)
+	}
+	if len(docs) != 1 || docs[0].ID != ids[1] {
+		t.Fatalf("删除后应只剩 1 篇，实际 %+v", docs)
+	}
+	// 其他作用域不受影响
+	if got, _ := p.KnowledgeList("g:123"); len(got) != 1 || got[0].ID != otherID {
+		t.Fatalf("其他作用域的文档被误删: %+v", got)
+	}
+
+	// 再次删除同一批 ID：返回 0 且不报错（面板重复点击/并发删除）
+	if n, err := p.KnowledgeDeleteMany("global", []string{ids[0], ids[2]}); err != nil || n != 0 {
+		t.Fatalf("重复删除应返回 0 且不报错，实际 n=%d err=%v", n, err)
+	}
+	// 空 ID 列表与非法 scope 应拒绝
+	if _, err := p.KnowledgeDeleteMany("global", nil); err == nil {
+		t.Fatal("空 ID 列表应报错")
+	}
+	if _, err := p.KnowledgeDeleteMany("bad-scope", []string{ids[1]}); err == nil {
+		t.Fatal("非法 scope 应报错")
+	}
+}
+
 func TestKnowledgePanelDisabled(t *testing.T) {
 	p := &AIChatPlugin{}
 	p.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -132,6 +182,9 @@ func TestKnowledgePanelDisabled(t *testing.T) {
 	}
 	if err := p.KnowledgeDelete("global", "x"); err == nil {
 		t.Fatal("功能未启用时 KnowledgeDelete 应报错")
+	}
+	if _, err := p.KnowledgeDeleteMany("global", []string{"x"}); err == nil {
+		t.Fatal("功能未启用时 KnowledgeDeleteMany 应报错")
 	}
 	if _, err := p.KnowledgeImportURL("global", "https://example.com"); err == nil {
 		t.Fatal("功能未启用时 KnowledgeImportURL 应报错")
