@@ -426,7 +426,7 @@ function fileBadge(name) {
   padding: 6px 14px;
   border-radius: 999px;
   background: rgb(255 244 207 / 0.72);
-  border: 1.5px dashed #ecd48c;
+  border: 1.5px dashed var(--warn-line);
   color: var(--warn-ink);
   font-size: 11.5px;
   line-height: 1.5;
@@ -442,10 +442,10 @@ function fileBadge(name) {
 .notice-title {
   font-weight: 800;
   letter-spacing: 0.02em;
-  color: #9a6a06;
+  color: var(--warn-ink);
 }
 .notice-context {
-  color: #b79a63;
+  color: var(--ink-muted);
   font-weight: 700;
   max-width: 150px;
   overflow: hidden;
@@ -453,12 +453,12 @@ function fileBadge(name) {
   white-space: nowrap;
 }
 .notice-body {
-  color: #a88340;
+  color: var(--ink-soft);
   min-width: 0;
   overflow-wrap: anywhere;
 }
 .notice-time {
-  color: #b79a63;
+  color: var(--ink-muted);
   font-family: var(--font-mono);
   font-size: 10.5px;
 }
@@ -541,7 +541,7 @@ function fileBadge(name) {
 .msg-name {
   font-size: 11.5px;
   font-weight: 800;
-  color: #7c6547;
+  color: var(--ink-body);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -566,7 +566,7 @@ function fileBadge(name) {
   flex-shrink: 0;
   padding: 0 6px;
   border-radius: 999px;
-  border: 1px dashed #e5b23a;
+  border: 1px dashed var(--warn);
   background: var(--warn-soft);
   color: var(--warn-ink);
   font-size: 9.5px;
@@ -613,8 +613,8 @@ function fileBadge(name) {
 .msg-row.is-self .msg-bubble {
   border-radius: 17px 6px 17px 17px;
   background: var(--accent-tint);
-  border-color: #b9ece5;
-  box-shadow: 0 2px 0 0 rgb(17 168 155 / 0.16);
+  border-color: var(--accent-line);
+  box-shadow: 0 2px 0 0 var(--accent-soft);
 }
 .msg-bubble.has-media {
   padding-bottom: 11px;

@@ -772,7 +772,7 @@ watch(busy, () => setPollSpeed())
   border-right: 2px solid var(--line);
   background:
     radial-gradient(circle, rgb(196 184 158 / 0.2) 1px, transparent 1px) 0 0 / 18px 18px,
-    linear-gradient(180deg, #fbf6e8 0%, #f7f0dd 100%);
+    linear-gradient(180deg, var(--surface-2) 0%, var(--surface-3) 100%);
 }
 .sess-head {
   padding: 13px 12px 10px;
@@ -951,7 +951,7 @@ watch(busy, () => setPollSpeed())
   gap: 10px;
   padding: 11px 16px;
   border-bottom: 2px solid var(--line);
-  background: linear-gradient(180deg, #fffdf7, #fdf8ea);
+  background: linear-gradient(180deg, var(--surface), var(--surface-2));
 }
 .head-main {
   min-width: 0;
@@ -981,8 +981,8 @@ watch(busy, () => setPollSpeed())
   background: var(--surface-3);
   color: var(--ink-soft);
 }
-.head-chip.kind-test { background: #fff4cf; border-color: #f0dfa0; color: var(--warn-ink); }
-.head-chip.kind-group { background: var(--accent-tint); border-color: #cdeee8; color: var(--accent-strong); }
+.head-chip.kind-test { background: #fff4cf; border-color: var(--warn-line); color: var(--warn-ink); }
+.head-chip.kind-group { background: var(--accent-tint); border-color: var(--accent-line); color: var(--accent-strong); }
 .head-chip.kind-friend { background: #eef4fd; border-color: #cfe0f7; color: #3d6ea8; }
 .head-sub {
   display: flex;
@@ -1040,7 +1040,7 @@ watch(busy, () => setPollSpeed())
 }
 .head-del:hover {
   color: var(--danger-ink);
-  border-color: #f3caca;
+  border-color: var(--danger-line);
   background: var(--danger-soft);
 }
 
@@ -1095,8 +1095,8 @@ watch(busy, () => setPollSpeed())
   font-size: 24px;
   border-radius: 20px;
   background: var(--accent-tint);
-  border: 2px solid #cdeee8;
-  box-shadow: 0 3px 0 0 #d8ece6;
+  border: 2px solid var(--accent-line);
+  box-shadow: 0 3px 0 0 var(--accent-line);
 }
 .empty-spinner {
   width: 22px;
@@ -1214,7 +1214,7 @@ watch(busy, () => setPollSpeed())
   padding: 5px 9px;
   border-radius: 9px;
   background: var(--danger-soft);
-  border: 1.5px solid #f3caca;
+  border: 1.5px solid var(--danger-line);
   color: var(--danger-ink);
   font-size: 11.5px;
   line-height: 1.6;
@@ -1433,7 +1433,7 @@ watch(busy, () => setPollSpeed())
 /* 输入区 */
 .composer {
   border-top: 2px solid var(--line);
-  background: linear-gradient(180deg, #fdf8ea, #fbf3e0);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface-3));
   padding: 10px 16px 12px;
 }
 .composer-error {
@@ -1578,7 +1578,7 @@ watch(busy, () => setPollSpeed())
 }
 .target-opt.active {
   background: var(--accent-tint);
-  border-color: #cdeee8;
+  border-color: var(--accent-line);
 }
 .target-opt-main {
   flex: 1;

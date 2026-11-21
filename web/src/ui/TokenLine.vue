@@ -3,8 +3,8 @@
     <svg class="token-line__svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
       <defs>
         <linearGradient :id="gradId" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#19c8b9" stop-opacity="0.3" />
-          <stop offset="100%" stop-color="#19c8b9" stop-opacity="0.02" />
+          <stop offset="0%" style="stop-color: var(--accent)" stop-opacity="0.3" />
+          <stop offset="100%" style="stop-color: var(--accent)" stop-opacity="0.02" />
         </linearGradient>
       </defs>
       <line x1="0" y1="99.4" x2="100" y2="99.4" class="token-line__axis" />
@@ -140,7 +140,7 @@ function placementFor(i) {
 }
 
 .token-line__band:hover {
-  background: rgb(25 200 185 / 0.08);
+  background: var(--accent-tint);
 }
 
 .token-line__dot {
@@ -150,7 +150,7 @@ function placementFor(i) {
   width: 8px;
   height: 8px;
   margin-top: -4px;
-  border: 2px solid #fffdf7;
+  border: 2px solid var(--surface);
   border-radius: 999px;
   background: var(--accent-strong);
   box-shadow: 0 1px 3px rgb(61 52 40 / 0.28);

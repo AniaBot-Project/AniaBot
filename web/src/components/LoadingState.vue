@@ -109,7 +109,7 @@ const rowWidths = ['46%', '100%', '72%']
 
 .loading-state--dark .loading-state__spinner {
   border-color: rgb(148 163 184 / 0.25);
-  border-top-color: #82d5bb;
+  border-top-color: var(--accent-hover);
 }
 
 .loading-state--dark .loading-state__group :deep(.animal-skeleton) {

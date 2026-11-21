@@ -58,6 +58,55 @@
   --danger-ink: #d94f4f;
   --danger-soft: #ffe9e9;
   --focus-ring: #ffcc00;
+  --warn-line: #f0dfa4;
+  --danger-line: #f2cccc;
+
+  /* ==========================================================================
+     外观设置令牌：src/appearance.js 会在 <html> 的行内样式里覆盖这些变量，
+     所以这里的值既是「默认外观」，也是 JS 未运行时的兜底。
+     ========================================================================== */
+
+  /* 页面底色与底纹：底色 + 两团光晕 + 壁纸图案（图案由 data-pattern 切换） */
+  --page-halo-1: radial-gradient(60rem 40rem at 2% -12%, rgb(25 200 185 / 0.12), transparent 58%);
+  --page-halo-2: radial-gradient(52rem 36rem at 98% -8%, rgb(247 205 103 / 0.18), transparent 56%);
+  --page-dot: rgb(196 184 158 / 0.3);
+  --page-pattern-a: radial-gradient(circle, var(--page-dot) 1.1px, transparent 1.1px);
+  --page-pattern-b: none;
+  --page-pattern-size: 22px 22px;
+
+  /* 主题色派生色（主色 / 悬停 / 加深之外，浅底与描边由主色混合得出） */
+  --accent-active: #0f958a;
+  --accent-line: #b9ece5;
+  --accent-mid: #8fd9cf;
+  --accent-wash: rgb(25 200 185 / 0.18);
+
+  /* 导航选中项（跟随主题色；文字色按主色明暗自动取深色或白色） */
+  --nav-active-bg: var(--accent);
+  --nav-active-ink: #ffffff;
+  --nav-active-shadow: var(--accent-strong);
+
+  /* 侧边栏（外观设置里可切换风格） */
+  --sidebar-bg:
+    radial-gradient(circle, rgb(196 184 158 / 0.22) 1.1px, transparent 1.1px) 0 0 / 20px 20px,
+    linear-gradient(180deg, #fdf8ea 0%, #f8f2e0 46%, #f3ecd8 100%);
+  --sidebar-border: var(--line-strong);
+  --sidebar-ink: #87735a;
+  --sidebar-ink-strong: #5f4423;
+  --sidebar-hover-bg: rgb(255 253 247 / 0.7);
+  --sidebar-divider: rgb(114 93 66 / 0.1);
+  --sidebar-tip-bg: #2b2118;
+  --sidebar-tip-ink: #f7ecd6;
+
+  /* 圆角刻度（外观设置可切换紧凑 / 标准 / 圆润） */
+  --r-card: 20px;
+  --r-sm: 6px;
+  --r: 8px;
+  --r-md: 10px;
+  --r-lg: 13px;
+  --r-xl: 16px;
+  --r-2xl: 20px;
+  --r-3xl: 24px;
+  --r-input: 999px;
 
   /* 阴影（暖色调，非冷黑） */
   --shadow-sm: 0 2px 4px 0 rgb(61 52 40 / 0.06);
@@ -73,7 +122,8 @@
     text-rendering: optimizeLegibility;
   }
 
-  /* 页面底色：暖奶油底 + 极淡的青绿/鹅黄光晕 + 小岛式点阵墙纸 */
+  /* 页面底色：暖奶油底 + 极淡的青绿/鹅黄光晕 + 小岛式点阵墙纸
+     三层颜色与壁纸图案都来自外观令牌，换底色 / 纹理时无需改这里 */
   body {
     font-family: var(--font-sans);
     color: var(--ink-body);
@@ -82,12 +132,35 @@
     /* dvh：移动端浏览器工具栏收放时按实际可视高度计算，避免 100vh 把底部内容压到工具栏下 */
     min-height: 100dvh;
     background-color: var(--page-bg);
-    background-image:
-      radial-gradient(60rem 40rem at 2% -12%, rgb(25 200 185 / 0.12), transparent 58%),
-      radial-gradient(52rem 36rem at 98% -8%, rgb(247 205 103 / 0.18), transparent 56%),
-      radial-gradient(circle, rgb(196 184 158 / 0.3) 1.1px, transparent 1.1px);
-    background-size: auto, auto, 22px 22px;
+    background-image: var(--page-halo-1), var(--page-halo-2), var(--page-pattern-a), var(--page-pattern-b);
+    background-size: auto, auto, var(--page-pattern-size), var(--page-pattern-size);
     background-attachment: fixed;
+  }
+
+  /* 背景纹理：点阵（默认）/ 网格 / 纯色 */
+  :root[data-pattern="grid"] {
+    --page-pattern-a: linear-gradient(90deg, var(--page-dot) 1px, transparent 1px);
+    --page-pattern-b: linear-gradient(var(--page-dot) 1px, transparent 1px);
+    --page-pattern-size: 26px 26px;
+  }
+  :root[data-pattern="plain"] {
+    --page-pattern-a: none;
+    --page-pattern-b: none;
+  }
+
+  /* 减弱动效：关掉装饰性过渡与动画；loading 转圈保留，否则看起来像卡死 */
+  :root[data-motion="reduced"] *,
+  :root[data-motion="reduced"] *::before,
+  :root[data-motion="reduced"] *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  :root[data-motion="reduced"] .animate-spin,
+  :root[data-motion="reduced"] .loading-state__spinner {
+    animation-duration: 1s !important;
+    animation-iteration-count: infinite !important;
   }
 
   /* 选中文字：鹅黄高亮 */
@@ -250,7 +323,7 @@
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(25 200 185 / 0.65);
+  background: var(--accent);
   background-clip: content-box;
 }
 
@@ -277,7 +350,7 @@
 
 /* 卡片：奶油底 + 2px 暖色描边 + 柔和暖阴影（主题库 Card 的观感） */
 .tcard {
-  border-radius: 20px;
+  border-radius: var(--r-card);
   background: var(--surface);
   border: 2px solid var(--line);
   box-shadow: var(--shadow-sm);
@@ -362,7 +435,7 @@
 
 /* 表面（单次使用，等价于卡片外观） */
 .glass {
-  border-radius: 20px;
+  border-radius: var(--r-card);
   background: var(--surface);
   border: 2px solid var(--line);
   box-shadow: var(--shadow-sm);
@@ -370,15 +443,15 @@
 
 /* 告警 / 错误表面：语义色雾 */
 .glass-warn {
-  border-radius: 20px;
+  border-radius: var(--r-card);
   background: #fffaf0;
-  border: 2px solid #f2dfa8;
+  border: 2px solid var(--warn-line);
   box-shadow: var(--shadow-sm);
 }
 .glass-danger {
-  border-radius: 20px;
+  border-radius: var(--r-card);
   background: #fff7f7;
-  border: 2px solid #f5cccc;
+  border: 2px solid var(--danger-line);
   box-shadow: var(--shadow-sm);
 }
 
@@ -415,7 +488,7 @@
   flex-shrink: 0;
   width: 17px;
   height: 17px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   border: 2px solid #c4b89e;
   background: var(--surface);
   transition: background-color 0.18s ease, border-color 0.18s ease;
@@ -482,6 +555,101 @@
 }
 
 /* ============================================================================
+   组件库主题色联动
+   animal-island-vue 把主色（薄荷青绿）编译进了自己的产物，这里用主题令牌覆盖
+   那些强调元素：换主题色时 Tabs、进度条、日期选择、链接按钮等一起变。
+   选择器与组件库的 [data-v-*] 规则同权重，本文件后加载，因此无需 !important。
+   ========================================================================== */
+.app-shell .animal-btn--link {
+  color: var(--accent-strong);
+}
+.app-shell .animal-btn--ghost.animal-btn--primary {
+  color: var(--accent-strong);
+}
+.app-shell .animal-btn--default:hover:not(:disabled),
+.app-shell .animal-btn--dashed:hover:not(:disabled) {
+  color: var(--accent-strong);
+  border-color: var(--accent);
+}
+.app-shell .animal-tabs__item:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.app-shell .animal-tabs__item--active,
+.app-shell .animal-tabs__item--active:hover {
+  background: var(--accent);
+  color: var(--nav-active-ink);
+}
+.app-shell .animal-tabs__item--active .animal-tabs__label {
+  color: var(--nav-active-ink);
+}
+.app-shell .animal-tabs__item--active .animal-tabs__icon {
+  color: var(--nav-active-ink);
+}
+.app-shell .animal-progress__fill {
+  background: linear-gradient(180deg, var(--accent-hover), var(--accent) 60%, var(--accent-strong));
+}
+.app-shell .animal-progress[aria-valuenow="100"] .animal-progress__fill {
+  background: linear-gradient(180deg, var(--accent-hover), var(--accent));
+}
+.app-shell .animal-date-picker__day-cell--selected,
+.app-shell .animal-date-picker__day-cell--selected:hover,
+.app-shell .animal-date-picker__month-cell--selected,
+.app-shell .animal-date-picker__year-cell--selected,
+.app-shell .animal-date-picker__month-cell--selected:hover,
+.app-shell .animal-date-picker__year-cell--selected:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.app-shell .animal-date-picker__day-cell--today {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  color: var(--accent-strong);
+}
+.app-shell .animal-date-picker__day-cell:hover,
+.app-shell .animal-date-picker__label-btn:hover,
+.app-shell .animal-date-picker__month-cell:hover,
+.app-shell .animal-date-picker__year-cell:hover {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+}
+.app-shell .animal-select__arrow--open {
+  color: var(--accent-strong);
+}
+.app-shell .animal-table__spinner {
+  color: var(--accent);
+}
+.app-shell .animal-avatar,
+.app-shell .animal-avatar-group__more {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+}
+.app-shell .animal-pagination--teal .animal-pagination__item--active {
+  background: var(--accent);
+}
+.app-shell .animal-pagination--teal .animal-pagination__item:hover:not(:disabled):not(.animal-pagination__item--active) {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+}
+.app-shell .animal-collapse__icon {
+  background: var(--accent);
+}
+
+/* 圆角联动：卡片 / 表格 / 输入框跟随外观设置里的圆角刻度 */
+.app-shell .animal-card--default,
+.app-shell .animal-card--dashed {
+  border-radius: var(--r-card);
+}
+.app-shell .animal-table-wrapper {
+  border-radius: var(--r-card);
+}
+.app-shell .animal-input {
+  border-radius: var(--r-input);
+}
+.app-shell .animal-select__trigger {
+  border-radius: var(--r-md);
+}
+
+/* ============================================================================
    工具类 → 小岛主题兼容层
    面板各页大量直接使用浅色 Tailwind 工具类（bg-white / border-slate-200 ...），
    这里在 .app-shell 作用域内统一改写成奶油色系；未分层（unlayered）规则优先于
@@ -521,10 +689,10 @@
   background-color: #e7dcc4;
 }
 .app-shell [class~="bg-zinc-400"] {
-  background-color: #b9e7df;
+  background-color: var(--accent-line);
 }
 .app-shell [class~="bg-zinc-500"] {
-  background-color: #7fbfb4;
+  background-color: var(--accent-mid);
 }
 .app-shell [class~="bg-zinc-700"],
 .app-shell [class~="bg-zinc-800"] {
@@ -537,10 +705,10 @@
   background-color: var(--accent-soft);
 }
 .app-shell [class~="bg-[#0071e3]/12"] {
-  background-color: rgb(25 200 185 / 0.16);
+  background-color: var(--accent-wash);
 }
 .app-shell [class~="bg-[#5ac8fa]/12"] {
-  background-color: rgb(25 200 185 / 0.1);
+  background-color: var(--accent-soft);
 }
 /* 深色终端 / 代码编辑区：主题库代码块的暖黑 */
 .app-shell [class~="bg-slate-950/85"] {
@@ -695,6 +863,21 @@
 }
 
 /* 硬编码的系统色 → 主题色 */
+.app-shell [class~="text-[#5f4423]"] {
+  color: var(--ink);
+}
+.app-shell [class~="text-[#725d42]"] {
+  color: var(--ink-body);
+}
+.app-shell [class~="text-[#11a89b]"] {
+  color: var(--accent-strong);
+}
+.app-shell [class~="bg-[#725d42]"] {
+  background-color: var(--ink-body);
+}
+.app-shell [class~="bg-[#19c8b9]/10"] {
+  background-color: var(--accent-soft);
+}
 .app-shell [class~="text-[#0071e3]"],
 .app-shell [class~="hover:text-[#0066cc]"]:hover {
   color: var(--accent-strong);
@@ -847,14 +1030,14 @@
   border-color: #e79a9a;
 }
 
-/* ---- 圆角：整体放大到小岛式圆润尺度 ---- */
-.app-shell [class~="rounded-sm"] { border-radius: 6px; }
-.app-shell [class~="rounded"] { border-radius: 8px; }
-.app-shell [class~="rounded-md"] { border-radius: 10px; }
-.app-shell [class~="rounded-lg"] { border-radius: 13px; }
-.app-shell [class~="rounded-xl"] { border-radius: 16px; }
-.app-shell [class~="rounded-2xl"] { border-radius: 20px; }
-.app-shell [class~="rounded-3xl"] { border-radius: 24px; }
+/* ---- 圆角：整体放大到小岛式圆润尺度（数值由外观设置里的圆角刻度决定） ---- */
+.app-shell [class~="rounded-sm"] { border-radius: var(--r-sm); }
+.app-shell [class~="rounded"] { border-radius: var(--r); }
+.app-shell [class~="rounded-md"] { border-radius: var(--r-md); }
+.app-shell [class~="rounded-lg"] { border-radius: var(--r-lg); }
+.app-shell [class~="rounded-xl"] { border-radius: var(--r-xl); }
+.app-shell [class~="rounded-2xl"] { border-radius: var(--r-2xl); }
+.app-shell [class~="rounded-3xl"] { border-radius: var(--r-3xl); }
 
 /* ---- 阴影：暖褐色柔和投影 ---- */
 .app-shell [class~="shadow-sm"] { box-shadow: var(--shadow-sm); }
@@ -882,7 +1065,7 @@
   border-color: var(--line-input);
   border-width: 2.5px;
   border-style: solid;
-  border-radius: 999px;
+  border-radius: var(--r-input);
   color: var(--ink-body);
   font-weight: 500;
   box-shadow: none;
@@ -892,7 +1075,7 @@
   border-color: var(--line-input);
   border-width: 2.5px;
   border-style: solid;
-  border-radius: 16px;
+  border-radius: var(--r-xl);
   color: var(--ink-body);
   font-weight: 500;
   box-shadow: none;
@@ -1031,12 +1214,12 @@
   border-left: 3px solid var(--accent);
   color: var(--ink-soft);
   background: var(--surface-2);
-  border-radius: 0 12px 12px 0;
+  border-radius: 0 var(--r-md) var(--r-md) 0;
 }
 .markdown-body code {
   background: var(--surface-2);
   border: 1.5px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--r);
   padding: 0.15em 0.4em;
   font-family: var(--font-mono);
   font-size: 0.9em;
@@ -1045,7 +1228,7 @@
 .markdown-body pre {
   background: #2b2118;
   color: #f0e3c8;
-  border-radius: 16px;
+  border-radius: var(--r-xl);
   padding: 12px;
   overflow-x: auto;
   margin: 0.8em 0;
@@ -1057,7 +1240,7 @@
   padding: 0;
   font-size: 12px;
 }
-.markdown-body img { max-width: 100%; border-radius: 12px; }
+.markdown-body img { max-width: 100%; border-radius: var(--r-md); }
 .markdown-body hr { border: none; border-top: 2px dashed var(--line-strong); margin: 1.2em 0; }
 /* 表格：浏览器默认无边框，补上后 README 表格才「像」表格 */
 .markdown-body table {

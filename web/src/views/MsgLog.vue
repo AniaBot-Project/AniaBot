@@ -1331,7 +1331,7 @@ onUnmounted(() => {
   border-right: 2px solid var(--line);
   background:
     radial-gradient(circle, rgb(196 184 158 / 0.2) 1px, transparent 1px) 0 0 / 18px 18px,
-    linear-gradient(180deg, #fbf6e8 0%, #f7f0dd 100%);
+    linear-gradient(180deg, var(--surface-2) 0%, var(--surface-3) 100%);
 }
 .conv-head {
   padding: 14px 13px 10px;
@@ -1745,9 +1745,9 @@ onUnmounted(() => {
   margin-bottom: 4px;
   border-radius: 22px;
   background: var(--accent-tint);
-  border: 2px solid #cdeee8;
+  border: 2px solid var(--accent-line);
   color: var(--accent-strong);
-  box-shadow: 0 3px 0 0 #d8ece6;
+  box-shadow: 0 3px 0 0 var(--accent-line);
 }
 .empty-spinner {
   width: 22px;

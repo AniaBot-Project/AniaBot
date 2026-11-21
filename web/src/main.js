@@ -3,6 +3,7 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import App from './App.vue'
 import backdropClose from './directives/backdropClose'
 import { installModalMaskGuard } from './ui/modalMaskGuard.js'
+import { initAppearance } from './appearance'
 // 主题库样式（animal-island-vue 的同步副本，见 scripts/sync-theme.mjs）必须先于面板自身样式
 import './styles/animal-island.vendor.css'
 import './style.css'
@@ -26,6 +27,7 @@ const routes = [
   { path: '/contacts', name: 'contacts', component: () => import('./views/Contacts.vue'), meta: { title: '通讯录' } },
   { path: '/marketplace', name: 'marketplace', component: () => import('./views/Marketplace.vue'), meta: { title: '插件市场' } },
   { path: '/update', name: 'update', component: () => import('./views/Update.vue'), meta: { title: '自动更新' } },
+  { path: '/appearance', name: 'appearance', component: () => import('./views/Appearance.vue'), meta: { title: '外观设置' } },
 ]
 
 export const router = createRouter({
@@ -34,6 +36,8 @@ export const router = createRouter({
 })
 
 async function boot() {
+  // 面板外观偏好（主题色 / 侧栏 / 圆角…）在挂载前应用，避免首屏闪一下默认配色
+  initAppearance()
   // 演示模式（--mode demo）：装载本地 mock，替换 fetch；正式构建中该分支被静态消除
   if (import.meta.env.MODE === 'demo') {
     const { installMock } = await import('./mock')

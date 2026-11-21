@@ -104,7 +104,7 @@ defineProps({
 }
 .quote-name {
   font-weight: 700;
-  color: #7c6547;
+  color: var(--ink-body);
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -136,7 +136,7 @@ defineProps({
   border: 1.5px solid var(--line-strong);
   font-size: 11.5px;
   font-weight: 700;
-  color: #6b5538;
+  color: var(--ink);
 }
 .msg-forward {
   margin: 5px 0;
@@ -153,7 +153,7 @@ defineProps({
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
-  color: #6b5538;
+  color: var(--ink);
   list-style: none;
   user-select: none;
 }
@@ -217,7 +217,7 @@ defineProps({
   border-left: 1.5px dashed var(--line-strong);
 }
 .forward-name {
-  color: #7c6547;
+  color: var(--ink-body);
   font-weight: 700;
 }
 </style>

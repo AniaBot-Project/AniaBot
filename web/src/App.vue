@@ -23,22 +23,22 @@
     >
       <div class="px-5 pt-6 pb-5 flex items-center gap-3">
         <img :src="logoUrl" alt="AniaBot" class="w-10 h-10 rounded-2xl object-cover border-2 border-white shadow-[0_2px_0_0_#d4c9b4]" />
-        <div>
-          <div class="text-[15px] font-extrabold leading-tight tracking-[0.02em] text-[#5f4423]">AniaBot</div>
-          <div class="text-[10px] text-slate-500 leading-tight tracking-[0.12em] mt-0.5">CONSOLE · 控制面板</div>
+        <div class="min-w-0">
+          <div class="brand-name">AniaBot</div>
+          <div class="brand-sub">CONSOLE · 控制面板</div>
         </div>
-        <button class="ml-auto md:hidden text-slate-500 hover:text-slate-900 p-1" aria-label="关闭菜单" @click="mobileOpen = false">
+        <button class="ml-auto md:hidden nav-close" aria-label="关闭菜单" @click="mobileOpen = false">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
         </button>
       </div>
       <!-- 演示模式徽章（demo 构建专属，正式构建静态为 false 不渲染） -->
       <div v-if="isDemo" class="mx-5 mb-3">
-        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold tracking-wide bg-amber-50 text-amber-700 border border-amber-200">
+        <span class="demo-badge">
           <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
           演示模式
         </span>
       </div>
-      <div class="mx-4 h-0.5 rounded-full bg-black/5" />
+      <div class="nav-divider mx-4" />
 
       <nav class="flex-1 px-2.5 py-3 space-y-0.5 overflow-y-auto">
         <RouterLink
@@ -46,21 +46,23 @@
           :key="item.to"
           :to="item.to"
           class="group relative flex items-center gap-3 px-3 h-10 rounded-xl text-[13px] font-semibold border-2 border-transparent transition-all duration-150"
-          :class="$route.path === item.to
-            ? 'nav-active'
-            : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'"
+          :class="$route.path === item.to ? 'nav-active' : 'nav-link'"
         >
           <span v-html="item.icon" class="shrink-0 [&>svg]:w-[18px] [&>svg]:h-[18px]" />
           {{ item.label }}
-          <span v-if="$route.path === item.to" class="ml-auto w-2 h-2 rounded-full bg-white/90 shadow-[0_0_0_2px_rgba(255,255,255,0.35)]" />
+          <span v-if="$route.path === item.to" class="nav-active-dot ml-auto" />
         </RouterLink>
       </nav>
 
-      <div class="px-4 py-4 border-t border-black/5 flex items-center justify-between">
+      <div class="nav-footer px-4 py-4 flex items-center justify-between">
         <a class="nav-ico" href="https://github.com/AniaBot-Project/AniaBot" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库">
           <span v-html="icons.github" class="[&>svg]:w-4 [&>svg]:h-4" />
           <span class="tip">GitHub</span>
         </a>
+        <RouterLink to="/appearance" class="nav-ico" aria-label="外观设置">
+          <span v-html="icons.palette" class="[&>svg]:w-4 [&>svg]:h-4" />
+          <span class="tip">外观设置</span>
+        </RouterLink>
         <button class="nav-ico" @click="onRestart" aria-label="重启 Bot">
           <span v-html="icons.restart" class="[&>svg]:w-4 [&>svg]:h-4" />
           <span class="tip">重启 Bot</span>
@@ -169,6 +171,7 @@ const icons = {
   update: '<svg fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 8.25H7.5a2.25 2.25 0 0 0-2.25 2.25v9a2.25 2.25 0 0 0 2.25 2.25h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25H15m0-3-3-3m0 0-3 3m3-3V15"/></svg>',
   store: '<svg fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 21v-7.5a.75.75 0 0 1 .75-.75h3a.75.75 0 0 1 .75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349M3.75 21V9.349m0 0a3.001 3.001 0 0 0 3.75-.615A2.993 2.993 0 0 0 9.75 9.75c.896 0 1.7-.393 2.25-1.016a2.993 2.993 0 0 0 2.25 1.016c.896 0 1.7-.393 2.25-1.015a3.001 3.001 0 0 0 3.75.614m-16.5 0a3.004 3.004 0 0 1-.621-4.72l1.189-1.19A1.5 1.5 0 0 1 5.378 3h13.243a1.5 1.5 0 0 1 1.06.44l1.19 1.189a3 3 0 0 1-.621 4.72M6.75 18h3.75a.75.75 0 0 0 .75-.75V13.5a.75.75 0 0 0-.75-.75H6.75a.75.75 0 0 0-.75.75v3.75c0 .414.336.75.75.75Z"/></svg>',
   restart: '<svg fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>',
+  palette: '<svg fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.4 2.245 4.5 4.5 0 0 0 8.4-2.245c0-.399-.078-.78-.22-1.128Zm0 0a15.998 15.998 0 0 0 3.388-1.62m-5.043-.025a15.994 15.994 0 0 1 1.622-3.395m3.42 3.42a15.995 15.995 0 0 0 4.764-4.648l3.876-5.814a1.151 1.151 0 0 0-1.597-1.597L14.146 6.32a15.996 15.996 0 0 0-4.649 4.763m3.42 3.42a6.776 6.776 0 0 0-3.42-3.42"/></svg>',
   key: '<svg fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z"/></svg>',
   logout: '<svg fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"/></svg>',
 }
@@ -192,6 +195,7 @@ const navItems = [
   { to: '/contacts', label: '通讯录', icon: icons.contacts },
   { to: '/marketplace', label: '插件市场', icon: icons.store },
   { to: '/update', label: '自动更新', icon: icons.update },
+  { to: '/appearance', label: '外观设置', icon: icons.palette },
 ]
 
 const showPwd = ref(false)
@@ -248,18 +252,65 @@ async function onChangePwd() {
 </script>
 
 <style scoped>
-/* 侧边栏：奶油小岛面板（浅色渐变 + 暖色描边） */
+/* 侧边栏：背景、描边与文字色全部由外观设置注入的令牌决定（见 src/appearance.js），
+   所以换侧栏风格 / 主题色时无需改模板。 */
 .sidebar-island {
-  background:
-    radial-gradient(circle, rgb(196 184 158 / 0.22) 1.1px, transparent 1.1px) 0 0 / 20px 20px,
-    linear-gradient(180deg, #fdf8ea 0%, #f8f2e0 46%, #f3ecd8 100%);
-  border-right: 2px solid var(--line-strong);
+  background: var(--sidebar-bg);
+  border-right: 2px solid var(--sidebar-border);
   box-shadow: 10px 0 30px -26px rgb(61 52 40 / 0.9);
+}
+
+/* 品牌区 */
+.brand-name {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: 0.02em;
+  color: var(--sidebar-ink-strong);
+}
+.brand-sub {
+  margin-top: 2px;
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.12em;
+  color: var(--sidebar-ink);
+  opacity: 0.85;
+}
+.nav-close {
+  padding: 4px;
+  border-radius: 10px;
+  color: var(--sidebar-ink);
+  transition: color 0.15s, background-color 0.15s;
+}
+.nav-close:hover {
+  color: var(--sidebar-ink-strong);
+  background: var(--sidebar-hover-bg);
+}
+
+/* 演示模式徽章 */
+.demo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+  border: 1.5px solid var(--warn-line);
+}
+
+.nav-divider {
+  height: 2px;
+  border-radius: 999px;
+  background: var(--sidebar-divider);
 }
 
 /* 顶部工具栏：奶油贴纸条 */
 .topbar-island {
-  border-radius: 20px;
+  border-radius: var(--r-card);
   background: rgb(255 253 247 / 0.92);
   border: 2px solid var(--line);
   box-shadow: var(--shadow-sm);
@@ -267,12 +318,34 @@ async function onChangePwd() {
   -webkit-backdrop-filter: blur(6px);
 }
 
-/* 当前导航项：雾霾蓝 pill + 白字（主题库 Demo 侧栏选中态） */
+/* 普通导航项 */
+.nav-link {
+  color: var(--sidebar-ink);
+}
+.nav-link:hover {
+  color: var(--sidebar-ink-strong);
+  background: var(--sidebar-hover-bg);
+}
+
+/* 当前导航项：主题色 pill + 自动适配的文字色 */
 .nav-active {
-  color: #fff;
+  color: var(--nav-active-ink);
   font-weight: 700;
-  background: #b7c6e5;
-  box-shadow: 0 2px 0 0 #a3b4d8, inset 0 1px 0 rgb(255 255 255 / 0.35);
+  background: var(--nav-active-bg);
+  box-shadow: 0 2px 0 0 var(--nav-active-shadow), inset 0 1px 0 rgb(255 255 255 / 0.35);
+}
+.nav-active-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--nav-active-ink);
+  opacity: 0.85;
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 0.3);
+}
+
+/* 侧边栏底部工具条 */
+.nav-footer {
+  border-top: 1.5px solid var(--sidebar-divider);
 }
 
 /* 侧边栏底部小按钮（图标 + hover 提示） */
@@ -284,12 +357,12 @@ async function onChangePwd() {
   width: 2.25rem;
   height: 2.25rem;
   border-radius: 12px;
-  color: var(--ink-soft);
+  color: var(--sidebar-ink);
   transition: color 0.15s, background-color 0.15s;
 }
 .nav-ico:hover {
-  color: var(--ink);
-  background: rgb(114 93 66 / 0.08);
+  color: var(--sidebar-ink-strong);
+  background: var(--sidebar-hover-bg);
 }
 .nav-ico .tip {
   position: absolute;
@@ -298,8 +371,8 @@ async function onChangePwd() {
   z-index: 20;
   padding: 0.3rem 0.6rem;
   border-radius: 999px;
-  background: #2b2118;
-  color: #f7ecd6;
+  background: var(--sidebar-tip-bg);
+  color: var(--sidebar-tip-ink);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;

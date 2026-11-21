@@ -136,12 +136,12 @@ function placementFor(i) {
 
 /* 单系列：浅奶油底槽 + 细描边，呼应主题 Progress 的轨道 */
 .token-chart__track--solid {
-  background: #f7f3df;
-  box-shadow: inset 0 0 0 1.5px #ece0c9;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1.5px var(--line);
 }
 
 .token-chart__col:hover .token-chart__track {
-  background: rgb(25 200 185 / 0.09);
+  background: var(--accent-tint);
 }
 
 .token-chart__seg {
@@ -157,7 +157,7 @@ function placementFor(i) {
 }
 
 .token-chart__seg.is-primary {
-  background: linear-gradient(180deg, #3dd4c6, #19c8b9 60%, #14b6a8);
+  background: linear-gradient(180deg, var(--accent-hover), var(--accent) 60%, var(--accent-strong));
 }
 
 .token-chart__seg.is-amber {
@@ -186,7 +186,7 @@ function placementFor(i) {
 }
 
 .token-chart__swatch.is-primary {
-  background: linear-gradient(180deg, #3dd4c6, #14b6a8);
+  background: linear-gradient(180deg, var(--accent-hover), var(--accent-strong));
 }
 
 .token-chart__swatch.is-amber {

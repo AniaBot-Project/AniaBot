@@ -95,6 +95,8 @@ The panel frontend's built `dist/` is gitignored (build artifact). `bot/adminpan
 
 Panel styling uses the animal-island theme (`animal-island-vue`, the Vue port of `animal-island-ui`): `web/scripts/sync-theme.mjs` runs before `npm run dev`/`build` and emits `web/src/styles/animal-island.vendor.css` from the package (dropping the 3.4MB CJK font subsets), `web/src/style.css` holds the design tokens plus the Tailwind-utility → theme mapping layer. Page controls (Button/Input/Select/Switch/Checkbox/Tabs/Table/Modal/Tag/Progress/DatePicker/…) are the library components themselves — prefer them over hand-written HTML controls when editing views. Both generated files are gitignored.
 
+Panel appearance is user-configurable (`web/src/appearance.js` + the `/#/appearance` page): theme color, page background/pattern, sidebar style, corner radius and motion are applied as CSS custom properties and `data-*` attributes on `<html>` (overriding the `:root` defaults in `style.css`), persisted per browser in localStorage. New views should therefore consume the tokens (`var(--accent*)`, `var(--surface*)`, `var(--ink*)`, `var(--line*)`, `var(--r-*)`, sidebar tokens) instead of hard-coding the theme's hex values; when a library component hard-codes the primary color, add a token-based override in the "组件库主题色联动" section of `style.css`.
+
 ### Test
 
 ```bash
