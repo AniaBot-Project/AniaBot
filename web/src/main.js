@@ -30,9 +30,25 @@ const routes = [
   { path: '/appearance', name: 'appearance', component: () => import('./views/Appearance.vue'), meta: { title: '外观设置' } },
 ]
 
+// 主内容用 <Transition name="fade" mode="out-in"> 淡入（见 App.vue / style.css 的 0.22s），
+// 导航瞬间新页面还没挂载，恢复旧位置要等过渡结束，否则会被当时旧页面的高度截断。
+const RESTORE_SCROLL_MS = 250
+
+// 页面切换的滚动行为：新页面回到顶部，浏览器前进/后退恢复离开时的位置。
+// vue-router 4 在没有 scrollBehavior 时完全不接管滚动，而面板是 hash 路由的 SPA
+// （文档不会重新加载），窗口的滚动偏移会原样带到下一个页面——因此从滚动过的页面
+// 点开 Token 统计、配置管理这类随窗口滚动的长页面时，会直接停在中间而不是顶部。
 export const router = createRouter({
   history: createWebHashHistory(),
   routes,
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) {
+      return new Promise((resolve) => {
+        setTimeout(() => resolve(savedPosition), RESTORE_SCROLL_MS)
+      })
+    }
+    return { top: 0 }
+  },
 })
 
 async function boot() {
