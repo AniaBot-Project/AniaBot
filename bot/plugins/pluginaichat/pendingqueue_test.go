@@ -74,6 +74,31 @@ func TestPendingQueueGroupFriendIsolation(t *testing.T) {
 	}
 }
 
+// TestMessageTargetPrivateWithChatID 回归：私聊消息即便带 GroupId（微信、飞书、
+// Telegram 的私聊会话都会填平台会话 ID），也必须判成私聊并取发送者作目标，
+// 否则回复走 SendGroupMsg，面板「消息日志」把同一会话拆成群聊 + 私聊两条。
+func TestMessageTargetPrivateWithChatID(t *testing.T) {
+	private := message.Message{
+		MessageType: "private",
+		GroupId:     "wx:u@im.wechat",
+		UserId:      "wx:u@im.wechat",
+		Sender:      message.MessageSender{UserId: "wx:u@im.wechat"},
+	}
+	if id, isGroup := messageTarget(private); isGroup || id != "wx:u@im.wechat" {
+		t.Fatalf("私聊应判为好友会话并取发送者: id=%v isGroup=%v", id, isGroup)
+	}
+
+	group := message.Message{
+		MessageType: "group",
+		GroupId:     "qq:123",
+		UserId:      "qq:456",
+		Sender:      message.MessageSender{UserId: "qq:456"},
+	}
+	if id, isGroup := messageTarget(group); !isGroup || id != "qq:123" {
+		t.Fatalf("群聊应判为群会话并取群号: id=%v isGroup=%v", id, isGroup)
+	}
+}
+
 func TestPendingQueueConcurrent(t *testing.T) {
 	p := &AIChatPlugin{}
 	const goroutines = 50

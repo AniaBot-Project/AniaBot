@@ -20,6 +20,23 @@ type Message struct {
 	Platform string `json:"-"`
 }
 
+// IsGroup 报告该消息是否来自群聊。
+//
+// 判断以 OneBot v11 的 message_type 为准：微信、飞书、Telegram、Discord 等
+// 适配器的私聊消息同样会填 GroupId（平台上的会话 ID），按「GroupId 是否为空」
+// 推断会把私聊当成群聊，进而错分会话键、把回复按群聊发出（面板「消息日志」
+// 就会把同一个会话拆成群聊 + 私聊两条）。message_type 缺失时（自定义适配器
+// 只填了 GroupId）退回按 GroupId 是否为空推断。
+func (m Message) IsGroup() bool {
+	switch m.MessageType {
+	case "group":
+		return true
+	case "private":
+		return false
+	}
+	return m.GroupId != ""
+}
+
 type ForwardMessageSegment struct {
 	Messages []NodeMsg        `json:"messages"`
 	News     []map[string]any `json:"news"`

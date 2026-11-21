@@ -199,6 +199,11 @@ func TestTranslateTextMessage(t *testing.T) {
 	if msg.UserId != "wx:u1@im.wechat" || msg.SelfId != "wx:bot@im.bot" {
 		t.Fatalf("ids = %q self=%q", msg.UserId, msg.SelfId)
 	}
+	// 私聊消息不能带 GroupId：框架用它区分群聊/私聊，填用户 ID 会让同一会话
+	// 在消息日志里被拆成群聊 + 私聊，指令也按群聊回复。
+	if msg.GroupId != "" {
+		t.Fatalf("私聊消息不应填 GroupId, got %q", msg.GroupId)
+	}
 	if msg.MessageId != "wx:u1@im.wechat:42" {
 		t.Fatalf("message id = %q", msg.MessageId)
 	}

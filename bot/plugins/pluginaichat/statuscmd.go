@@ -46,11 +46,7 @@ type sessionStatusSnapshot struct {
 // handleStatusCommand 处理 /status 命令：回复当前会话的 AI 状态（返回 false
 // 消费消息，同 /stop；群聊中已由 mention 门保证只有 @ 机器人才会走到这里）。
 func (p *AIChatPlugin) handleStatusCommand(b bot.Bot, msg message.Message) (bool, error) {
-	isGroup := msg.GroupId != ""
-	id := msg.Sender.UserId
-	if isGroup {
-		id = msg.GroupId
-	}
+	id, isGroup := messageTarget(msg)
 	p.sendPlainText(b, id, isGroup, renderSessionStatus(p.collectSessionStatus(id, isGroup)))
 	return false, nil
 }

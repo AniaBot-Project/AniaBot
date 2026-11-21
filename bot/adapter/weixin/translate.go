@@ -12,6 +12,11 @@ import (
 // translateMessage 将 iLink 消息翻译为框架通用消息。
 // 在独立 goroutine 内调用（图片下载等 I/O 不阻塞长轮询）。
 // iLink bot 仅 bot↔用户 1:1 会话，统一映射为 private/friend。
+//
+// 私聊消息不填 GroupId：平台没有群会话，而 GroupId 在框架里是「群聊」标志
+// （插件据此决定会话键、回复走 SendGroupMsg 还是 SendFriendMsg）。把用户 ID
+// 同时填进 GroupId 会让每条私聊被当成群聊，同一会话在面板「消息日志」里被
+// 拆成群聊 + 私聊两栏，/status、/plan 等指令也会按群聊回复。
 func (a *weixinAdapter) translateMessage(m *WeixinMessage) *message.Message {
 	segs := a.itemsToSegments(m)
 	if len(segs) == 0 {
@@ -30,7 +35,6 @@ func (a *weixinAdapter) translateMessage(m *WeixinMessage) *message.Message {
 		SubType:     "friend",
 		MessageId:   rawID,
 		UserId:      frameUserID(from),
-		GroupId:     frameUserID(from),
 		Message:     segs,
 		RawMessage:  segmentsPlainText(segs),
 		Sender: message.MessageSender{

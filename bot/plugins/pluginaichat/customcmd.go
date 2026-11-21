@@ -254,11 +254,7 @@ func (m *commandManager) rewriteCustomCommand(cmd command.Command, msg *message.
 //	/cmd add <名> <模板>      新增/覆盖（仅管理员；模板中 $args 为参数占位符）
 //	/cmd del <名>             删除（仅管理员）
 func (p *AIChatPlugin) handleCmdCommand(ctx context.Context, b bot.Bot, cmd command.Command, msg message.Message) (bool, error) {
-	isGroup := msg.GroupId != ""
-	id := msg.Sender.UserId
-	if isGroup {
-		id = msg.GroupId
-	}
+	id, isGroup := messageTarget(msg)
 	if p.commandManager == nil {
 		p.sendPlainText(b, id, isGroup, "自定义命令功能未就绪")
 		return false, nil
