@@ -137,6 +137,8 @@ const TONE_STYLES = {
     codeBg: '#2b2118',
     codeInk: '#f0e3c8',
     shadow3d: '#bdaea0',
+    chart2: '#f7cd67',
+    chart3: '#a88c62',
     sidebar: ['#fdf8ea', '#f8f2e0', '#f3ecd8'],
   },
   snow: {
@@ -170,6 +172,8 @@ const TONE_STYLES = {
     codeBg: '#232a33',
     codeInk: '#e6ecf3',
     shadow3d: '#b9c2cc',
+    chart2: '#9db8d6',
+    chart3: '#75879c',
     sidebar: ['#f8fafc', '#eff3f8', '#e7edf4'],
   },
   sakura: {
@@ -203,6 +207,8 @@ const TONE_STYLES = {
     codeBg: '#2f2228',
     codeInk: '#f3e4e6',
     shadow3d: '#c2a9a5',
+    chart2: '#e79bb4',
+    chart3: '#a88a95',
     sidebar: ['#fdf6f4', '#f9ece9', '#f3e1dd'],
   },
   mint: {
@@ -236,6 +242,8 @@ const TONE_STYLES = {
     codeBg: '#1f2a26',
     codeInk: '#dceee7',
     shadow3d: '#a8bdb1',
+    chart2: '#9ccbb6',
+    chart3: '#6f8f81',
     sidebar: ['#f4fbf7', '#eaf5ef', '#e0efe7'],
   },
   oat: {
@@ -269,6 +277,8 @@ const TONE_STYLES = {
     codeBg: '#2b2519',
     codeInk: '#f0e6cf',
     shadow3d: '#bba98b',
+    chart2: '#d9bd8c',
+    chart3: '#8c8464',
     sidebar: ['#fdf8ec', '#f7efdd', '#f0e5cd'],
   },
   slate: {
@@ -302,6 +312,8 @@ const TONE_STYLES = {
     codeBg: '#222932',
     codeInk: '#e4eaf1',
     shadow3d: '#b4bec8',
+    chart2: '#aab5c3',
+    chart3: '#6d7b8c',
     sidebar: ['#f6f9fc', '#edf2f7', '#e3e9f0'],
   },
 }
@@ -563,6 +575,13 @@ function toneVars(tone) {
     '--code-bg': tone.codeBg,
     '--code-ink': tone.codeInk,
     '--shadow-3d': tone.shadow3d,
+    // 图表次要系列：跟随配色方案的色相，避免蓝主题里突然出现金色/棕色柱子
+    '--chart-2': tone.chart2,
+    '--chart-2-light': mixWhite(tone.chart2, 0.24),
+    '--chart-2-strong': mixBlack(tone.chart2, 0.14),
+    '--chart-3': tone.chart3,
+    '--chart-3-light': mixWhite(tone.chart3, 0.24),
+    '--chart-3-strong': mixBlack(tone.chart3, 0.14),
   }
 }
 
@@ -581,6 +600,9 @@ function accentVars(accent) {
     '--nav-active-bg': base,
     '--nav-active-ink': contrastInk(base),
     '--nav-active-shadow': mixBlack(base, 0.24),
+    // 焦点圈也跟着主题色，避免蓝主题里出现鹅黄描边
+    '--focus-ring': mixBlack(base, 0.28),
+    '--focus-halo': rgbCss(base, 0.3),
     // 组件库（animal-island-vue）自身的 CSS 变量
     '--animal-primary-color': base,
     '--animal-primary-color-hover': mixWhite(base, 0.16),

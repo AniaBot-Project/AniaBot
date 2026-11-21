@@ -161,11 +161,11 @@ function placementFor(i) {
 }
 
 .token-chart__seg.is-amber {
-  background: linear-gradient(180deg, #ffe08a, #f7cd67 70%, #eebd4a);
+  background: linear-gradient(180deg, var(--chart-2-light), var(--chart-2) 70%, var(--chart-2-strong));
 }
 
 .token-chart__seg.is-clay {
-  background: linear-gradient(180deg, #c0a577, #a88c62 70%, #9a835a);
+  background: linear-gradient(180deg, var(--chart-3-light), var(--chart-3) 70%, var(--chart-3-strong));
 }
 
 .token-chart__legend {
@@ -190,10 +190,10 @@ function placementFor(i) {
 }
 
 .token-chart__swatch.is-amber {
-  background: linear-gradient(180deg, #ffe08a, #eebd4a);
+  background: linear-gradient(180deg, var(--chart-2-light), var(--chart-2-strong));
 }
 
 .token-chart__swatch.is-clay {
-  background: linear-gradient(180deg, #c0a577, #9a835a);
+  background: linear-gradient(180deg, var(--chart-3-light), var(--chart-3-strong));
 }
 </style>

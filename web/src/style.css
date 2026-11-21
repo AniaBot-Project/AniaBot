@@ -62,6 +62,14 @@
   --code-bg: #2b2118;
   --code-ink: #f0e3c8;
 
+  /* 图表次要系列（默认暖沙 / 琥珀，随配色方案换成同调色） */
+  --chart-2: #f7cd67;
+  --chart-2-light: #fadd92;
+  --chart-2-strong: #d9b45b;
+  --chart-3: #a88c62;
+  --chart-3-light: #bda780;
+  --chart-3-strong: #907954;
+
   /* 状态色 */
   --ok: #6fba2c;
   --ok-ink: #4f9417;
@@ -72,7 +80,8 @@
   --danger: #e05a5a;
   --danger-ink: #d94f4f;
   --danger-soft: #ffe9e9;
-  --focus-ring: #ffcc00;
+  --focus-ring: #0f9c90; /* 焦点圈跟随主题色（appearance.js 会覆盖） */
+  --focus-halo: rgb(25 200 185 / 0.3);
   --warn-line: #f0dfa4;
   --danger-line: #f2cccc;
 
@@ -185,9 +194,9 @@
   }
 
   /* 键盘焦点：主题库统一的鹅黄焦点圈 */
-  .app-shell button:focus-visible,
-  .app-shell a:focus-visible,
-  .app-shell [role="button"]:focus-visible {
+  :root button:focus-visible,
+  :root a:focus-visible,
+  :root [role="button"]:focus-visible {
     outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
   }
@@ -199,7 +208,7 @@
 }
 
 /* ============ 复选框：圆润小方块 + 薄荷青绿勾选 ============ */
-.app-shell input[type="checkbox"] {
+:root input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;
   position: relative;
@@ -213,15 +222,15 @@
   cursor: pointer;
   transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
-.app-shell input[type="checkbox"]:hover {
+:root input[type="checkbox"]:hover {
   border-color: var(--accent);
 }
-.app-shell input[type="checkbox"]:checked {
+:root input[type="checkbox"]:checked {
   border-color: var(--accent);
   background: var(--accent);
   box-shadow: 0 2px 0 0 var(--accent-strong);
 }
-.app-shell input[type="checkbox"]:checked::after {
+:root input[type="checkbox"]:checked::after {
   content: "";
   position: absolute;
   left: 5px;
@@ -233,12 +242,12 @@
   transform: rotate(45deg);
 }
 /* 半选态（如「全选当前列表」在部分勾选时） */
-.app-shell input[type="checkbox"]:indeterminate {
+:root input[type="checkbox"]:indeterminate {
   border-color: var(--accent);
   background: var(--accent);
   box-shadow: 0 2px 0 0 var(--accent-strong);
 }
-.app-shell input[type="checkbox"]:indeterminate::after {
+:root input[type="checkbox"]:indeterminate::after {
   content: "";
   position: absolute;
   left: 3px;
@@ -248,7 +257,7 @@
   border-radius: 2px;
   background: #fff;
 }
-.app-shell input[type="checkbox"]:disabled {
+:root input[type="checkbox"]:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -256,14 +265,14 @@
 /* ============ 滑条：奶油轨道 + 薄荷滑块（配置页的「活跃度」等滑条） ============
    替换浏览器默认的深色 range 轨道；已填充比例由 --slider-pct（0%~100%，
    Vue 内联设置）驱动，未设置时按 0 处理。 */
-.app-shell input[type="range"] {
+:root input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   height: 20px;
   background: transparent;
   cursor: pointer;
 }
-.app-shell input[type="range"]::-webkit-slider-runnable-track {
+:root input[type="range"]::-webkit-slider-runnable-track {
   height: 8px;
   border-radius: 999px;
   border: 1px solid var(--line-strong);
@@ -274,7 +283,7 @@
   );
   box-shadow: inset 0 1px 2px rgb(114 93 66 / 0.12);
 }
-.app-shell input[type="range"]::-webkit-slider-thumb {
+:root input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 18px;
@@ -286,31 +295,31 @@
   box-shadow: 0 1px 3px rgb(61 52 40 / 0.35), 0 0 0 1px var(--accent-strong);
   transition: transform 0.15s ease;
 }
-.app-shell input[type="range"]:hover::-webkit-slider-thumb {
+:root input[type="range"]:hover::-webkit-slider-thumb {
   background: var(--accent-hover);
 }
-.app-shell input[type="range"]:active::-webkit-slider-thumb {
+:root input[type="range"]:active::-webkit-slider-thumb {
   transform: scale(1.1);
 }
-.app-shell input[type="range"]:focus-visible {
+:root input[type="range"]:focus-visible {
   outline: none;
 }
-.app-shell input[type="range"]:focus-visible::-webkit-slider-thumb {
+:root input[type="range"]:focus-visible::-webkit-slider-thumb {
   box-shadow: 0 0 0 4px var(--focus-ring);
 }
 /* Firefox：轨道与已填充进度分开画 */
-.app-shell input[type="range"]::-moz-range-track {
+:root input[type="range"]::-moz-range-track {
   height: 8px;
   border-radius: 999px;
   border: 1px solid var(--line-strong);
   background: var(--surface-3);
 }
-.app-shell input[type="range"]::-moz-range-progress {
+:root input[type="range"]::-moz-range-progress {
   height: 8px;
   border-radius: 999px;
   background: var(--accent);
 }
-.app-shell input[type="range"]::-moz-range-thumb {
+:root input[type="range"]::-moz-range-thumb {
   width: 14px;
   height: 14px;
   border-radius: 999px;
@@ -318,7 +327,7 @@
   background: var(--accent);
   box-shadow: 0 1px 3px rgb(61 52 40 / 0.35), 0 0 0 1px var(--accent-strong);
 }
-.app-shell input[type="range"]:disabled {
+:root input[type="range"]:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -553,19 +562,14 @@
   transform: none;
 }
 
-/* 主题库的 soft 标签在纸张底上几乎没有对比度：补一层浅描边（彩色 soft 标签不受影响） */
-.app-shell .animal-tag--soft {
-  border-color: var(--line-strong);
-  background-color: var(--surface);
-}
 
 /* 主题库的 danger + text/link 按钮是白字（假定放在彩底上）；面板是奶油底，改回语义红 */
-.app-shell button.animal-btn--danger.animal-btn--text,
-.app-shell button.animal-btn--danger.animal-btn--link {
+:root button.animal-btn--danger.animal-btn--text,
+:root button.animal-btn--danger.animal-btn--link {
   color: var(--danger);
 }
-.app-shell button.animal-btn--danger.animal-btn--text:hover:not(:disabled),
-.app-shell button.animal-btn--danger.animal-btn--link:hover:not(:disabled) {
+:root button.animal-btn--danger.animal-btn--text:hover:not(:disabled),
+:root button.animal-btn--danger.animal-btn--link:hover:not(:disabled) {
   color: #f08080;
 }
 
@@ -575,92 +579,104 @@
    那些强调元素：换主题色时 Tabs、进度条、日期选择、链接按钮等一起变。
    选择器与组件库的 [data-v-*] 规则同权重，本文件后加载，因此无需 !important。
    ========================================================================== */
-.app-shell .animal-btn--link {
+:root .animal-btn--link {
   color: var(--accent-strong);
 }
-.app-shell .animal-btn--ghost.animal-btn--primary {
+:root .animal-btn--ghost.animal-btn--primary {
   color: var(--accent-strong);
 }
-.app-shell .animal-btn--default:hover:not(:disabled),
-.app-shell .animal-btn--dashed:hover:not(:disabled) {
+:root .animal-btn--default:hover:not(:disabled),
+:root .animal-btn--dashed:hover:not(:disabled) {
   color: var(--accent-strong);
   border-color: var(--accent);
 }
-.app-shell .animal-tabs__item:hover {
+:root .animal-tabs__item:hover {
   background: var(--accent-soft);
   color: var(--ink);
 }
-.app-shell .animal-tabs__item--active,
-.app-shell .animal-tabs__item--active:hover {
+:root .animal-tabs__item--active,
+:root .animal-tabs__item--active:hover {
   background: var(--accent);
   color: var(--nav-active-ink);
 }
-.app-shell .animal-tabs__item--active .animal-tabs__label {
+:root .animal-tabs__item--active .animal-tabs__label {
   color: var(--nav-active-ink);
 }
-.app-shell .animal-tabs__item--active .animal-tabs__icon {
+:root .animal-tabs__item--active .animal-tabs__icon {
   color: var(--nav-active-ink);
 }
-.app-shell .animal-progress__fill {
+:root .animal-progress__fill {
   background: linear-gradient(180deg, var(--accent-hover), var(--accent) 60%, var(--accent-strong));
 }
-.app-shell .animal-progress[aria-valuenow="100"] .animal-progress__fill {
+:root .animal-progress[aria-valuenow="100"] .animal-progress__fill {
   background: linear-gradient(180deg, var(--accent-hover), var(--accent));
 }
-.app-shell .animal-date-picker__day-cell--selected,
-.app-shell .animal-date-picker__day-cell--selected:hover,
-.app-shell .animal-date-picker__month-cell--selected,
-.app-shell .animal-date-picker__year-cell--selected,
-.app-shell .animal-date-picker__month-cell--selected:hover,
-.app-shell .animal-date-picker__year-cell--selected:hover {
+:root .animal-date-picker__day-cell--selected,
+:root .animal-date-picker__day-cell--selected:hover,
+:root .animal-date-picker__month-cell--selected,
+:root .animal-date-picker__year-cell--selected,
+:root .animal-date-picker__month-cell--selected:hover,
+:root .animal-date-picker__year-cell--selected:hover {
   background: var(--accent);
   color: #fff;
 }
-.app-shell .animal-date-picker__day-cell--today {
+:root .animal-date-picker__day-cell--today {
   box-shadow: inset 0 0 0 1.5px var(--accent);
   color: var(--accent-strong);
 }
-.app-shell .animal-date-picker__day-cell:hover,
-.app-shell .animal-date-picker__label-btn:hover,
-.app-shell .animal-date-picker__month-cell:hover,
-.app-shell .animal-date-picker__year-cell:hover {
+:root .animal-date-picker__day-cell:hover,
+:root .animal-date-picker__label-btn:hover,
+:root .animal-date-picker__month-cell:hover,
+:root .animal-date-picker__year-cell:hover {
   background: var(--accent-tint);
   color: var(--accent-strong);
 }
-.app-shell .animal-select__arrow--open {
+:root .animal-select__arrow--open {
   color: var(--accent-strong);
 }
-.app-shell .animal-table__spinner {
+:root .animal-table__spinner {
   color: var(--accent);
 }
-.app-shell .animal-avatar,
-.app-shell .animal-avatar-group__more {
+:root .animal-avatar,
+:root .animal-avatar-group__more {
   background: var(--accent-tint);
   color: var(--accent-strong);
 }
-.app-shell .animal-pagination--teal .animal-pagination__item--active {
+:root .animal-pagination--teal .animal-pagination__item--active {
   background: var(--accent);
 }
-.app-shell .animal-pagination--teal .animal-pagination__item:hover:not(:disabled):not(.animal-pagination__item--active) {
+:root .animal-pagination--teal .animal-pagination__item:hover:not(:disabled):not(.animal-pagination__item--active) {
   background: var(--accent-tint);
   color: var(--accent-strong);
 }
-.app-shell .animal-collapse__icon {
+:root .animal-collapse__icon {
   background: var(--accent);
 }
 
+/* 焦点圈：组件库内部写死的鹅黄 → 主题色 */
+:root .animal-btn:focus-visible,
+:root .animal-switch:focus-visible,
+:root .animal-tag--clickable:focus-visible {
+  outline-color: var(--focus-ring);
+}
+:root .animal-checkbox__cbx input[type="checkbox"]:focus-visible,
+:root .animal-radio__cbx input[type="radio"]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
 /* 圆角联动：卡片 / 表格 / 输入框跟随外观设置里的圆角刻度 */
-.app-shell .animal-card--default,
-.app-shell .animal-card--dashed {
+:root .animal-card--default,
+:root .animal-card--dashed {
   border-radius: var(--r-card);
 }
-.app-shell .animal-table-wrapper {
+:root .animal-table-wrapper {
   border-radius: var(--r-card);
 }
-.app-shell .animal-input {
+:root .animal-input {
   border-radius: var(--r-input);
 }
-.app-shell .animal-select__trigger {
+:root .animal-select__trigger {
   border-radius: var(--r-md);
 }
 
@@ -672,586 +688,708 @@
    ========================================================================== */
 
 /* 卡片 / 表格 / 弹窗 */
-.app-shell .animal-card--default {
+:root .animal-card--default {
   background: var(--surface-2);
   color: var(--ink-body);
 }
-.app-shell .animal-card--dashed {
+:root .animal-card--dashed {
   background: var(--surface);
   border-color: var(--line-strong);
 }
-.app-shell .animal-table-wrapper,
-.app-shell .animal-table__head {
+:root .animal-table-wrapper,
+:root .animal-table__head,
+:root .animal-table__body {
   background: var(--surface-2);
 }
-.app-shell .animal-table__th,
-.app-shell .animal-table__cell {
+:root .animal-table__th,
+:root .animal-table__cell,
+:root .animal-table__empty {
   color: var(--ink-body);
 }
-.app-shell .animal-table__row--striped {
+:root .animal-table__empty {
+  color: var(--ink-muted);
+}
+:root .animal-table__row--striped {
   background: var(--surface-glass);
 }
-.app-shell .animal-table__row:hover {
+:root .animal-table__row:hover {
   background-color: var(--accent-tint);
 }
-.app-shell .animal-table__head-row::after,
-.app-shell .animal-table__row::after {
+:root .animal-table__loader {
+  background: var(--surface-glass);
+}
+:root .animal-table__head-row::after,
+:root .animal-table__row::after {
   background: repeating-linear-gradient(90deg, var(--line) 0, var(--line) 6px, transparent 6px, transparent 12px);
 }
-.app-shell .animal-modal__body {
+:root .animal-modal__body {
   background: var(--surface-2);
   color: var(--ink-body);
   border-radius: calc(var(--r-card) + 2px);
 }
-.app-shell .animal-modal__title {
+:root .animal-modal__title {
   color: var(--ink);
+}
+:root .animal-modal__content {
+  color: var(--ink-body);
+}
+
+/* 页签上的装饰小叶点：跟随主题色，别再是固定的鹅黄 */
+:root .animal-tabs__leaf {
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface);
 }
 
 /* 页签 */
-.app-shell .animal-tabs {
+:root .animal-tabs {
   background: var(--surface-2);
   border-color: var(--line);
 }
-.app-shell .animal-tabs__list {
+:root .animal-tabs__list {
   background: var(--surface-glass);
   border-bottom-color: var(--line);
 }
 
 /* 输入框 / 下拉 */
-.app-shell .animal-input {
+:root .animal-input {
   background: var(--surface-input);
 }
-.app-shell .animal-input__inner {
+:root .animal-input__inner {
   color: var(--ink-body);
 }
-.app-shell .animal-input__inner::placeholder {
+:root .animal-input__inner::placeholder {
   color: var(--ink-disabled);
 }
-.app-shell .animal-select__trigger {
+:root .animal-select__trigger {
   background: var(--surface);
   border-color: var(--line-strong);
 }
-.app-shell .animal-select__trigger:hover {
+:root .animal-select__trigger:hover {
   background: var(--surface);
   border-color: var(--line-input);
 }
-.app-shell .animal-select__trigger--open,
-.app-shell .animal-select__trigger--open:hover {
+:root .animal-select__trigger--open,
+:root .animal-select__trigger--open:hover {
   background: var(--surface);
 }
-.app-shell .animal-select__dropdown {
+:root .animal-select__dropdown {
   background: var(--surface);
   border: 2px solid var(--line-strong);
   box-shadow: var(--shadow-base);
 }
-.app-shell .animal-select__option {
+:root .animal-select__option {
   color: var(--ink-body);
+}
+/* 下拉选项悬停时的「小箭头」光标：固定鹅黄 → 主题色 */
+:root .animal-select__option--hovered::before {
+  border-left-color: var(--accent);
 }
 
 /* 按钮 */
-.app-shell .animal-btn--default {
+:root .animal-btn--default {
   background: var(--surface);
   border-color: var(--line-control);
   color: var(--ink-body);
 }
-.app-shell .animal-btn--dashed {
+:root .animal-btn--dashed {
   background: var(--surface);
   border-color: var(--line-control);
   color: var(--ink-body);
 }
-.app-shell .animal-btn--primary {
+:root .animal-btn--primary {
   background: var(--surface-2);
   border-color: var(--surface-2);
   color: var(--ink-body);
   box-shadow: 0 5px var(--shadow-3d);
 }
-.app-shell .animal-btn--primary:hover:not(:disabled) {
+:root .animal-btn--primary:hover:not(:disabled) {
   box-shadow: 0 6px var(--shadow-3d);
 }
-.app-shell .animal-btn--primary:active:not(:disabled) {
+:root .animal-btn--primary:active:not(:disabled) {
   box-shadow: 0 1px var(--shadow-3d);
 }
-.app-shell .animal-btn--text {
+:root .animal-btn--text {
   color: var(--ink-body);
 }
-.app-shell .animal-btn--text:hover:not(:disabled),
-.app-shell .animal-btn--text:active:not(:disabled) {
+:root .animal-btn--text:hover:not(:disabled),
+:root .animal-btn--text:active:not(:disabled) {
   background: var(--surface-3);
 }
 
 /* 标签 */
-.app-shell .animal-tag--solid {
+:root .animal-tag--solid {
   background: var(--surface-2);
   color: var(--ink-soft);
   border-color: var(--line-strong);
 }
-.app-shell .animal-tag--outlined,
-.app-shell .animal-tag--dashed {
+:root .animal-tag--outlined,
+:root .animal-tag--dashed {
   color: var(--ink-soft);
   border-color: var(--line-control);
 }
-.app-shell .animal-tag--soft {
+:root .animal-tag--soft {
   background: var(--surface-3);
   color: var(--ink-soft);
   border-color: transparent;
 }
 
 /* 进度条 / 开关 / 骨架屏 */
-.app-shell .animal-progress__track {
+:root .animal-progress__track {
   background: var(--surface-2);
   border-color: var(--line);
 }
-.app-shell .animal-progress__info {
+:root .animal-progress__info {
   color: var(--ink-body);
 }
-.app-shell .animal-switch {
+:root .animal-switch {
   background: var(--surface-5);
   border-color: var(--line-control);
 }
 /* 开关的「开」保持语义绿，不受纸张影响；显式重申以压过后面的通用规则 */
-.app-shell .animal-switch--checked {
+:root .animal-switch--checked {
   background: #86d67a;
   border-color: #6fba2c;
 }
-.app-shell .animal-switch__handle {
+:root .animal-switch__handle {
   background: var(--surface-3);
   border-color: var(--line-control);
 }
-.app-shell .animal-switch--checked .animal-switch__handle {
+:root .animal-switch--checked .animal-switch__handle {
   border-color: #6fba2c;
 }
-.app-shell .animal-skeleton {
+:root .animal-skeleton {
   background: var(--surface-4);
 }
-.app-shell .animal-skeleton--line {
+:root .animal-skeleton--line {
   background: var(--surface-5);
 }
 
 /* 提示气泡 / 分隔线 */
-.app-shell .animal-tooltip__bubble {
+:root .animal-tooltip__bubble {
   background: var(--surface);
   color: var(--ink-body);
 }
-.app-shell .animal-tooltip__bubble::after {
+:root .animal-tooltip__bubble::after {
   background: var(--surface);
 }
-.app-shell .animal-divider--dashed-brown {
+:root .animal-divider--dashed-brown {
   background-image: linear-gradient(to right, var(--line-control) 50%, transparent 50%);
 }
 
 /* 日期选择器弹层 */
-.app-shell .animal-date-picker__panel,
-.app-shell .animal-time-picker__panel {
+:root .animal-date-picker__panel,
+:root .animal-time-picker__panel {
   background: var(--surface);
   border-color: var(--line-strong);
 }
-.app-shell .animal-date-picker__footer,
-.app-shell .animal-time-picker__footer {
+:root .animal-date-picker__footer,
+:root .animal-time-picker__footer {
   border-top-color: var(--line);
+}
+:root .animal-date-picker__trigger {
+  background: var(--surface-input);
+}
+:root .animal-date-picker__trigger:hover {
+  box-shadow: 0 3px var(--line-control);
+}
+/* 展开态的鹅黄描边 → 主题色 */
+:root .animal-date-picker__trigger--open,
+:root .animal-time-picker__trigger--open {
+  box-shadow: 0 3px var(--accent-strong), 0 0 0 3px var(--focus-halo);
+}
+:root .animal-date-picker__value,
+:root .animal-date-picker__label-btn,
+:root .animal-date-picker__year-label,
+:root .animal-date-picker__day-cell,
+:root .animal-date-picker__month-cell,
+:root .animal-date-picker__year-cell {
+  color: var(--ink-body);
+}
+:root .animal-date-picker__placeholder,
+:root .animal-date-picker__clear,
+:root .animal-date-picker__day-cell--outside,
+:root .animal-date-picker__day-cell--disabled {
+  color: var(--ink-disabled);
+}
+:root .animal-date-picker__calendar-icon,
+:root .animal-date-picker__nav-btn,
+:root .animal-date-picker__week-cell,
+:root .animal-date-picker__today-btn {
+  color: var(--ink-muted);
+}
+:root .animal-date-picker__range-divider {
+  background: var(--line-strong);
+}
+:root .animal-date-picker__nav-btn:hover,
+:root .animal-date-picker__clear:hover,
+:root .animal-date-picker__today-btn:hover {
+  background: var(--fill-hover);
+  color: var(--ink);
+}
+:root .animal-date-picker__confirm-btn {
+  background: var(--fill-hover);
+  color: var(--ink-soft);
+}
+/* 区间选中原本是琥珀黄，改成主题色 */
+:root .animal-date-picker__day-cell--in-range,
+:root .animal-date-picker__day-cell--in-range:hover,
+:root .animal-date-picker__day-cell--range-start,
+:root .animal-date-picker__day-cell--range-end,
+:root .animal-date-picker__day-cell--range-start:hover,
+:root .animal-date-picker__day-cell--range-end:hover,
+:root .animal-date-picker__panel--range .animal-date-picker__day-cell:hover {
+  background: var(--accent);
+  color: var(--nav-active-ink);
+}
+
+/* 日期弹层里的日历本体（同样是奶油底 + 暖色点阵） */
+:root .animal-calendar {
+  --animal-calendar-accent: var(--accent);
+  --animal-calendar-accent-soft: var(--accent-soft);
+  --animal-calendar-accent-tint: var(--accent-tint);
+}
+:root .animal-calendar__body {
+  border-color: var(--line-strong);
+  background:
+    radial-gradient(circle, var(--page-dot) 1.1px, transparent 1.1px) 0 0 / 28px 28px,
+    radial-gradient(circle, var(--page-dot) 0.8px, transparent 0.8px) 7px 7px / 14px 14px,
+    var(--surface);
+  box-shadow: var(--shadow-base);
+}
+:root .animal-calendar__month-label {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+:root .animal-calendar__nav-btn,
+:root .animal-calendar__today-btn,
+:root .animal-calendar__week-cell {
+  color: var(--ink-muted);
+}
+:root .animal-calendar__nav-btn:hover,
+:root .animal-calendar__today-btn:hover {
+  background: var(--fill-hover);
+  color: var(--accent-strong);
+}
+:root .animal-calendar__day-number {
+  color: var(--ink-body);
+}
+:root .animal-calendar__cell:hover {
+  background: var(--fill-hover);
+}
+:root .animal-calendar__cell:hover .animal-calendar__day-number {
+  color: var(--ink);
+}
+:root .animal-calendar__cell--outside .animal-calendar__day-number {
+  color: var(--ink-disabled);
+}
+:root .animal-calendar__cell--selected {
+  background: var(--accent-tint);
 }
 
 /* ============================================================================
    工具类 → 小岛主题兼容层
    面板各页大量直接使用浅色 Tailwind 工具类（bg-white / border-slate-200 ...），
-   这里在 .app-shell 作用域内统一改写成奶油色系；未分层（unlayered）规则优先于
+   这里在 :root 作用域内统一改写成纸张色系；未分层（unlayered）规则优先于
    Tailwind 的 utilities 层，因此无需改动各页模板。
+   注意作用域是 :root 而不是面板容器：组件库的弹窗会 teleport 到 <body>，
+   只用 .app-shell 前缀会漏掉弹窗里的全部内容。
    ========================================================================== */
 
 /* ---- 表面 ---- */
-.app-shell [class~="bg-white"] {
+:root [class~="bg-white"] {
   background-color: var(--surface);
 }
-.app-shell [class~="bg-white/85"] {
+:root [class~="bg-white/85"] {
   background-color: var(--surface-glass);
 }
-.app-shell [class~="bg-slate-50"],
-.app-shell [class~="bg-slate-50/60"],
-.app-shell [class~="bg-slate-50/70"],
-.app-shell [class~="bg-slate-50/80"],
-.app-shell [class~="bg-zinc-50"],
-.app-shell [class~="bg-zinc-50/40"],
-.app-shell [class~="bg-zinc-50/60"],
-.app-shell [class~="bg-zinc-50/70"] {
+:root [class~="bg-slate-50"],
+:root [class~="bg-slate-50/60"],
+:root [class~="bg-slate-50/70"],
+:root [class~="bg-slate-50/80"],
+:root [class~="bg-zinc-50"],
+:root [class~="bg-zinc-50/40"],
+:root [class~="bg-zinc-50/60"],
+:root [class~="bg-zinc-50/70"] {
   background-color: var(--surface-2);
 }
-.app-shell [class~="bg-slate-100"],
-.app-shell [class~="bg-zinc-100"] {
+:root [class~="bg-slate-100"],
+:root [class~="bg-zinc-100"] {
   background-color: var(--surface-4);
 }
-.app-shell [class~="bg-slate-200/60"],
-.app-shell [class~="bg-zinc-200"],
-.app-shell [class~="bg-zinc-200/70"] {
+:root [class~="bg-slate-200/60"],
+:root [class~="bg-zinc-200"],
+:root [class~="bg-zinc-200/70"] {
   background-color: var(--surface-5);
 }
 /* 图表 / 进度条：主数据用主题色，次级用沙色，底衬用浅纸色 */
-.app-shell [class~="bg-zinc-300"],
-.app-shell [class~="bg-slate-300"],
-.app-shell [class~="bg-slate-300/70"] {
+:root [class~="bg-zinc-300"],
+:root [class~="bg-slate-300"],
+:root [class~="bg-slate-300/70"] {
   background-color: var(--surface-6);
 }
-.app-shell [class~="bg-zinc-400"] {
+:root [class~="bg-zinc-400"] {
   background-color: var(--accent-line);
 }
-.app-shell [class~="bg-zinc-500"] {
+:root [class~="bg-zinc-500"] {
   background-color: var(--accent-mid);
 }
-.app-shell [class~="bg-zinc-700"],
-.app-shell [class~="bg-zinc-800"] {
+:root [class~="bg-zinc-700"],
+:root [class~="bg-zinc-800"] {
   background-color: var(--accent);
 }
-.app-shell [class~="bg-[#0071e3]"] {
+:root [class~="bg-[#0071e3]"] {
   background-color: var(--accent);
 }
-.app-shell [class~="bg-[#0071e3]/10"] {
+:root [class~="bg-[#0071e3]/10"] {
   background-color: var(--accent-soft);
 }
-.app-shell [class~="bg-[#0071e3]/12"] {
+:root [class~="bg-[#0071e3]/12"] {
   background-color: var(--accent-wash);
 }
-.app-shell [class~="bg-[#5ac8fa]/12"] {
+:root [class~="bg-[#5ac8fa]/12"] {
   background-color: var(--accent-soft);
 }
 /* 深色终端 / 代码编辑区：代码块底色（随配色方案，默认暖黑） */
-.app-shell [class~="bg-slate-950/85"] {
+:root [class~="bg-slate-950/85"] {
   background-color: var(--code-bg);
 }
-.app-shell [class~="bg-black/[0.03]"] {
+:root [class~="bg-black/[0.03]"] {
   background-color: var(--fill-subtle);
 }
-.app-shell [class~="bg-black/5"] {
+:root [class~="bg-black/5"] {
   background-color: var(--fill-hover);
 }
-.app-shell [class~="bg-black/8"] {
+:root [class~="bg-black/8"] {
   background-color: var(--fill-press);
 }
 /* 弹窗遮罩：暖暗色而非纯黑 */
-.app-shell [class~="bg-black/30"] {
+:root [class~="bg-black/30"] {
   background-color: var(--overlay);
 }
 
 /* ---- 悬停态 ---- */
-.app-shell [class~="hover:bg-zinc-100"]:hover,
-.app-shell [class~="hover:bg-slate-100"]:hover,
-.app-shell [class~="hover:bg-zinc-200"]:hover,
-.app-shell [class~="hover:bg-slate-200/60"]:hover {
+:root [class~="hover:bg-zinc-100"]:hover,
+:root [class~="hover:bg-slate-100"]:hover,
+:root [class~="hover:bg-zinc-200"]:hover,
+:root [class~="hover:bg-slate-200/60"]:hover {
   background-color: var(--fill-hover);
 }
-.app-shell [class~="hover:bg-slate-50"]:hover,
-.app-shell [class~="hover:bg-zinc-50"]:hover,
-.app-shell [class~="hover:bg-zinc-50/70"]:hover,
-.app-shell [class~="hover:bg-slate-50/60"]:hover,
-.app-shell [class~="hover:bg-slate-50/70"]:hover,
-.app-shell [class~="hover:bg-slate-50/80"]:hover,
-.app-shell [class~="hover:bg-black/5"]:hover {
+:root [class~="hover:bg-slate-50"]:hover,
+:root [class~="hover:bg-zinc-50"]:hover,
+:root [class~="hover:bg-zinc-50/70"]:hover,
+:root [class~="hover:bg-slate-50/60"]:hover,
+:root [class~="hover:bg-slate-50/70"]:hover,
+:root [class~="hover:bg-slate-50/80"]:hover,
+:root [class~="hover:bg-black/5"]:hover {
   background-color: var(--fill-subtle);
 }
-.app-shell [class~="hover:bg-zinc-700"]:hover,
-.app-shell [class~="hover:bg-zinc-800"]:hover {
+:root [class~="hover:bg-zinc-700"]:hover,
+:root [class~="hover:bg-zinc-800"]:hover {
   background-color: var(--accent-hover);
 }
 /* 模板里大量 white 系悬停：统一改为淡色纸底 */
-.app-shell [class~="hover:bg-white/55"]:hover,
-.app-shell [class~="hover:bg-white/60"]:hover,
-.app-shell [class~="hover:bg-white/70"]:hover {
+:root [class~="hover:bg-white/55"]:hover,
+:root [class~="hover:bg-white/60"]:hover,
+:root [class~="hover:bg-white/70"]:hover {
   background-color: var(--fill-subtle);
 }
-.app-shell [class~="hover:bg-red-50"]:hover,
-.app-shell [class~="hover:bg-red-100"]:hover {
+:root [class~="hover:bg-red-50"]:hover,
+:root [class~="hover:bg-red-100"]:hover {
   background-color: var(--danger-soft);
 }
-.app-shell [class~="hover:bg-amber-100"]:hover {
+:root [class~="hover:bg-amber-100"]:hover {
   background-color: var(--warn-soft);
 }
 
 /* ---- 语义浅色底 ---- */
-.app-shell [class~="bg-red-50"],
-.app-shell [class~="bg-red-50!"] {
+:root [class~="bg-red-50"],
+:root [class~="bg-red-50!"] {
   background-color: var(--danger-soft);
 }
-.app-shell [class~="bg-red-100"] {
+:root [class~="bg-red-100"] {
   background-color: #ffdede;
 }
-.app-shell [class~="bg-red-400"] {
+:root [class~="bg-red-400"] {
   background-color: var(--danger);
 }
-.app-shell [class~="bg-amber-50"],
-.app-shell [class~="bg-amber-50!"] {
+:root [class~="bg-amber-50"],
+:root [class~="bg-amber-50!"] {
   background-color: var(--warn-soft);
 }
-.app-shell [class~="bg-amber-100"] {
+:root [class~="bg-amber-100"] {
   background-color: #ffefb8;
 }
-.app-shell [class~="bg-amber-500"] {
+:root [class~="bg-amber-500"] {
   background-color: var(--warn);
 }
-.app-shell [class~="bg-emerald-50"] {
+:root [class~="bg-emerald-50"] {
   background-color: var(--ok-soft);
 }
-.app-shell [class~="bg-emerald-100"] {
+:root [class~="bg-emerald-100"] {
   background-color: #dff3c8;
 }
-.app-shell [class~="bg-blue-50"] {
+:root [class~="bg-blue-50"] {
   background-color: var(--accent-tint);
 }
-.app-shell [class~="bg-blue-200"] {
+:root [class~="bg-blue-200"] {
   background-color: #bfe3dc;
 }
-.app-shell [class~="bg-amber-600"] {
+:root [class~="bg-amber-600"] {
   background-color: #dba90e;
 }
 
 /* ---- 文字色（暖棕梯度） ---- */
-.app-shell [class~="text-zinc-950"],
-.app-shell [class~="text-zinc-900"],
-.app-shell [class~="text-slate-900"] {
+:root [class~="text-zinc-950"],
+:root [class~="text-zinc-900"],
+:root [class~="text-slate-900"] {
   color: var(--ink);
 }
-.app-shell [class~="text-zinc-800"],
-.app-shell [class~="text-slate-800"] {
+:root [class~="text-zinc-800"],
+:root [class~="text-slate-800"] {
   color: var(--ink-body);
 }
-.app-shell [class~="text-zinc-700"],
-.app-shell [class~="text-slate-700"] {
+:root [class~="text-zinc-700"],
+:root [class~="text-slate-700"] {
   color: var(--ink-body);
 }
-.app-shell [class~="text-zinc-600"],
-.app-shell [class~="text-slate-600"] {
+:root [class~="text-zinc-600"],
+:root [class~="text-slate-600"] {
   color: var(--ink-soft);
 }
-.app-shell [class~="text-zinc-500"],
-.app-shell [class~="text-slate-500"] {
+:root [class~="text-zinc-500"],
+:root [class~="text-slate-500"] {
   color: var(--ink-soft);
 }
-.app-shell [class~="text-zinc-400"],
-.app-shell [class~="text-slate-400"] {
+:root [class~="text-zinc-400"],
+:root [class~="text-slate-400"] {
   color: var(--ink-muted);
 }
-.app-shell [class~="text-zinc-300"],
-.app-shell [class~="text-slate-300"] {
+:root [class~="text-zinc-300"],
+:root [class~="text-slate-300"] {
   color: var(--ink-disabled);
 }
-.app-shell [class~="text-zinc-200"],
-.app-shell [class~="text-slate-200"] {
+:root [class~="text-zinc-200"],
+:root [class~="text-slate-200"] {
   color: var(--ink-disabled);
 }
-.app-shell [class~="text-zinc-100"] {
+:root [class~="text-zinc-100"] {
   color: var(--ink-on-dark);
 }
-.app-shell [class~="text-[#1d1d1f]"] {
+:root [class~="text-[#1d1d1f]"] {
   color: var(--ink);
 }
 
 /* 语义文字色 */
-.app-shell [class~="text-amber-300"],
-.app-shell [class~="text-amber-400"] {
+:root [class~="text-amber-300"],
+:root [class~="text-amber-400"] {
   color: #e0b34a;
 }
-.app-shell [class~="text-amber-500"] {
+:root [class~="text-amber-500"] {
   color: #c9920a;
 }
-.app-shell [class~="text-amber-600"] {
+:root [class~="text-amber-600"] {
   color: #b8860b;
 }
-.app-shell [class~="text-amber-700"],
-.app-shell [class~="text-amber-800"] {
+:root [class~="text-amber-700"],
+:root [class~="text-amber-800"] {
   color: var(--warn-ink);
 }
-.app-shell [class~="text-red-400"] {
+:root [class~="text-red-400"] {
   color: #dd6f6f;
 }
-.app-shell [class~="text-red-700"] {
+:root [class~="text-red-700"] {
   color: var(--danger-ink);
 }
 
 /* 硬编码的系统色 → 主题色 */
-.app-shell [class~="text-[#5f4423]"] {
+:root [class~="text-[#5f4423]"] {
   color: var(--ink);
 }
-.app-shell [class~="text-[#725d42]"] {
+:root [class~="text-[#725d42]"] {
   color: var(--ink-body);
 }
-.app-shell [class~="text-[#11a89b]"] {
+:root [class~="text-[#11a89b]"] {
   color: var(--accent-strong);
 }
-.app-shell [class~="bg-[#725d42]"] {
+:root [class~="bg-[#725d42]"] {
   background-color: var(--ink-body);
 }
-.app-shell [class~="bg-[#19c8b9]/10"] {
+:root [class~="bg-[#19c8b9]/10"] {
   background-color: var(--accent-soft);
 }
-.app-shell [class~="text-[#0071e3]"],
-.app-shell [class~="hover:text-[#0066cc]"]:hover {
+:root [class~="text-[#0071e3]"],
+:root [class~="hover:text-[#0066cc]"]:hover {
   color: var(--accent-strong);
 }
-.app-shell [class~="text-[#248a3d]"] {
+:root [class~="text-[#248a3d]"] {
   color: #3f7d14;
 }
-.app-shell [class~="text-[#34c759]"] {
+:root [class~="text-[#34c759]"] {
   color: var(--ok-ink);
 }
-.app-shell [class~="text-[#ff9f0a]"] {
+:root [class~="text-[#ff9f0a]"] {
   color: #b8790a;
 }
-.app-shell [class~="text-[#ff9f0a]/80"] {
+:root [class~="text-[#ff9f0a]/80"] {
   color: rgb(184 121 10 / 0.8);
 }
-.app-shell [class~="text-[#ff3b30]"] {
+:root [class~="text-[#ff3b30]"] {
   color: var(--danger-ink);
 }
-.app-shell [class~="bg-[#34c759]"] {
+:root [class~="bg-[#34c759]"] {
   background-color: var(--ok);
 }
-.app-shell [class~="bg-[#34c759]/10"] {
+:root [class~="bg-[#34c759]/10"] {
   background-color: var(--ok-soft);
 }
-.app-shell [class~="bg-[#34c759]/15"] {
+:root [class~="bg-[#34c759]/15"] {
   background-color: #e2f3c9;
 }
-.app-shell [class~="bg-[#ff9f0a]"] {
+:root [class~="bg-[#ff9f0a]"] {
   background-color: var(--warn);
 }
-.app-shell [class~="bg-[#ff3b30]"] {
+:root [class~="bg-[#ff3b30]"] {
   background-color: var(--danger);
 }
 /* 渐变图标（向导步骤图标等）：系统蓝渐变 → 薄荷青绿渐变 */
-.app-shell [class~="from-[#0a84ff]"][class~="to-[#0071e3]"] {
+:root [class~="from-[#0a84ff]"][class~="to-[#0071e3]"] {
   background-image: linear-gradient(135deg, var(--accent-hover), var(--accent));
 }
 
 /* 悬停文字色 */
-.app-shell [class~="hover:text-zinc-900"]:hover,
-.app-shell [class~="hover:text-slate-900"]:hover {
+:root [class~="hover:text-zinc-900"]:hover,
+:root [class~="hover:text-slate-900"]:hover {
   color: var(--ink);
 }
-.app-shell [class~="hover:text-zinc-800"]:hover,
-.app-shell [class~="hover:text-slate-800"]:hover {
+:root [class~="hover:text-zinc-800"]:hover,
+:root [class~="hover:text-slate-800"]:hover {
   color: var(--ink-body);
 }
-.app-shell [class~="hover:text-zinc-700"]:hover,
-.app-shell [class~="hover:text-slate-700"]:hover {
+:root [class~="hover:text-zinc-700"]:hover,
+:root [class~="hover:text-slate-700"]:hover {
   color: var(--ink-body);
 }
-.app-shell [class~="hover:text-zinc-600"]:hover,
-.app-shell [class~="hover:text-slate-600"]:hover {
+:root [class~="hover:text-zinc-600"]:hover,
+:root [class~="hover:text-slate-600"]:hover {
   color: var(--ink-soft);
 }
-.app-shell [class~="hover:text-red-700"]:hover {
+:root [class~="hover:text-red-700"]:hover {
   color: #c94444;
 }
-.app-shell [class~="hover:text-[#ff3b30]"]:hover {
+:root [class~="hover:text-[#ff3b30]"]:hover {
   color: #c94444;
 }
-.app-shell [class~="hover:text-red-300!"]:hover {
+:root [class~="hover:text-red-300!"]:hover {
   color: #c94444;
 }
 
 /* ---- 描边 ---- */
-.app-shell [class~="border-slate-100"],
-.app-shell [class~="border-slate-200"],
-.app-shell [class~="border-slate-200/60"],
-.app-shell [class~="border-slate-200/70"],
-.app-shell [class~="border-zinc-100"],
-.app-shell [class~="border-zinc-200"],
-.app-shell [class~="border-zinc-200/60"],
-.app-shell [class~="border-slate-50"],
-.app-shell [class~="border-white/50"],
-.app-shell [class~="border-white/60"],
-.app-shell [class~="border-black/5"],
-.app-shell [class~="border-black/10"] {
+:root [class~="border-slate-100"],
+:root [class~="border-slate-200"],
+:root [class~="border-slate-200/60"],
+:root [class~="border-slate-200/70"],
+:root [class~="border-zinc-100"],
+:root [class~="border-zinc-200"],
+:root [class~="border-zinc-200/60"],
+:root [class~="border-slate-50"],
+:root [class~="border-white/50"],
+:root [class~="border-white/60"],
+:root [class~="border-black/5"],
+:root [class~="border-black/10"] {
   border-color: var(--line);
 }
-.app-shell [class~="border-slate-300"],
-.app-shell [class~="border-slate-300/60"],
-.app-shell [class~="border-zinc-300"],
-.app-shell [class~="border-zinc-500"],
-.app-shell [class~="border-zinc-700"],
-.app-shell [class~="border-black/15"] {
+:root [class~="border-slate-300"],
+:root [class~="border-slate-300/60"],
+:root [class~="border-zinc-300"],
+:root [class~="border-zinc-500"],
+:root [class~="border-zinc-700"],
+:root [class~="border-black/15"] {
   border-color: var(--line-strong);
 }
-.app-shell [class~="border-amber-100"],
-.app-shell [class~="border-amber-200"],
-.app-shell [class~="border-amber-200/70"] {
+:root [class~="border-amber-100"],
+:root [class~="border-amber-200"],
+:root [class~="border-amber-200/70"] {
   border-color: var(--warn-line);
 }
-.app-shell [class~="border-red-100"],
-.app-shell [class~="border-red-200"] {
+:root [class~="border-red-100"],
+:root [class~="border-red-200"] {
   border-color: var(--danger-line);
 }
-.app-shell [class~="border-red-400"] {
+:root [class~="border-red-400"] {
   border-color: var(--danger);
 }
-.app-shell [class~="border-zinc-900"] {
+:root [class~="border-zinc-900"] {
   border-color: var(--ink-body);
 }
-.app-shell [class~="border-blue-200"] {
+:root [class~="border-blue-200"] {
   border-color: var(--accent-line);
 }
-.app-shell [class~="border-[#0071e3]"] {
+:root [class~="border-[#0071e3]"] {
   border-color: var(--accent);
 }
-.app-shell [class~="border-[#0071e3]/70!"] {
+:root [class~="border-[#0071e3]/70!"] {
   border-color: var(--accent);
 }
-.app-shell [class~="border-t-[#0071e3]"] {
+:root [class~="border-t-[#0071e3]"] {
   border-top-color: var(--accent);
 }
-.app-shell [class~="border-t-zinc-300"] {
+:root [class~="border-t-zinc-300"] {
   border-top-color: var(--line-strong);
 }
-.app-shell [class~="border-t-zinc-500"] {
+:root [class~="border-t-zinc-500"] {
   border-top-color: var(--line-control);
 }
-.app-shell [class~="border-t-zinc-600"] {
+:root [class~="border-t-zinc-600"] {
   border-top-color: var(--ink-soft);
 }
-.app-shell [class~="border-t-zinc-800"] {
+:root [class~="border-t-zinc-800"] {
   border-top-color: var(--ink);
 }
-.app-shell [class~="border-l-amber-400"] {
+:root [class~="border-l-amber-400"] {
   border-left-color: var(--warn);
 }
-.app-shell [class~="border-l-red-400"] {
+:root [class~="border-l-red-400"] {
   border-left-color: var(--danger);
 }
-.app-shell [class~="border-[#34c759]/40"] {
+:root [class~="border-[#34c759]/40"] {
   border-color: rgb(111 186 44 / 0.45);
 }
-.app-shell [class~="divide-slate-100"] > * + *,
-.app-shell [class~="divide-zinc-100"] > * + * {
+:root [class~="divide-slate-100"] > * + *,
+:root [class~="divide-zinc-100"] > * + * {
   border-color: var(--line);
 }
-.app-shell [class~="hover:border-zinc-300"]:hover,
-.app-shell [class~="hover:border-slate-300/60"]:hover {
+:root [class~="hover:border-zinc-300"]:hover,
+:root [class~="hover:border-slate-300/60"]:hover {
   border-color: var(--line-input);
 }
-.app-shell [class~="hover:border-zinc-500"]:hover {
+:root [class~="hover:border-zinc-500"]:hover {
   border-color: var(--line-control);
 }
-.app-shell [class~="hover:border-red-300"]:hover {
+:root [class~="hover:border-red-300"]:hover {
   border-color: #e79a9a;
 }
 
 /* ---- 圆角：整体放大到小岛式圆润尺度（数值由外观设置里的圆角刻度决定） ---- */
-.app-shell [class~="rounded-sm"] { border-radius: var(--r-sm); }
-.app-shell [class~="rounded"] { border-radius: var(--r); }
-.app-shell [class~="rounded-md"] { border-radius: var(--r-md); }
-.app-shell [class~="rounded-lg"] { border-radius: var(--r-lg); }
-.app-shell [class~="rounded-xl"] { border-radius: var(--r-xl); }
-.app-shell [class~="rounded-2xl"] { border-radius: var(--r-2xl); }
-.app-shell [class~="rounded-3xl"] { border-radius: var(--r-3xl); }
+:root [class~="rounded-sm"] { border-radius: var(--r-sm); }
+:root [class~="rounded"] { border-radius: var(--r); }
+:root [class~="rounded-md"] { border-radius: var(--r-md); }
+:root [class~="rounded-lg"] { border-radius: var(--r-lg); }
+:root [class~="rounded-xl"] { border-radius: var(--r-xl); }
+:root [class~="rounded-2xl"] { border-radius: var(--r-2xl); }
+:root [class~="rounded-3xl"] { border-radius: var(--r-3xl); }
 
 /* ---- 阴影：暖褐色柔和投影 ---- */
-.app-shell [class~="shadow-sm"] { box-shadow: var(--shadow-sm); }
-.app-shell [class~="shadow"] { box-shadow: 0 2px 6px 0 rgb(61 52 40 / 0.1); }
-.app-shell [class~="shadow-md"] { box-shadow: 0 4px 12px 0 rgb(61 52 40 / 0.12); }
-.app-shell [class~="shadow-lg"] { box-shadow: var(--shadow-lg); }
-.app-shell [class~="shadow-xl"] { box-shadow: 0 12px 28px 0 rgb(61 52 40 / 0.16); }
-.app-shell [class~="shadow-2xl"] { box-shadow: 0 18px 38px 0 rgb(61 52 40 / 0.2); }
-.app-shell [class~="hover:shadow-zinc-200/50"]:hover { box-shadow: var(--shadow-base); }
+:root [class~="shadow-sm"] { box-shadow: var(--shadow-sm); }
+:root [class~="shadow"] { box-shadow: 0 2px 6px 0 rgb(61 52 40 / 0.1); }
+:root [class~="shadow-md"] { box-shadow: 0 4px 12px 0 rgb(61 52 40 / 0.12); }
+:root [class~="shadow-lg"] { box-shadow: var(--shadow-lg); }
+:root [class~="shadow-xl"] { box-shadow: 0 12px 28px 0 rgb(61 52 40 / 0.16); }
+:root [class~="shadow-2xl"] { box-shadow: 0 18px 38px 0 rgb(61 52 40 / 0.2); }
+:root [class~="hover:shadow-zinc-200/50"]:hover { box-shadow: var(--shadow-base); }
 
 /* 可点击卡片：悬停时轻微上浮 */
-.app-shell [class~="bg-white"][class*="cursor-pointer"]:hover,
-.app-shell .tcard[class*="cursor-pointer"]:hover {
+:root [class~="bg-white"][class*="cursor-pointer"]:hover,
+:root .tcard[class*="cursor-pointer"]:hover {
   box-shadow: var(--shadow-base);
   transform: translateY(-1px);
   transition: box-shadow 0.2s ease, transform 0.2s ease;
@@ -1260,8 +1398,8 @@
 /* ---- 输入类控件：奶油底 pill 输入框 + 鹅黄焦点圈 ----
    组件库的 Input / Select 内部还有原生 input，必须排除，否则会出现双层边框；
    深色代码编辑区（bg-slate-950/85 等）保留页面自带的深色写法。 */
-.app-shell input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(.animal-input__inner):not(.animal-select__search-input):not([class*="bg-slate-950"]):not([class*="bg-black"]),
-.app-shell select:not([class*="bg-slate-950"]):not([class*="bg-black"]) {
+:root input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(.animal-input__inner):not(.animal-select__search-input):not([class*="bg-slate-950"]):not([class*="bg-black"]),
+:root select:not([class*="bg-slate-950"]):not([class*="bg-black"]) {
   background-color: var(--surface-input);
   border-color: var(--line-input);
   border-width: 2.5px;
@@ -1271,7 +1409,7 @@
   font-weight: 500;
   box-shadow: none;
 }
-.app-shell textarea:not([class*="bg-slate-950"]):not([class*="bg-black"]) {
+:root textarea:not([class*="bg-slate-950"]):not([class*="bg-black"]) {
   background-color: var(--surface-input);
   border-color: var(--line-input);
   border-width: 2.5px;
@@ -1281,33 +1419,33 @@
   font-weight: 500;
   box-shadow: none;
 }
-.app-shell input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(.animal-input__inner):not(.animal-select__search-input):not([class*="bg-slate-950"]):not([class*="bg-black"]):hover,
-.app-shell select:not([class*="bg-slate-950"]):not([class*="bg-black"]):hover,
-.app-shell textarea:not([class*="bg-slate-950"]):not([class*="bg-black"]):hover {
+:root input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(.animal-input__inner):not(.animal-select__search-input):not([class*="bg-slate-950"]):not([class*="bg-black"]):hover,
+:root select:not([class*="bg-slate-950"]):not([class*="bg-black"]):hover,
+:root textarea:not([class*="bg-slate-950"]):not([class*="bg-black"]):hover {
   border-color: var(--line-control);
 }
-.app-shell input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(.animal-input__inner):not(.animal-select__search-input):not([class*="bg-slate-950"]):not([class*="bg-black"]):focus,
-.app-shell select:not([class*="bg-slate-950"]):not([class*="bg-black"]):focus,
-.app-shell textarea:not([class*="bg-slate-950"]):not([class*="bg-black"]):focus {
+:root input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(.animal-input__inner):not(.animal-select__search-input):not([class*="bg-slate-950"]):not([class*="bg-black"]):focus,
+:root select:not([class*="bg-slate-950"]):not([class*="bg-black"]):focus,
+:root textarea:not([class*="bg-slate-950"]):not([class*="bg-black"]):focus {
   outline: none;
   border-color: var(--focus-ring);
-  box-shadow: 0 0 0 3px rgb(255 204 0 / 0.18);
+  box-shadow: 0 0 0 3px var(--focus-halo);
 }
-.app-shell input::placeholder,
-.app-shell textarea::placeholder {
+:root input::placeholder,
+:root textarea::placeholder {
   color: var(--ink-disabled);
   font-weight: 400;
 }
 
 /* Tabs 面板里的多个块之间留出间距（组件默认只有内边距，卡片会贴在一起）。
    注意 Tabs 的结构是 .animal-tabs__content > .animal-tabs__inner > 内容，间距要加在 inner 上 */
-.app-shell .animal-tabs__inner > * + * {
+:root .animal-tabs__inner > * + * {
   margin-top: 16px;
 }
 
 /* 主题库的 Select 把选项面板弹到触发器右侧（left:100%），而 MCP 表单里的「连接方式」贴在卡片右边缘，
    面板会跑到卡片外被裁成一条黄缝。这里改为在触发器正下方展开（宽度按选项自适应，超高时自身滚动）。 */
-.app-shell .mcp-transport .animal-select__dropdown {
+:root .mcp-transport .animal-select__dropdown {
   left: 0 !important;
   right: auto !important;
   top: calc(100% + 6px) !important;
@@ -1322,7 +1460,7 @@
   overflow-y: auto;
   box-shadow: var(--shadow-base);
 }
-.app-shell .mcp-transport .animal-select__option {
+:root .mcp-transport .animal-select__option {
   white-space: normal;
   text-align: center;
 }
@@ -1331,22 +1469,22 @@
    主题库 Table 只有传 scroll 属性才给容器加 overflow，未传时宽表格会被外层
    Card 的 overflow:hidden 直接裁掉右侧列（看起来「显示不全」）。这里统一兜底，
    宽度足够时不会出现滚动条，行为与原来一致。 */
-.app-shell .animal-table-wrapper {
+:root .animal-table-wrapper {
   overflow-x: auto;
   min-width: 0;
 }
 /* 窄屏压缩单元格内边距，同样的屏幕上能看到更多列、行高也不会被挤成一字一行 */
 @media (max-width: 767px) {
-  .app-shell .animal-table__th {
+  :root .animal-table__th {
     padding: 14px 10px;
   }
-  .app-shell .animal-table__cell {
+  :root .animal-table__cell {
     padding: 12px 10px;
   }
 }
 
 /* 分段筛选按钮组：每组一个奶油小框，多组并排时能看出分组边界 */
-.app-shell .filter-group {
+:root .filter-group {
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -1359,26 +1497,26 @@
   overflow-x: auto;
   scrollbar-width: none;
 }
-.app-shell .filter-group::-webkit-scrollbar {
+:root .filter-group::-webkit-scrollbar {
   display: none;
 }
 
 /* ---- 焦点环：统一鹅黄（主题库的 focus 色） ---- */
-.app-shell [class*="focus:ring-"]:focus {
-  --tw-ring-color: rgb(255 204 0 / 0.45);
+:root [class*="focus:ring-"]:focus {
+  --tw-ring-color: var(--focus-halo);
 }
-.app-shell [class*="focus:border-"]:focus,
-.app-shell [class~="focus:border-[#0071e3]/50"]:focus,
-.app-shell [class~="focus:border-[#0071e3]/70!"]:focus {
+:root [class*="focus:border-"]:focus,
+:root [class~="focus:border-[#0071e3]/50"]:focus,
+:root [class~="focus:border-[#0071e3]/70!"]:focus {
   border-color: var(--focus-ring);
 }
-.app-shell [class~="focus:ring-[#0071e3]/30"]:focus,
-.app-shell [class~="focus:ring-[#0071e3]/35"]:focus {
-  --tw-ring-color: rgb(255 204 0 / 0.45);
+:root [class~="focus:ring-[#0071e3]/30"]:focus,
+:root [class~="focus:ring-[#0071e3]/35"]:focus {
+  --tw-ring-color: var(--focus-halo);
 }
 
 /* 例外：侧栏搜索框聚焦只加深中性描边，不显示主题色焦点环 */
-.app-shell .search-field:focus {
+:root .search-field:focus {
   border-color: var(--line-input);
   box-shadow: none;
 }
