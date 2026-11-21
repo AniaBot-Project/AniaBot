@@ -26,10 +26,15 @@ func (a *discordAdapter) translateMessage(m *discordgo.Message) *message.Message
 	if len(segs) == 0 {
 		return nil
 	}
-	// 对齐 OneBot v11 消息类型语义：DM（无 GuildID）= private + sub_type=friend
+	// 对齐 OneBot v11 消息类型语义：DM（无 GuildID）= private + sub_type=friend。
+	// DM 的频道 ID 不是群号，私聊不写 GroupId：框架用它判断群聊（插件据此选
+	// 会话键与发送路由），私聊按 UserId 即可寻址，DM 频道由适配器按需打开。
 	msgType, subType := "group", ""
+	var groupID message.QID
 	if m.GuildID == "" {
 		msgType, subType = "private", "friend"
+	} else {
+		groupID = message.QID(idPrefix + m.ChannelID)
 	}
 	userID := userQID(m.Author.ID)
 	msg := &message.Message{
@@ -38,7 +43,7 @@ func (a *discordAdapter) translateMessage(m *discordgo.Message) *message.Message
 		MessageType: msgType,
 		SubType:     subType,
 		MessageId:   msgID(m.ChannelID, m.ID),
-		GroupId:     message.QID(idPrefix + m.ChannelID),
+		GroupId:     groupID,
 		UserId:      userID,
 		Message:     segs,
 		RawMessage:  segmentsPlainText(segs),

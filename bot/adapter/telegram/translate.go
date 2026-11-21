@@ -21,10 +21,16 @@ func (a *telegramAdapter) updateToMessage(m *Message) *message.Message {
 	if len(segs) == 0 {
 		return nil
 	}
-	// 对齐 OneBot v11 消息类型语义：private = 私聊 + sub_type=friend
+	// 对齐 OneBot v11 消息类型语义：private = 私聊 + sub_type=friend。
+	// 私聊不写 GroupId：它是框架里的「群聊」标志（插件据此决定会话键与发送
+	// 路由），而 Telegram 私聊的 chat_id 恒等于对端 user_id，按 UserId 即可
+	// 寻址；填进去会让私聊被当成群聊（消息日志拆会话、指令按群聊回复）。
 	msgType, subType := "group", ""
+	var groupID message.QID
 	if m.Chat.Type == "private" {
 		msgType, subType = "private", "friend"
+	} else {
+		groupID = message.QID(idPrefix + chatIDRaw(m.Chat.ID))
 	}
 	userID := ""
 	if m.From != nil {
@@ -39,7 +45,7 @@ func (a *telegramAdapter) updateToMessage(m *Message) *message.Message {
 		MessageType: msgType,
 		SubType:     subType,
 		MessageId:   msgID(m.Chat.ID, m.MessageID),
-		GroupId:     message.QID(idPrefix + chatIDRaw(m.Chat.ID)),
+		GroupId:     groupID,
 		UserId:      message.QID(userID),
 		Message:     segs,
 		RawMessage:  segmentsPlainText(segs),

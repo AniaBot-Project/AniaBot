@@ -494,10 +494,16 @@ func (a *feishuAdapter) onReceive(ctx context.Context, event *larkim.P2MessageRe
 		if len(ob) == 0 {
 			return
 		}
-		// 对齐 OneBot v11 消息类型语义：p2p 私聊 = private + sub_type=friend
+		// 对齐 OneBot v11 消息类型语义：p2p 私聊 = private + sub_type=friend。
+		// 单聊的 chat_id 不是群号，私聊不写 GroupId：它是框架里的「群聊」标志
+		// （插件据此决定会话键与发送路由），单聊按 open_id 即可寻址，chat_id
+		// 由适配器自己缓存（p2pChats）。
 		msgType, subType := chatType, ""
+		var groupID message.QID
 		if chatType == "p2p" {
 			msgType, subType = "private", "friend"
+		} else {
+			groupID = message.QID(idPrefix + deref(em.ChatId))
 		}
 		msg := message.Message{
 			Time:        msTimeToUint(em.CreateTime),
@@ -505,7 +511,7 @@ func (a *feishuAdapter) onReceive(ctx context.Context, event *larkim.P2MessageRe
 			MessageType: msgType,
 			SubType:     subType,
 			MessageId:   message.QID(idPrefix + deref(em.MessageId)),
-			GroupId:     message.QID(idPrefix + deref(em.ChatId)),
+			GroupId:     groupID,
 			UserId:      message.QID(idPrefix + openID),
 			Message:     ob,
 			RawMessage:  segmentsPlainText(ob),
@@ -1482,13 +1488,24 @@ func (a *feishuAdapter) apiMessageToMessage(m *larkim.Message) *message.Message 
 		return nil
 	}
 	segs := a.apiMessageToOB11(m)
+	chatID := deref(m.ChatId)
 	msg := &message.Message{
 		MessageId:  message.QID(idPrefix + deref(m.MessageId)),
-		GroupId:    message.QID(idPrefix + deref(m.ChatId)),
 		Message:    segs,
 		RawMessage: segmentsPlainText(segs),
 		SelfId:     a.selfID(),
 		Platform:   Platform,
+	}
+	// 按事件缓存里的 chat_type 区分群聊/单聊：单聊的 chat_id 不是群号，不能留在
+	// GroupId 上（框架用它判断群聊）。缓存未命中（如刚启动就查历史）时保守保留
+	// 会话 ID，由知道会话类型的调用方（群/私聊历史）覆盖。
+	if chatType := a.chatTypeOf(chatID); chatType == "p2p" {
+		msg.MessageType, msg.SubType = "private", "friend"
+	} else {
+		msg.GroupId = message.QID(idPrefix + chatID)
+		if chatType == "group" {
+			msg.MessageType = "group"
+		}
 	}
 	if m.Sender != nil {
 		msg.Sender = message.MessageSender{
@@ -1556,6 +1573,8 @@ func (a *feishuAdapter) GetGroupMsgHistory(groupId message.QID, count int, messa
 		if mm == nil {
 			continue
 		}
+		// 群历史统一按群聊标注：chat_type 缓存可能未命中，也不能沿用单聊标注
+		mm.MessageType, mm.SubType = "group", ""
 		mm.GroupId = groupId
 		out = append(out, *mm)
 	}
@@ -1591,6 +1610,10 @@ func (a *feishuAdapter) GetFriendMsgHistory(userId message.QID, count int, messa
 		if mm == nil {
 			continue
 		}
+		// 单聊历史按私聊返回：即便 chat_type 缓存未命中，也不能把会话 ID
+		// 留在群号上
+		mm.MessageType, mm.SubType = "private", "friend"
+		mm.GroupId = ""
 		mm.UserId = userId
 		out = append(out, *mm)
 	}

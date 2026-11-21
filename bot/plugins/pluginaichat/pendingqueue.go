@@ -25,6 +25,18 @@ func sessionKey(id message.QID, isGroup bool) string {
 	return "f:" + id.String()
 }
 
+// messageTarget 返回一条消息所属的会话目标与是否群聊：群聊取 GroupId，
+// 私聊取发送者。群聊与否一律以 message_type 为准（见 message.Message.IsGroup）：
+// 微信、飞书、Telegram 等平台的私聊消息同样带 GroupId，按「GroupId 非空」推断
+// 会把私聊当群聊，回复走 SendGroupMsg，面板「消息日志」随之把同一会话拆成
+// 群聊 + 私聊两条，会话级状态（计划模式、主动互动、定时任务）也会记错键。
+func messageTarget(msg message.Message) (message.QID, bool) {
+	if msg.IsGroup() {
+		return msg.GroupId, true
+	}
+	return msg.Sender.UserId, false
+}
+
 func (p *AIChatPlugin) getPendingQueue(id message.QID, isGroup bool) *pendingQueue {
 	q, _ := p.pendingMsgs.LoadOrStore(sessionKey(id, isGroup), &pendingQueue{})
 	return q.(*pendingQueue)

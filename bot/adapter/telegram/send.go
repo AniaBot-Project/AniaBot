@@ -391,12 +391,18 @@ func (a *telegramAdapter) cacheSent(chatID int64, messageID int, segs []message.
 	if chatID > 0 {
 		msgType = "private"
 	}
+	// 与入站保持一致：私聊（chat_id 即 user_id）不写 GroupId，避免下游把私聊
+	// 当成群聊消息
+	var groupID message.QID
+	if msgType != "private" {
+		groupID = message.QID(idPrefix + chatIDRaw(chatID))
+	}
 	msg := message.Message{
 		Time:        uint(time.Now().Unix()),
 		PostType:    "message",
 		MessageType: msgType,
 		MessageId:   msgID(chatID, messageID),
-		GroupId:     message.QID(idPrefix + chatIDRaw(chatID)),
+		GroupId:     groupID,
 		Message:     message.StripInlinePayloadSegments(segs),
 		RawMessage:  segmentsPlainText(segs),
 		SelfId:      a.selfID(),

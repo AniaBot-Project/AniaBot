@@ -324,12 +324,17 @@ func (a *discordAdapter) cacheSent(channelID, messageID string, segs []message.O
 	if private {
 		msgType = "private"
 	}
+	// 与入站保持一致：DM 的频道 ID 不是群号，私聊不写 GroupId
+	var groupID message.QID
+	if !private {
+		groupID = message.QID(idPrefix + channelID)
+	}
 	msg := message.Message{
 		Time:        uint(time.Now().Unix()),
 		PostType:    "message",
 		MessageType: msgType,
 		MessageId:   msgID(channelID, messageID),
-		GroupId:     message.QID(idPrefix + channelID),
+		GroupId:     groupID,
 		Message:     message.StripInlinePayloadSegments(segs),
 		RawMessage:  segmentsPlainText(segs),
 		SelfId:      a.SelfID(),

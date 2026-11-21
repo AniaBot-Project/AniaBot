@@ -127,6 +127,10 @@ func TestTranslateDM(t *testing.T) {
 	if msg == nil || msg.MessageType != "private" || msg.SubType != "friend" {
 		t.Fatalf("DM 消息类型错误: %+v", msg)
 	}
+	// DM 频道 ID 不是群号：私聊不写 GroupId，否则会被当成群聊
+	if msg.GroupId != "" {
+		t.Fatalf("DM 消息不应带 GroupId, got %q", msg.GroupId)
+	}
 	if msg.Sender.Nickname != "u" {
 		t.Fatalf("昵称应回落 Username: %q", msg.Sender.Nickname)
 	}

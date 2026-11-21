@@ -17,11 +17,7 @@ import (
 //	/plan off   退出计划模式（即批准计划，恢复正常执行）
 //	/plan       查看当前状态
 func (p *AIChatPlugin) handlePlanCommand(ctx context.Context, b bot.Bot, cmd command.Command, msg message.Message) (bool, error) {
-	isGroup := msg.GroupId != ""
-	id := msg.Sender.UserId
-	if isGroup {
-		id = msg.GroupId
-	}
+	id, isGroup := messageTarget(msg)
 	key := sessionKey(id, isGroup)
 
 	sub := ""

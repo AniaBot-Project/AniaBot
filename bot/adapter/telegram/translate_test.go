@@ -64,8 +64,10 @@ func TestUpdateToMessagePrivate(t *testing.T) {
 	if msg.MessageId.String() != "tg:111:1" {
 		t.Fatalf("MessageId = %s, want tg:111:1", msg.MessageId)
 	}
-	if msg.GroupId.String() != "tg:111" || msg.UserId.String() != "tg:222" {
-		t.Fatalf("GroupId/UserId = %s/%s, want tg:111/tg:222", msg.GroupId, msg.UserId)
+	// 私聊不写 GroupId：框架用它判断群聊，填上会让私聊在消息日志里被拆成
+	// 群聊 + 私聊，指令也按群聊回复
+	if msg.GroupId != "" || msg.UserId.String() != "tg:222" {
+		t.Fatalf("GroupId/UserId = %s/%s, want 空/tg:222", msg.GroupId, msg.UserId)
 	}
 	if msg.SelfId.String() != "tg:100" {
 		t.Fatalf("SelfId = %s, want tg:100", msg.SelfId)
@@ -94,6 +96,9 @@ func TestUpdateToMessageGroupChannel(t *testing.T) {
 		}
 		if msg.MessageId.String() != "tg:-100:1" {
 			t.Fatalf("chatType=%s: MessageId = %s, want tg:-100:1", ct, msg.MessageId)
+		}
+		if msg.GroupId.String() != "tg:-100" {
+			t.Fatalf("chatType=%s: GroupId = %s, want tg:-100", ct, msg.GroupId)
 		}
 	}
 }

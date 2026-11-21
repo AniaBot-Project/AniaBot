@@ -29,11 +29,7 @@ import (
 )
 
 func (p *AIChatPlugin) handleProactiveCommand(_ context.Context, b bot.Bot, cmd command.Command, msg message.Message) (bool, error) {
-	isGroup := msg.GroupId != ""
-	id := msg.Sender.UserId
-	if isGroup {
-		id = msg.GroupId
-	}
+	id, isGroup := messageTarget(msg)
 	scope := sessionKey(id, isGroup)
 	isAdmin := p.SystemConfig.IsAdmin(msg.Sender.UserId)
 

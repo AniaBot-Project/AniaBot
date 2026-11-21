@@ -147,6 +147,31 @@ func TestCollectSessionStatus(t *testing.T) {
 	}
 }
 
+// TestStatusCommandPrivateWithChatID 回归：私聊消息带着平台会话 ID（微信私聊、
+// Telegram 私聊都如此）时，/status 必须按私聊回复并走 SendFriendMsg——按
+// GroupId 非空推断群聊会让回复以群聊身份写入消息日志，面板「消息日志」于是
+// 把同一个会话拆成「群聊」+「私聊」两条。
+func TestStatusCommandPrivateWithChatID(t *testing.T) {
+	p := &AIChatPlugin{}
+	p.Logger = testLogger()
+	fb := &recordBot{}
+	msg := message.Message{
+		MessageType: "private",
+		GroupId:     "wx:u@im.wechat",
+		UserId:      "wx:u@im.wechat",
+		Sender:      message.MessageSender{UserId: "wx:u@im.wechat"},
+	}
+	if _, err := p.handleStatusCommand(fb, msg); err != nil {
+		t.Fatalf("/status 返回错误: %v", err)
+	}
+	if len(fb.groups) != 0 {
+		t.Fatalf("私聊 /status 不应按群聊发送, got %v", fb.groups)
+	}
+	if len(fb.friend) != 1 || !strings.Contains(fb.friend[0], "【会话状态】私聊 wx:u@im.wechat") {
+		t.Fatalf("私聊 /status 回复错误: %v", fb.friend)
+	}
+}
+
 // TestSessionLockHeldWhenActiveContextMissing 建会话/回放历史阶段尚未登记
 // activeContexts，但锁已被持有：/status 应仍显示响应中（准备会话）。
 func TestSessionLockHeldWhenActiveContextMissing(t *testing.T) {
