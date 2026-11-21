@@ -3,7 +3,8 @@
     <!-- 说明 + 复位 -->
     <div class="flex items-start justify-between gap-3 flex-wrap">
       <p class="text-xs text-zinc-500 leading-relaxed max-w-3xl">
-        调整面板的配色与外观，选中即时生效。偏好只保存在当前浏览器（localStorage），不写入 Bot 配置、不需要重启，也不影响其他人的浏览器。
+        调整面板的配色与外观，选中即时生效。主题色决定强调色；卡片纸张、描边与文字色由「配色方案」决定，用预设主题可以一次换整套。
+        偏好只保存在当前浏览器（localStorage），不写入 Bot 配置、不需要重启，也不影响其他人的浏览器。
       </p>
       <Button type="text" size="small" @click="onReset">恢复默认</Button>
     </div>
@@ -27,8 +28,8 @@
           <span class="preset-thumb" :style="{ background: p.page }">
             <span class="preset-thumb__side" :style="{ background: p.side }" />
             <span class="preset-thumb__main">
-              <span class="preset-thumb__card" />
-              <span class="preset-thumb__card preset-thumb__card--short" />
+              <span class="preset-thumb__card" :style="{ background: p.surface }" />
+              <span class="preset-thumb__card preset-thumb__card--short" :style="{ background: p.surface }" />
               <span class="preset-thumb__bar" :style="{ background: p.accent }" />
             </span>
           </span>
@@ -83,11 +84,11 @@
       </div>
     </Card>
 
-    <!-- 页面背景 -->
+    <!-- 配色方案 -->
     <Card style="padding: 20px 24px">
       <div class="flex items-baseline justify-between gap-3 flex-wrap">
-        <span class="tlabel">Canvas · 页面背景</span>
-        <span class="text-[11px] text-zinc-400">卡片纸张保持奶油白，只换底色与底纹</span>
+        <span class="tlabel">Tone · 配色方案</span>
+        <span class="text-[11px] text-zinc-400">页面底色、卡片纸张、描边与文字色一起换</span>
       </div>
       <div class="mt-4 flex flex-wrap gap-2">
         <button
@@ -98,7 +99,9 @@
           :class="{ 'opt-chip-on': appearance.background === t.id }"
           @click="onPatch({ background: t.id })"
         >
-          <span class="tone-dot" :style="{ background: t.bg }" />
+          <span class="tone-dot" :style="{ background: t.bg }">
+            <span class="tone-dot__paper" :style="{ background: t.surface }" />
+          </span>
           {{ t.name }}
         </button>
       </div>
@@ -126,7 +129,7 @@
     <Card style="padding: 20px 24px">
       <div class="flex items-baseline justify-between gap-3 flex-wrap">
         <span class="tlabel">Sidebar · 侧边栏</span>
-        <span class="text-[11px] text-zinc-400">「主题色浅调」会跟随上面选的主色</span>
+        <span class="text-[11px] text-zinc-400">「浅色纸张」跟随配色方案，「主题色浅调」跟随主色</span>
       </div>
       <div class="side-grid mt-4">
         <button
@@ -211,6 +214,7 @@ import {
   SIDEBAR_OPTIONS,
   THEME_PRESETS,
   appearance,
+  getTone,
   updateAppearance,
   resetAppearance,
 } from '../appearance'
@@ -220,14 +224,15 @@ watch(() => appearance.accent, (value) => { hexText.value = value })
 
 const sameAccent = (value) => appearance.accent.toLowerCase() === value.toLowerCase()
 
-// 预设主题是否与当前状态完全一致（主题色 + 底色 + 纹理 + 侧栏）
+// 预设主题是否与当前状态完全一致（主题色 + 配色方案 + 纹理 + 侧栏）
 const isThemeActive = (preset) =>
   sameAccent(preset.accent) &&
   appearance.background === preset.background &&
   appearance.pattern === preset.pattern &&
   appearance.sidebar === preset.sidebar
 
-const sidebarSwatch = (item) => (typeof item.swatch === 'function' ? item.swatch(appearance.accent) : item.swatch)
+const sidebarSwatch = (item) =>
+  typeof item.swatch === 'function' ? item.swatch(appearance.accent, getTone(appearance.background)) : item.swatch
 
 function onPatch(patch) {
   updateAppearance(patch)
@@ -445,11 +450,21 @@ function onReset() {
 
 /* ---- 底色 / 纹理小图标 ---- */
 .tone-dot {
-  width: 15px;
-  height: 15px;
-  border-radius: 999px;
-  border: 1.5px solid rgb(114 93 66 / 0.22);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
   flex-shrink: 0;
+  border-radius: 6px;
+  border: 1.5px solid rgb(114 93 66 / 0.2);
+}
+.tone-dot__paper {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.08);
 }
 .pattern-thumb {
   width: 17px;

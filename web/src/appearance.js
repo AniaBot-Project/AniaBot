@@ -1,11 +1,12 @@
-// 面板外观偏好：主题色、页面背景、侧栏风格、圆角与动效。
+// 面板外观偏好：主题色、配色方案（纸张）、背景纹理、侧栏风格、圆角与动效。
 //
 // 所有可调外观都落到 <html> 上的 CSS 变量与 data-* 属性，由 style.css 的
 // 设计令牌与 Tailwind 兼容层消费，因此改完即时生效、不需要重启 Bot。
 // 偏好只保存在当前浏览器（localStorage），不写进 Bot 配置，也不影响其他设备。
 //
 // 主题色不写死一整套色板：只保存选中的主色，悬停 / 按下 / 浅底 / 描边等
-// 派生色在运行时按比例混合得出，自定义任意颜色都能得到协调的一套。
+// 派生色在运行时按比例混合得出，自定义任意颜色都能得到协调的一套；
+// 配色方案则给出整套「纸张」：页面底色、卡片/表格/输入框的底、描边与文字色。
 
 import { reactive } from 'vue'
 
@@ -15,7 +16,7 @@ export const DEFAULT_APPEARANCE = Object.freeze({
   accent: '#19c8b9',
   background: 'cream',
   pattern: 'dots',
-  sidebar: 'cream',
+  sidebar: 'light',
   radius: 'normal',
   motion: 'full',
 })
@@ -98,61 +99,224 @@ export const ACCENT_PRESETS = [
   { name: '石墨灰', value: '#5b5b66' },
 ].map((item) => ({ ...item, ink: contrastInk(item.value) }))
 
-// ============ 页面背景 ============
+// ============ 配色方案（纸张） ============
+//
+// 一套方案 = 页面底色 + 光晕 + 壁纸颜色 + 五级纸张底色 + 三级描边 + 文字梯度
+// + 悬浮/遮罩 + 代码块 + 3D 阴影 + 侧栏渐变。卡片、表格、弹窗、输入框、页签、
+// 标签等全部消费这些令牌，所以换方案时整块「纸张」都会跟着变，而不是只换强调色。
 
-// 只换「页面底色 + 光晕 + 点阵颜色」，卡片纸张（奶油白）保持统一观感。
-const BACKGROUND_STYLES = {
+const TONE_STYLES = {
   cream: {
     name: '奶油小岛',
-    desc: '暖米白底色',
-    bg: '#efe5cd',
+    desc: '暖米白纸张',
+    page: '#efe5cd',
     halo1: 'rgb(25 200 185 / 0.12)',
     halo2: 'rgb(247 205 103 / 0.18)',
     dot: 'rgb(196 184 158 / 0.3)',
+    surface: '#fffdf7',
+    surface2: '#f7f3df',
+    surface3: '#f0e8d8',
+    surface4: '#f5efe0',
+    surface5: '#efe6d3',
+    surface6: '#e7dcc4',
+    input: '#fffbe7',
+    line: '#ece0c9',
+    lineStrong: '#e0d2b6',
+    lineInput: '#d9cdb4',
+    lineControl: '#c4b89e',
+    ink: '#5f4423',
+    inkBody: '#725d42',
+    inkSoft: '#8a7b66',
+    inkMuted: '#9a8b72',
+    inkDisabled: '#c4b89e',
+    inkOnDark: '#f7ecd6',
+    fillSubtle: 'rgb(114 93 66 / 0.05)',
+    fillHover: 'rgb(114 93 66 / 0.07)',
+    fillPress: 'rgb(114 93 66 / 0.1)',
+    overlay: 'rgb(43 33 24 / 0.42)',
+    codeBg: '#2b2118',
+    codeInk: '#f0e3c8',
+    shadow3d: '#bdaea0',
+    sidebar: ['#fdf8ea', '#f8f2e0', '#f3ecd8'],
   },
   snow: {
     name: '月白',
     desc: '冷调浅灰蓝',
-    bg: '#e8ecf2',
+    page: '#e8ecf2',
     halo1: 'rgb(90 140 210 / 0.1)',
     halo2: 'rgb(120 195 210 / 0.14)',
     dot: 'rgb(174 184 196 / 0.32)',
+    surface: '#ffffff',
+    surface2: '#f3f5f8',
+    surface3: '#e9edf2',
+    surface4: '#f0f3f7',
+    surface5: '#e6ebf1',
+    surface6: '#dbe2ea',
+    input: '#f8fbff',
+    line: '#e3e8ee',
+    lineStrong: '#d2dae3',
+    lineInput: '#c6d0da',
+    lineControl: '#aab7c4',
+    ink: '#3f4a58',
+    inkBody: '#55636f',
+    inkSoft: '#6f7d8a',
+    inkMuted: '#8b98a5',
+    inkDisabled: '#b6c1cc',
+    inkOnDark: '#f2f6fb',
+    fillSubtle: 'rgb(96 112 128 / 0.05)',
+    fillHover: 'rgb(96 112 128 / 0.08)',
+    fillPress: 'rgb(96 112 128 / 0.12)',
+    overlay: 'rgb(32 40 50 / 0.42)',
+    codeBg: '#232a33',
+    codeInk: '#e6ecf3',
+    shadow3d: '#b9c2cc',
+    sidebar: ['#f8fafc', '#eff3f8', '#e7edf4'],
   },
   sakura: {
     name: '樱粉',
     desc: '淡粉暖调',
-    bg: '#f5e6e3',
+    page: '#f5e6e3',
     halo1: 'rgb(240 140 165 / 0.14)',
     halo2: 'rgb(247 200 150 / 0.16)',
     dot: 'rgb(212 180 175 / 0.34)',
+    surface: '#fffbfa',
+    surface2: '#faf0ee',
+    surface3: '#f5e7e4',
+    surface4: '#fdf5f3',
+    surface5: '#f8ebe8',
+    surface6: '#efdcd8',
+    input: '#fff7f5',
+    line: '#f0ded9',
+    lineStrong: '#e5cdc7',
+    lineInput: '#d9bfb9',
+    lineControl: '#c6a9a4',
+    ink: '#5c3a44',
+    inkBody: '#74505a',
+    inkSoft: '#8d6b74',
+    inkMuted: '#a3868d',
+    inkDisabled: '#c7aeb3',
+    inkOnDark: '#fbefef',
+    fillSubtle: 'rgb(126 90 98 / 0.05)',
+    fillHover: 'rgb(126 90 98 / 0.08)',
+    fillPress: 'rgb(126 90 98 / 0.12)',
+    overlay: 'rgb(50 32 38 / 0.42)',
+    codeBg: '#2f2228',
+    codeInk: '#f3e4e6',
+    shadow3d: '#c2a9a5',
+    sidebar: ['#fdf6f4', '#f9ece9', '#f3e1dd'],
   },
   mint: {
     name: '薄荷',
     desc: '青绿浅底',
-    bg: '#e1ede4',
+    page: '#e1ede4',
     halo1: 'rgb(70 190 160 / 0.14)',
     halo2: 'rgb(180 215 130 / 0.16)',
     dot: 'rgb(170 194 178 / 0.34)',
+    surface: '#fbfffd',
+    surface2: '#eff7f2',
+    surface3: '#e2efe8',
+    surface4: '#f5fbf7',
+    surface5: '#e8f2ec',
+    surface6: '#d9e8e0',
+    input: '#f7fdfa',
+    line: '#dcebe2',
+    lineStrong: '#c8dcd1',
+    lineInput: '#b8cec3',
+    lineControl: '#a3bcae',
+    ink: '#2f4a42',
+    inkBody: '#476059',
+    inkSoft: '#63796f',
+    inkMuted: '#80938a',
+    inkDisabled: '#b2c4bb',
+    inkOnDark: '#eef7f2',
+    fillSubtle: 'rgb(70 100 90 / 0.05)',
+    fillHover: 'rgb(70 100 90 / 0.08)',
+    fillPress: 'rgb(70 100 90 / 0.12)',
+    overlay: 'rgb(26 40 36 / 0.42)',
+    codeBg: '#1f2a26',
+    codeInk: '#dceee7',
+    shadow3d: '#a8bdb1',
+    sidebar: ['#f4fbf7', '#eaf5ef', '#e0efe7'],
   },
   oat: {
     name: '燕麦',
     desc: '沙色大地调',
-    bg: '#ece3d1',
+    page: '#ece3d1',
     halo1: 'rgb(205 165 110 / 0.14)',
     halo2: 'rgb(140 170 150 / 0.1)',
     dot: 'rgb(192 178 152 / 0.32)',
+    surface: '#fffcf3',
+    surface2: '#f7f1e1',
+    surface3: '#eee5d1',
+    surface4: '#faf5e9',
+    surface5: '#efe6d3',
+    surface6: '#e4d8c1',
+    input: '#fffaeb',
+    line: '#e8ddc6',
+    lineStrong: '#d9caac',
+    lineInput: '#ccbc9c',
+    lineControl: '#b6a382',
+    ink: '#564a34',
+    inkBody: '#6b5d45',
+    inkSoft: '#857556',
+    inkMuted: '#9c8d6f',
+    inkDisabled: '#c3b79d',
+    inkOnDark: '#f8efdc',
+    fillSubtle: 'rgb(110 95 70 / 0.05)',
+    fillHover: 'rgb(110 95 70 / 0.08)',
+    fillPress: 'rgb(110 95 70 / 0.12)',
+    overlay: 'rgb(42 35 24 / 0.42)',
+    codeBg: '#2b2519',
+    codeInk: '#f0e6cf',
+    shadow3d: '#bba98b',
+    sidebar: ['#fdf8ec', '#f7efdd', '#f0e5cd'],
   },
   slate: {
     name: '石板',
     desc: '冷灰工业感',
-    bg: '#dfe3e8',
+    page: '#dfe3e8',
     halo1: 'rgb(100 130 175 / 0.12)',
     halo2: 'rgb(150 175 210 / 0.16)',
     dot: 'rgb(168 178 190 / 0.3)',
+    surface: '#f8fafc',
+    surface2: '#eef1f5',
+    surface3: '#e4e9ef',
+    surface4: '#f3f6f9',
+    surface5: '#e9eef4',
+    surface6: '#dfe6ee',
+    input: '#f6f9fc',
+    line: '#dfe4ea',
+    lineStrong: '#cdd5de',
+    lineInput: '#c1cad4',
+    lineControl: '#a8b3be',
+    ink: '#38414b',
+    inkBody: '#4f5a65',
+    inkSoft: '#6b7682',
+    inkMuted: '#86909c',
+    inkDisabled: '#b2bcc6',
+    inkOnDark: '#f1f4f8',
+    fillSubtle: 'rgb(80 95 110 / 0.05)',
+    fillHover: 'rgb(80 95 110 / 0.08)',
+    fillPress: 'rgb(80 95 110 / 0.12)',
+    overlay: 'rgb(28 34 42 / 0.42)',
+    codeBg: '#222932',
+    codeInk: '#e4eaf1',
+    shadow3d: '#b4bec8',
+    sidebar: ['#f6f9fc', '#edf2f7', '#e3e9f0'],
   },
 }
 
-export const BACKGROUND_OPTIONS = Object.entries(BACKGROUND_STYLES).map(([id, style]) => ({ id, ...style }))
+export const BACKGROUND_OPTIONS = Object.entries(TONE_STYLES).map(([id, tone]) => ({
+  id,
+  name: tone.name,
+  desc: tone.desc,
+  bg: tone.page,
+  surface: tone.surface2,
+}))
+
+export function getTone(id) {
+  return TONE_STYLES[id] || TONE_STYLES.cream
+}
 
 // ============ 背景纹理 ============
 
@@ -165,22 +329,21 @@ export const PATTERN_OPTIONS = [
 // ============ 侧边栏 ============
 
 // 侧栏是面积最大的深色/浅色块，换风格时视觉差异最明显。
-// 每套风格给出一组令牌；「主题色浅调」按当前主色实时算出浅色渐变。
+// 「浅色纸张」跟随当前配色方案，「主题色浅调」跟随主色，其余是两套深色。
 const SIDEBAR_STYLES = {
-  cream: {
-    name: '奶油小岛',
-    desc: '默认暖米白',
-    swatch: 'linear-gradient(180deg, #fdf8ea, #f3ecd8)',
-    vars: () => ({
-      '--sidebar-bg':
-        'radial-gradient(circle, rgb(196 184 158 / 0.22) 1.1px, transparent 1.1px) 0 0 / 20px 20px, linear-gradient(180deg, #fdf8ea 0%, #f8f2e0 46%, #f3ecd8 100%)',
-      '--sidebar-border': 'var(--line-strong)',
-      '--sidebar-ink': '#87735a',
-      '--sidebar-ink-strong': '#5f4423',
-      '--sidebar-hover-bg': 'rgb(255 253 247 / 0.7)',
-      '--sidebar-divider': 'rgb(114 93 66 / 0.1)',
-      '--sidebar-tip-bg': '#2b2118',
-      '--sidebar-tip-ink': '#f7ecd6',
+  light: {
+    name: '浅色纸张',
+    desc: '跟随配色方案',
+    swatch: (accent, tone) => `linear-gradient(180deg, ${tone.sidebar[0]}, ${tone.sidebar[2]})`,
+    vars: (accent, tone) => ({
+      '--sidebar-bg': `radial-gradient(circle, ${rgbCss(tone.lineControl, 0.22)} 1.1px, transparent 1.1px) 0 0 / 20px 20px, linear-gradient(180deg, ${tone.sidebar[0]} 0%, ${tone.sidebar[1]} 46%, ${tone.sidebar[2]} 100%)`,
+      '--sidebar-border': tone.lineStrong,
+      '--sidebar-ink': tone.inkSoft,
+      '--sidebar-ink-strong': tone.ink,
+      '--sidebar-hover-bg': rgbCss(tone.surface, 0.7),
+      '--sidebar-divider': rgbCss(tone.ink, 0.1),
+      '--sidebar-tip-bg': tone.codeBg,
+      '--sidebar-tip-ink': tone.inkOnDark,
     }),
   },
   accent: {
@@ -202,7 +365,7 @@ const SIDEBAR_STYLES = {
     name: '深棕咖啡',
     desc: '暖深色',
     dark: true,
-    swatch: 'linear-gradient(180deg, #40342a, #2b221a)',
+    swatch: () => 'linear-gradient(180deg, #40342a, #2b221a)',
     vars: () => ({
       '--sidebar-bg':
         'radial-gradient(circle, rgb(255 255 255 / 0.05) 1.1px, transparent 1.1px) 0 0 / 20px 20px, linear-gradient(180deg, #40342a 0%, #342a21 46%, #2b221a 100%)',
@@ -219,7 +382,7 @@ const SIDEBAR_STYLES = {
     name: '石板深蓝',
     desc: '冷深色',
     dark: true,
-    swatch: 'linear-gradient(180deg, #3a4553, #262f3a)',
+    swatch: () => 'linear-gradient(180deg, #3a4553, #262f3a)',
     vars: () => ({
       '--sidebar-bg':
         'radial-gradient(circle, rgb(255 255 255 / 0.06) 1.1px, transparent 1.1px) 0 0 / 20px 20px, linear-gradient(180deg, #3a4553 0%, #303a47 46%, #262f3a 100%)',
@@ -311,21 +474,24 @@ export const MOTION_OPTIONS = [
 
 // ============ 预设主题 ============
 
-// 整套配色组合：主色 + 页面底色 + 纹理 + 侧栏。圆角与动效不随预设变化。
+// 整套配色组合：主色 + 纸张方案 + 纹理 + 侧栏。圆角与动效不随预设变化。
 export const THEME_PRESETS = [
-  { id: 'island', name: '薄荷小岛', desc: '奶油底 · 薄荷青绿', accent: '#19c8b9', background: 'cream', pattern: 'dots', sidebar: 'cream' },
-  { id: 'sakura', name: '樱花奶油', desc: '樱粉底 · 玫瑰粉', accent: '#e86a93', background: 'sakura', pattern: 'dots', sidebar: 'cream' },
-  { id: 'ocean', name: '海盐月白', desc: '月白底 · 海盐蓝', accent: '#3a8fd8', background: 'snow', pattern: 'grid', sidebar: 'accent' },
-  { id: 'forest', name: '森林燕麦', desc: '燕麦底 · 苔原绿', accent: '#4aa96c', background: 'oat', pattern: 'dots', sidebar: 'coffee' },
-  { id: 'dusk', name: '暮色咖啡', desc: '奶油底 · 琥珀金', accent: '#d99a1e', background: 'cream', pattern: 'plain', sidebar: 'coffee' },
-  { id: 'ink', name: '墨石板岩', desc: '石板底 · 蓝灰', accent: '#5f7d99', background: 'slate', pattern: 'grid', sidebar: 'slate' },
-].map((preset) => ({
-  ...preset,
-  page: (BACKGROUND_STYLES[preset.background] || BACKGROUND_STYLES.cream).bg,
-  side: typeof SIDEBAR_STYLES[preset.sidebar].swatch === 'function'
-    ? SIDEBAR_STYLES[preset.sidebar].swatch(preset.accent)
-    : SIDEBAR_STYLES[preset.sidebar].swatch,
-}))
+  { id: 'island', name: '薄荷小岛', desc: '奶油纸 · 薄荷青绿', accent: '#19c8b9', background: 'cream', pattern: 'dots', sidebar: 'light' },
+  { id: 'sakura', name: '樱花奶油', desc: '樱粉纸 · 玫瑰粉', accent: '#e86a93', background: 'sakura', pattern: 'dots', sidebar: 'light' },
+  { id: 'ocean', name: '海盐月白', desc: '月白纸 · 海盐蓝', accent: '#3a8fd8', background: 'snow', pattern: 'grid', sidebar: 'accent' },
+  { id: 'forest', name: '森林燕麦', desc: '燕麦纸 · 苔原绿', accent: '#4aa96c', background: 'oat', pattern: 'dots', sidebar: 'coffee' },
+  { id: 'dusk', name: '暮色咖啡', desc: '奶油纸 · 琥珀金', accent: '#d99a1e', background: 'cream', pattern: 'plain', sidebar: 'coffee' },
+  { id: 'ink', name: '墨石板岩', desc: '石板纸 · 蓝灰', accent: '#5f7d99', background: 'slate', pattern: 'grid', sidebar: 'slate' },
+].map((preset) => {
+  const tone = getTone(preset.background)
+  const sidebar = SIDEBAR_STYLES[preset.sidebar] || SIDEBAR_STYLES.light
+  return {
+    ...preset,
+    page: tone.page,
+    surface: tone.surface,
+    side: sidebar.swatch(preset.accent, tone),
+  }
+})
 
 // ============ 状态与持久化 ============
 
@@ -341,7 +507,7 @@ export function normalizeAppearance(raw) {
   const source = raw && typeof raw === 'object' ? raw : {}
   return {
     accent: normalizeAccent(source.accent),
-    background: BACKGROUND_STYLES[source.background] ? source.background : DEFAULT_APPEARANCE.background,
+    background: TONE_STYLES[source.background] ? source.background : DEFAULT_APPEARANCE.background,
     pattern: PATTERN_OPTIONS.some((p) => p.id === source.pattern) ? source.pattern : DEFAULT_APPEARANCE.pattern,
     sidebar: SIDEBAR_STYLES[source.sidebar] ? source.sidebar : DEFAULT_APPEARANCE.sidebar,
     radius: RADIUS_STYLES[source.radius] ? source.radius : DEFAULT_APPEARANCE.radius,
@@ -365,18 +531,38 @@ function loadStored() {
 
 export const appearance = reactive(loadStored())
 
-function buildVars(state) {
-  const background = BACKGROUND_STYLES[state.background] || BACKGROUND_STYLES.cream
-  const sidebar = SIDEBAR_STYLES[state.sidebar] || SIDEBAR_STYLES.cream
-  const radius = RADIUS_STYLES[state.radius] || RADIUS_STYLES.normal
+function toneVars(tone) {
   return {
-    ...radius.vars,
-    ...sidebar.vars(state.accent),
-    ...accentVars(state.accent),
-    '--page-bg': background.bg,
-    '--page-halo-1': `radial-gradient(60rem 40rem at 2% -12%, ${background.halo1}, transparent 58%)`,
-    '--page-halo-2': `radial-gradient(52rem 36rem at 98% -8%, ${background.halo2}, transparent 56%)`,
-    '--page-dot': background.dot,
+    '--page-bg': tone.page,
+    '--page-halo-1': `radial-gradient(60rem 40rem at 2% -12%, ${tone.halo1}, transparent 58%)`,
+    '--page-halo-2': `radial-gradient(52rem 36rem at 98% -8%, ${tone.halo2}, transparent 56%)`,
+    '--page-dot': tone.dot,
+    '--surface': tone.surface,
+    '--surface-2': tone.surface2,
+    '--surface-3': tone.surface3,
+    '--surface-4': tone.surface4,
+    '--surface-5': tone.surface5,
+    '--surface-6': tone.surface6,
+    '--surface-input': tone.input,
+    '--surface-glass': rgbCss(tone.surface, 0.85),
+    '--surface-topbar': rgbCss(tone.surface, 0.92),
+    '--line': tone.line,
+    '--line-strong': tone.lineStrong,
+    '--line-input': tone.lineInput,
+    '--line-control': tone.lineControl,
+    '--ink': tone.ink,
+    '--ink-body': tone.inkBody,
+    '--ink-soft': tone.inkSoft,
+    '--ink-muted': tone.inkMuted,
+    '--ink-disabled': tone.inkDisabled,
+    '--ink-on-dark': tone.inkOnDark,
+    '--fill-subtle': tone.fillSubtle,
+    '--fill-hover': tone.fillHover,
+    '--fill-press': tone.fillPress,
+    '--overlay': tone.overlay,
+    '--code-bg': tone.codeBg,
+    '--code-ink': tone.codeInk,
+    '--shadow-3d': tone.shadow3d,
   }
 }
 
@@ -403,6 +589,18 @@ function accentVars(accent) {
   }
 }
 
+function buildVars(state) {
+  const tone = getTone(state.background)
+  const sidebar = SIDEBAR_STYLES[state.sidebar] || SIDEBAR_STYLES.light
+  const radius = RADIUS_STYLES[state.radius] || RADIUS_STYLES.normal
+  return {
+    ...radius.vars,
+    ...toneVars(tone),
+    ...sidebar.vars(state.accent, tone),
+    ...accentVars(state.accent),
+  }
+}
+
 // 同步移动端浏览器地址栏的 theme-color，让它跟着页面底色走
 function syncThemeColor(color) {
   let meta = document.querySelector('meta[name="theme-color"]')
@@ -422,7 +620,7 @@ export function applyAppearance() {
   }
   root.dataset.pattern = appearance.pattern
   root.dataset.motion = appearance.motion
-  syncThemeColor((BACKGROUND_STYLES[appearance.background] || BACKGROUND_STYLES.cream).bg)
+  syncThemeColor(getTone(appearance.background).page)
 }
 
 function persist() {

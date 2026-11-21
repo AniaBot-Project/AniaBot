@@ -87,11 +87,11 @@ async function onSubmit() {
   box-shadow: 0 18px 40px -22px rgb(61 52 40 / 0.45), 0 2px 0 0 rgb(255 255 255 / 0.9) inset;
 }
 
-/* 主按钮沿用主题库的像素级 3D 按键形态，配色换成面板主色薄荷青绿 */
+/* 主按钮沿用主题库的像素级 3D 按键形态，配色换成当前主题色 */
 .login-card :deep(.animal-btn--primary) {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--nav-active-ink);
   box-shadow: 0 5px 0 0 var(--accent-strong);
 }
 .login-card :deep(.animal-btn--primary:hover:not(:disabled)) {

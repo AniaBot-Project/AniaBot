@@ -22,7 +22,7 @@
       :class="mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'"
     >
       <div class="px-5 pt-6 pb-5 flex items-center gap-3">
-        <img :src="logoUrl" alt="AniaBot" class="w-10 h-10 rounded-2xl object-cover border-2 border-white shadow-[0_2px_0_0_#d4c9b4]" />
+        <img :src="logoUrl" alt="AniaBot" class="w-10 h-10 rounded-2xl object-cover border-2 border-white shadow-[0_2px_0_0_var(--shadow-3d)]" />
         <div class="min-w-0">
           <div class="brand-name">AniaBot</div>
           <div class="brand-sub">CONSOLE · 控制面板</div>
@@ -308,10 +308,10 @@ async function onChangePwd() {
   background: var(--sidebar-divider);
 }
 
-/* 顶部工具栏：奶油贴纸条 */
+/* 顶部工具栏：纸张色贴纸条 */
 .topbar-island {
   border-radius: var(--r-card);
-  background: rgb(255 253 247 / 0.92);
+  background: var(--surface-topbar);
   border: 2px solid var(--line);
   box-shadow: var(--shadow-sm);
   backdrop-filter: blur(6px);
