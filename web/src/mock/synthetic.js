@@ -217,12 +217,12 @@ export function buildMsgLogs(now) {
 
 const QUERIES = [
   { q: '帮我总结一下今天的群聊都聊了什么', tools: [['qq_get_msg_history', '读取群最近 200 条消息'], ['subagent_run', '归纳话题并写成简报']] },
-  { q: 'MCP 的 streamable 和 sse 有什么区别？', tools: [['skill_read', '读取内置 web 技能用法'], ['bash', 'webctl.py search --deepseek "MCP 传输协议"']] },
-  { q: '今天有什么科技新闻', tools: [['bash', 'webctl.py search --deepseek "今日科技新闻"'], ['bash', 'webctl.py fetch --deepseek "https://example.com/news"']] },
+  { q: 'MCP 的 streamable 和 sse 有什么区别？', tools: [['skill_read', '读取内置 web 技能用法'], ['bash', 'webctl.py search "MCP 传输协议"']] },
+  { q: '今天有什么科技新闻', tools: [['bash', 'webctl.py search "今日科技新闻"'], ['bash', 'webctl.py fetch "https://example.com/news"']] },
   { q: '记一下：周五晚上团建', tools: [['memory_save', '保存到群聊长期记忆']] },
   { q: '看看这张图里报错是什么意思', tools: [['load_images', '加载用户发送的截图']] },
   { q: '帮我建个每天早上 8 点的早报任务', tools: [['clock_create', '创建定时任务「每日早报」']] },
-  { q: 'AniaBot 怎么部署到 docker', tools: [['bash', 'webctl.py fetch --deepseek "https://docs.aniabot.dev/deploy"']] },
+  { q: 'AniaBot 怎么部署到 docker', tools: [['bash', 'webctl.py fetch "https://docs.aniabot.dev/deploy"']] },
   { q: '写一个快速排序，Go 语言的', tools: [] },
   { q: '群友小张的 QQ 号是多少', tools: [['qq_get_group_member_list', '检索群成员列表']] },
   { q: '现在服务器负载怎么样', tools: [['bash', 'uptime && free -h']] },
@@ -535,11 +535,11 @@ export function buildContacts(kind) {
 
 const SKILLS = [
   {
-    name: 'web', description: '联网搜索与网页抓取（内置 CLI，需启用 bash 工具）',
+    name: 'web', description: '联网搜索与网页抓取（内置 CLI，需启用 bash 工具，支持多个搜索平台）',
     location: '.builtin/web/SKILL.md', builtin: true, refs: [], extras: ['webctl.py'],
-    content: '---\nname: web\ndescription: 联网搜索与网页抓取（内置 CLI，需启用 bash 工具）：查最新资料、核实外部事实、读取网页正文\n---\n\n# 联网搜索与网页抓取\n\n需要最新资讯、外部事实或网页正文时，先读取本技能，再按说明用 bash 执行附带脚本。\n\n## 命令\n\n```bash\npython3 "<webctl.py 的绝对路径>" search --deepseek "查询词" [--count 8] [--content]\npython3 "<webctl.py 的绝对路径>" fetch --deepseek "https://example.com/article" [--offset 8000]\n```\n\n- 需要 DEEPSEEK_API_KEY 环境变量\n- 搜索结果摘要够用就不必抓正文；长文用 --offset 续读\n',
+    content: '---\nname: web\ndescription: 联网搜索与网页抓取（内置 CLI，需启用 bash 工具，支持多个搜索平台）：查最新资料、核实外部事实、读取网页正文\n---\n\n# 联网搜索与网页抓取\n\n需要最新资讯、外部事实或网页正文时，先读取本技能，再按说明用 bash 执行附带脚本。\n\n## 命令\n\n```bash\npython3 "<webctl.py 的绝对路径>" providers\npython3 "<webctl.py 的绝对路径>" search "查询词" [--count 8] [--content]\npython3 "<webctl.py 的绝对路径>" fetch "https://example.com/article"\n```\n\n- 需要至少一个平台 API Key（DEEPSEEK_API_KEY / TAVILY_API_KEY / EXA_API_KEY / FIRECRAWL_API_KEY / JINA_API_KEY），不指定平台时自动检测\n- 搜索结果摘要够用就不必抓正文；fetch 返回完整正文\n',
     files: [
-      { name: 'webctl.py', kind: 'extra', size: 8214, content: '#!/usr/bin/env python3\n"""AniaBot 内置 web 技能 CLI：搜索与抓取（DeepSeek）"""\n' },
+      { name: 'webctl.py', kind: 'extra', size: 27770, content: '#!/usr/bin/env python3\n"""AniaBot 内置 web 技能 CLI：搜索与抓取（多平台）"""\n' },
     ],
   },
   {

@@ -334,11 +334,14 @@ X-Proxy-Route: team-a
 内置 `web` 技能随二进制发布、不可删除/禁用，自带 `webctl.py` CLI：
 
 ```bash
-python3 "<webctl.py 绝对路径>" search --deepseek "查询词" [--count 8] [--content]
-python3 "<webctl.py 绝对路径>" fetch  --deepseek "https://example.com/article" [--offset 8000]
+python3 "<webctl.py 绝对路径>" providers                     # 查看哪些平台已配置 Key
+python3 "<webctl.py 绝对路径>" search "查询词" [--count 8] [--content] [--<平台>]
+python3 "<webctl.py 绝对路径>" fetch  "https://example.com/article" [--<平台>]
 ```
 
-需要在运行 AniaBot 的环境中配置 `DEEPSEEK_API_KEY`（或在面板 bash 工具的「环境变量」中追加），并开启 `plugin.ai_chat_bot.bash.enable`。搜索/抓取平台通过 `--deepseek` 参数选择，后续可在 CLI 的 `PROVIDERS` 注册表中扩展其他平台。
+支持 DeepSeek、Tavily、Exa、Firecrawl、Jina AI 五个平台，分别读取环境变量 `DEEPSEEK_API_KEY` / `TAVILY_API_KEY` / `EXA_API_KEY` / `FIRECRAWL_API_KEY` / `JINA_API_KEY`（可在运行 AniaBot 的环境中配置，或在面板 bash 工具的「环境变量」中追加）。不指定 `--<平台>` 时脚本会自动检测已配置的 Key，按 Tavily → Exa → Firecrawl → Jina AI → DeepSeek 的顺序选择第一个可用平台；可用 `WEB_SEARCH_PROVIDER=<平台名>` 指定自动选择的优先平台。还需开启 `plugin.ai_chat_bot.bash.enable`。后续可在 CLI 的 `PROVIDERS` 注册表中扩展其他平台。
+
+> `JINA_API_KEY` 只供 web CLI 使用，与下一节知识库「导入 URL」的 `plugin.ai_chat_bot.search.token` 是两项独立配置。CLI 本身不做输出截断/分页，搜索与抓取结果完整返回，长内容的展示与上下文控制由框架层的工具输出机制处理。
 
 ### 知识库网页导入
 

@@ -77,8 +77,8 @@ Discord 同理：防撤回不生效；成员进出走平台事件（不触发公
 联网能力由内置 `web` 技能提供（不再是单独的 Go 工具）：
 
 1. 在面板「配置管理 → AI 对话 · 工具」开启 `bash` 工具（技能里的 CLI 需要通过 bash 执行）
-2. 在运行 AniaBot 的环境变量或 bash 工具的「环境变量」中配置 `DEEPSEEK_API_KEY`（当前使用 DeepSeek Search / Fetch API）
-3. 之后直接让 AI 查最新资料即可：它会先 `skill_read` 读取 `web` 技能，再调用自带 CLI 搜索或抓取
+2. 在运行 AniaBot 的环境变量或 bash 工具的「环境变量」中配置至少一个搜索平台的 Key：`DEEPSEEK_API_KEY` / `TAVILY_API_KEY` / `EXA_API_KEY` / `FIRECRAWL_API_KEY` / `JINA_API_KEY`（对应 DeepSeek / Tavily / Exa / Firecrawl / Jina AI；只配一个即可，配多个时按 Tavily → Exa → Firecrawl → Jina AI → DeepSeek 的顺序自动选择）
+3. 之后直接让 AI 查最新资料即可：它会先 `skill_read` 读取 `web` 技能，再调用自带 CLI 搜索或抓取；不指定平台时脚本会自动检测已配置的 Key，也可用 `WEB_SEARCH_PROVIDER` 指定优先平台
 
 内置 `web` 技能不能删除、不能禁用；如需接入其他搜索平台，可自行添加外置 skill 与 CLI（参考内置技能的 `webctl.py`，在 `PROVIDERS` 中注册新平台）。外置技能可在面板「技能管理」页随时禁用/启用。
 
