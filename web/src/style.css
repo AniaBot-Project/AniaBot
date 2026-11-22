@@ -139,6 +139,20 @@
   --shadow-3d: #bdaea0;
 }
 
+/* 背景纹理：点阵（默认）/ 网格 / 纯色。
+   必须留在 @layer 之外：上面那套 :root 令牌是「无层级」声明，而 CSS 级联里
+   无层级样式优先于任何 @layer 的样式（与选择器权重无关），所以这组覆盖一旦
+   写进 @layer base 就会被 :root 里的点阵默认值压掉，切纹理看起来完全没反应。 */
+:root[data-pattern="grid"] {
+  --page-pattern-a: linear-gradient(90deg, var(--page-dot) 1px, transparent 1px);
+  --page-pattern-b: linear-gradient(var(--page-dot) 1px, transparent 1px);
+  --page-pattern-size: 26px 26px;
+}
+:root[data-pattern="plain"] {
+  --page-pattern-a: none;
+  --page-pattern-b: none;
+}
+
 @layer base {
   html {
     -webkit-font-smoothing: antialiased;
@@ -161,16 +175,8 @@
     background-attachment: fixed;
   }
 
-  /* 背景纹理：点阵（默认）/ 网格 / 纯色 */
-  :root[data-pattern="grid"] {
-    --page-pattern-a: linear-gradient(90deg, var(--page-dot) 1px, transparent 1px);
-    --page-pattern-b: linear-gradient(var(--page-dot) 1px, transparent 1px);
-    --page-pattern-size: 26px 26px;
-  }
-  :root[data-pattern="plain"] {
-    --page-pattern-a: none;
-    --page-pattern-b: none;
-  }
+  /* 背景纹理（:root[data-pattern]）的覆盖写在文件上方的令牌区之后，
+     不能放进本层，原因见那里的注释。 */
 
   /* 减弱动效：关掉装饰性过渡与动画；loading 转圈保留，否则看起来像卡死 */
   :root[data-motion="reduced"] *,
