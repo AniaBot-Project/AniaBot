@@ -331,8 +331,6 @@ export const api = {
   // 多选删除：一次删除同一 scope 下的多篇文档，返回实际删除条数
   deleteKnowledgeDocs: (scope, ids) =>
     request('/api/knowledge/batch-delete', { method: 'POST', body: JSON.stringify({ scope, ids }) }),
-  importKnowledgeURL: (scope, url) =>
-    request('/api/knowledge/import-url', { method: 'POST', body: JSON.stringify({ scope, url }) }),
 
   restart: () => request('/api/restart', { method: 'POST' }),
 

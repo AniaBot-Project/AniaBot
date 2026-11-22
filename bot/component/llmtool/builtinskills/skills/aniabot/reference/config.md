@@ -157,7 +157,6 @@
 | `retry.base_delay_sec` | `2` | 退避基准秒数 |
 | `fallback.base_url` / `api_key` / `model` / `api_format` | 空 | 备用模型；`model` 留空表示不启用，主模型重试耗尽后切一次 |
 | `compressor.base_url` / `api_key` / `model` / `api_format` | 空 | 上下文压缩专用模型，留空跟随主模型 |
-| `search.token` | 空 | Jina AI Token，仅用于「知识库 → 导入 URL」，与联网能力无关（联网靠内置 web 技能 + 至少一个搜索平台 Key 环境变量：`DEEPSEEK_API_KEY` / `TAVILY_API_KEY` / `EXA_API_KEY` / `FIRECRAWL_API_KEY` / `JINA_API_KEY`） |
 
 ### 工具开关（高危项默认全关）
 

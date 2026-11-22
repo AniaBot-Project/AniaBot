@@ -954,10 +954,6 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 		p.Logger.Info("已启用深度思考模式", "mode", p.cfg.Thinking.Mode)
 	}
 
-	if p.cfg.Search.Token == "" {
-		p.Logger.Warn("Jina AI Token 未设置，知识库「导入 URL」功能将不可用")
-	}
-
 	if p.cfg.Multimodal {
 		p.Logger.Info("主对话模型已配置为支持多模态，将按需直接加载图片")
 	}

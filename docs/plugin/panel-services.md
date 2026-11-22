@@ -174,7 +174,6 @@ type KnowledgeBaseSource interface {
     KnowledgeCreate(up plugininfo.KnowledgeDocUpsert) (string, error)
     KnowledgeUpdate(up plugininfo.KnowledgeDocUpsert) error
     KnowledgeDelete(scope, id string) error
-    KnowledgeImportURL(scope, url string) (string, error)
 }
 
 // 可选：多选批量删除（未实现时面板逐条调用 KnowledgeDelete 回退）

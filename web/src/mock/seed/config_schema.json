@@ -731,14 +731,6 @@
     "default": "auto"
   },
   {
-    "key": "plugin.ai_chat_bot.search.token",
-    "label": "Jina AI Token",
-    "type": "password",
-    "group": "AI 对话 · 模型",
-    "help": "网页浏览与搜索功能",
-    "sensitive": true
-  },
-  {
     "key": "plugin.ai_chat_bot.prompt_cache.enable",
     "label": "启用 Prompt 缓存",
     "type": "bool",

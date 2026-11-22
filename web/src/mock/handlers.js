@@ -821,15 +821,6 @@ const routes = [
     },
   },
   {
-    m: 'POST', re: /^\/api\/knowledge\/import-url$/, h: (c) => {
-      const b = c.body || {}
-      const entry = { scope: b.scope, id: hexId(), title: '网页导入的文档', content: `（演示环境不真实抓取网页。原始 URL：${b.url}）\n\n导入的正文会保存到这里，作为知识库检索的语料。`, tags: [], source: `url:${b.url}`, created_at: toLocalIso(new Date()) }
-      state.knowledge.unshift(entry)
-      addOpLog('knowledge', 'knowledge_import', `面板从 URL 导入知识库文档 ${entry.scope}/${entry.id}`)
-      return { ok: true, id: entry.id }
-    },
-  },
-  {
     m: 'PUT', re: /^\/api\/knowledge$/, h: (c) => {
       const b = c.body || {}
       const entry = state.knowledge.find((x) => x.scope === b.scope && x.id === b.id)

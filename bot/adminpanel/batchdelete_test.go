@@ -187,8 +187,6 @@ func (f *fakeKnowledgeSource) KnowledgeDelete(scope, id string) error {
 	return nil
 }
 
-func (f *fakeKnowledgeSource) KnowledgeImportURL(string, string) (string, error) { return "", nil }
-
 // fakeKnowledgeBatchSource 额外实现批量删除接口，一次性记录整批 ID。
 type fakeKnowledgeBatchSource struct {
 	*fakeKnowledgeSource

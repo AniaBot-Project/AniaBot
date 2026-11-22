@@ -7,7 +7,6 @@
       </div>
       <div class="flex items-center gap-3">
         <Button type="text" size="small" @click="load">刷新</Button>
-        <Button type="default" size="small" @click="openImport">导入 URL</Button>
         <Button type="primary" size="small" @click="openCreate">新增文档</Button>
       </div>
     </div>
@@ -38,7 +37,7 @@
             <LoadingState text="正在加载知识库…" :rows="2" compact />
           </li>
           <li v-else-if="filteredScopes.length === 0" class="py-10 text-xs text-slate-400 text-center list-none px-4">
-            暂无文档。可在面板手动新增，或点击右上角导入 URL
+            暂无文档。点击右上角「新增文档」手动添加
           </li>
           <li
             v-for="s in filteredScopes"
@@ -177,33 +176,6 @@
         </div>
       </form>
     </Modal>
-
-    <!-- 导入 URL 弹窗 -->
-    <Modal
-      variant="default"
-      v-model:open="showImport"
-      title="从 URL 导入"
-      :typewriter="false"
-      :show-footer="false"
-      :width="544"
-    >
-      <form class="w-full space-y-4" @submit.prevent="onImport">
-        <div>
-          <label class="block text-xs text-slate-500 mb-1.5">作用域（手输 global / g:会话ID / f:用户ID，支持前缀如 g:fs:oc_xxx）</label>
-          <Input v-model="importForm.scope" placeholder="如 global 或 g:123456" />
-        </div>
-        <div>
-          <label class="block text-xs text-slate-500 mb-1.5">网页地址</label>
-          <Input v-model="importForm.url" placeholder="https://..." />
-          <p class="text-[11px] text-slate-400 mt-1.5">通过 Jina Reader 抓取正文入库，需要已配置 Jina AI Token</p>
-        </div>
-        <p v-if="importForm.msg" class="text-sm text-[#ff3b30]">{{ importForm.msg }}</p>
-        <div class="flex justify-end gap-2 pt-1">
-          <Button type="default" @click="showImport = false">取消</Button>
-          <Button type="primary" html-type="submit">导入</Button>
-        </div>
-      </form>
-    </Modal>
   </div>
 </template>
 
@@ -238,9 +210,6 @@ const deleting = ref(false)
 
 const showForm = ref(false)
 const form = reactive({ scope: '', id: '', title: '', content: '', tagsText: '', source: '', msg: '' })
-
-const showImport = ref(false)
-const importForm = reactive({ scope: '', url: '', msg: '' })
 
 const scopePattern = /^(global|[gf]:.+)$/
 
@@ -435,35 +404,6 @@ async function onDeleteSelected() {
     msg.value = err.message
   } finally {
     deleting.value = false
-  }
-}
-
-function openImport() {
-  importForm.scope = current.value?.scope || 'global'
-  importForm.url = ''
-  importForm.msg = ''
-  showImport.value = true
-}
-
-async function onImport() {
-  importForm.msg = ''
-  const scope = importForm.scope.trim()
-  if (!scopePattern.test(scope)) {
-    importForm.msg = '作用域应为 global、g:会话ID 或 f:用户ID（如 g:fs:oc_xxx）'
-    return
-  }
-  try {
-    await api.importKnowledgeURL(scope, importForm.url.trim())
-    showImport.value = false
-    msgOk.value = true
-    msg.value = 'URL 已导入知识库'
-    await load()
-    if (current.value?.scope !== scope) {
-      const found = scopes.value.find((s) => s.scope === scope)
-      if (found) await selectScope(found)
-    }
-  } catch (e) {
-    importForm.msg = e.message
   }
 }
 

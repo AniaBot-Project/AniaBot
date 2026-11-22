@@ -224,7 +224,7 @@ type QueryLogSource interface {
 }
 
 // KnowledgeBaseSource 可选接口：插件实现后，面板「知识库」页可对其知识库文档
-// 做列表 / 新增 / 编辑 / 删除 / URL 导入（当前由 AI 对话插件实现）。改动即时生效，无需重启。
+// 做列表 / 新增 / 编辑 / 删除（当前由 AI 对话插件实现）。改动即时生效，无需重启。
 type KnowledgeBaseSource interface {
 	// KnowledgeScopes 返回已有知识库的作用域列表及各自文档条数
 	KnowledgeScopes() []plugininfo.KnowledgeScopeInfo
@@ -236,8 +236,6 @@ type KnowledgeBaseSource interface {
 	KnowledgeUpdate(up plugininfo.KnowledgeDocUpsert) error
 	// KnowledgeDelete 按 ID 删除一条文档
 	KnowledgeDelete(scope, id string) error
-	// KnowledgeImportURL 抓取网页正文导入知识库，返回生成的 ID
-	KnowledgeImportURL(scope, url string) (string, error)
 }
 
 // KnowledgeBatchDeleteSource 可选接口：在 KnowledgeBaseSource 之外提供多选批量
@@ -389,7 +387,6 @@ func (s *Server) routes() {
 	s.mux.Handle("PUT /api/knowledge", s.requireAuth(http.HandlerFunc(s.handleKnowledgeUpdate)))
 	s.mux.Handle("DELETE /api/knowledge", s.requireAuth(http.HandlerFunc(s.handleKnowledgeDelete)))
 	s.mux.Handle("POST /api/knowledge/batch-delete", s.requireAuth(http.HandlerFunc(s.handleKnowledgeBatchDelete)))
-	s.mux.Handle("POST /api/knowledge/import-url", s.requireAuth(http.HandlerFunc(s.handleKnowledgeImportURL)))
 	s.mux.Handle("GET /api/qrlogin/sources", s.requireAuth(http.HandlerFunc(s.handleQRLoginSources)))
 	s.mux.Handle("POST /api/qrlogin/{platform}/start", s.requireAuth(http.HandlerFunc(s.handleQRLoginStart)))
 	s.mux.Handle("GET /api/qrlogin/{platform}/status", s.requireAuth(http.HandlerFunc(s.handleQRLoginStatus)))
@@ -2227,26 +2224,6 @@ func deleteKnowledgeDocs(src KnowledgeBaseSource, scope string, ids []string) (i
 		return batch.KnowledgeDeleteMany(scope, ids)
 	}
 	return deleteEach(ids, func(id string) error { return src.KnowledgeDelete(scope, id) })
-}
-
-// handleKnowledgeImportURL 抓取网页正文导入知识库。
-func (s *Server) handleKnowledgeImportURL(w http.ResponseWriter, r *http.Request) {
-	if s.opt.Knowledge == nil {
-		writeError(w, http.StatusNotFound, "知识库功能未启用")
-		return
-	}
-	var req plugininfo.KnowledgeImportURLRequest
-	if err := readJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "请求格式错误")
-		return
-	}
-	id, err := s.opt.Knowledge.KnowledgeImportURL(req.Scope, req.URL)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	oplog.Record(oplog.CategoryKnowledge, "knowledge_import", "面板从 URL 导入知识库文档 "+req.Scope+"/"+id+": "+req.URL)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id})
 }
 
 // handleRestart 自重启 Bot：先响应请求，再延迟以相同命令行参数重启进程。

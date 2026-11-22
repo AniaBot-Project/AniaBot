@@ -108,10 +108,6 @@ func TestKnowledgePanelScopeValidation(t *testing.T) {
 	if err := p.KnowledgeUpdate(plugininfo.KnowledgeDocUpsert{Scope: "global", Content: "x"}); err == nil {
 		t.Fatal("KnowledgeUpdate 缺少 id 应报错")
 	}
-	// URL 导入校验
-	if _, err := p.KnowledgeImportURL("global", "not-a-url"); err == nil {
-		t.Fatal("非法 URL 应被拒绝")
-	}
 }
 
 func TestKnowledgePanelBatchDelete(t *testing.T) {
@@ -185,9 +181,6 @@ func TestKnowledgePanelDisabled(t *testing.T) {
 	}
 	if _, err := p.KnowledgeDeleteMany("global", []string{"x"}); err == nil {
 		t.Fatal("功能未启用时 KnowledgeDeleteMany 应报错")
-	}
-	if _, err := p.KnowledgeImportURL("global", "https://example.com"); err == nil {
-		t.Fatal("功能未启用时 KnowledgeImportURL 应报错")
 	}
 }
 

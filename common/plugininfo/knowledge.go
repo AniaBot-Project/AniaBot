@@ -16,7 +16,7 @@ type KnowledgeDocInfo struct {
 	Title     string    `json:"title"`
 	Content   string    `json:"content"`
 	Tags      []string  `json:"tags,omitempty"`
-	Source    string    `json:"source,omitempty"` // 来源：manual / url:https://...
+	Source    string    `json:"source,omitempty"` // 来源，可空（如网页链接）
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -28,10 +28,4 @@ type KnowledgeDocUpsert struct {
 	Content string   `json:"content"`
 	Tags    []string `json:"tags,omitempty"`
 	Source  string   `json:"source,omitempty"`
-}
-
-// KnowledgeImportURLRequest 是面板 URL 导入的请求体。
-type KnowledgeImportURLRequest struct {
-	Scope string `json:"scope"`
-	URL   string `json:"url"`
 }
