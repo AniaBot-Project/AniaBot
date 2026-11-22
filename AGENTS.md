@@ -1,23 +1,250 @@
-# Agents.md
+# AGENTS.md
 
-This file provides guidance to Agents when working with code in this repository.
+Guidance for coding agents working in this repository (AniaBot — a Go, plugin-driven,
+multi-platform bot framework with a built-in AI agent engine).
+
+Keep this file factual. When you add or rename a subsystem, config key, panel page or chat
+command, update **this file** and the AI-facing manual shipped inside the binary —
+`bot/component/llmtool/builtinskills/skills/aniabot/` (its `SKILL.md` plus
+`reference/config.md`, `reference/panel.md`, `reference/troubleshooting.md`). Deep dives live
+in `docs/internals/` (framework, agent-llm, agent-context, agent-tools); plugin authoring in
+`docs/plugin/`; user guide in `docs/guide/`.
 
 ## Project Overview
 
-AniaBot is a plugin-driven multi-platform bot framework built with Go. It connects to platforms via pluggable adapters — QQ through NapCat (WebSocket or HTTP adapter using the OneBot v11 protocol), QQ Official through the QQ Open Platform API v2 (WebSocket gateway + REST OpenAPI, hand-rolled resty/gorilla client), Feishu/Lark through the official oapi-sdk-go (WebSocket long-connection or webhook), Telegram through the Bot API (long polling, hand-rolled resty client), Discord through bwmarrin/discordgo (Gateway WebSocket + REST), WeChat through the iLink bot HTTP long-polling API (QR-code login, CDN media with AES-128-ECB, protocol reference: Tencent's open-source openclaw-weixin) — and features an AI chat engine supporting three LLM API formats (OpenAI Chat Completions / OpenAI Responses / Anthropic Messages) with tool calling, MCP (Model Context Protocol) integration, and a skill system.
+AniaBot connects to platforms through pluggable adapters:
 
-**Multi-platform model**: the framework normalizes every platform to the OneBot v11 segment format (`OB11Segment{Type, Data}`) as its canonical message shape — adapters translate at the boundary (inbound: platform event → segments; outbound: segments → platform API). IDs are platform-prefixed (`qo:<openid>` for QQ Official, `fs:oc_xxx` for Feishu, `tg:<chat_id>:<message_id>` for Telegram messages, `dc:<channel_id>:<message_id>` for Discord messages, `wx:<user_id>:<message_id>` for WeChat messages); QQ legacy numeric IDs carry no prefix and route to the default adapter. Platform-specific capabilities are exposed via optional interfaces (`adapter.QQExt` / plugin-facing `bot.QQ`; `adapter.ContactsExt` backs the panel's multi-platform address book) — plugins type-assert to probe them, so a plugin written for QQ degrades gracefully on other platforms. Adding a platform = a new adapter package + one blank import in `cmd/main.go`; the core is untouched.
+| Platform | Adapter | Transport |
+| --- | --- | --- |
+| QQ (NapCat) | `bot/adapter/napcat` | OneBot v11 over WebSocket or HTTP |
+| QQ (Luckylilia / LLBot) | `bot/adapter/luckylilia` | OneBot v11 over WebSocket or HTTP |
+| QQ Official | `bot/adapter/qqofficial` | QQ Open Platform API v2: WebSocket gateway + REST (hand-rolled resty/gorilla) |
+| Feishu / Lark | `bot/adapter/feishu` | official `oapi-sdk-go/v3`, WebSocket long connection or webhook |
+| Telegram | `bot/adapter/telegram` | Bot API long polling, hand-rolled resty client |
+| Discord | `bot/adapter/discord` | `bwmarrin/discordgo`, Gateway WebSocket + REST |
+| WeChat | `bot/adapter/weixin` | iLink bot HTTP long polling, QR-code login, CDN media (AES-128-ECB) |
+
+On top of that sits an AI agent engine: three LLM API formats (OpenAI Chat Completions /
+OpenAI Responses / Anthropic Messages), multi-turn tool calling, MCP, skills, long-term
+memory, knowledge base, scheduled tasks, proactive interaction, sub-agents, agent teams,
+tool approval, agent hooks, plan mode and a token quota — plus a Vue web admin panel and a
+GitHub-backed plugin marketplace. It is built for humans **and** for its own AI to operate
+(the `aniabot` built-in skill teaches the AI how to configure itself).
+
+### Multi-platform model
+
+- Every platform is normalized to the OneBot v11 segment format (`message.OB11Segment{Type,
+  Data}`). Adapters translate at the boundary: inbound `platform event → segments`, outbound
+  `segments → platform API`. The core never knows platform details.
+- **IDs are platform-prefixed inside the framework**: `qq:` (NapCat), `lil:` (Luckylilia),
+  `qo:` (QQ Official), `fs:` (Feishu), `tg:` (Telegram), `dc:` (Discord), `wx:` (WeChat).
+  `message.QID` is a string type; `FromString`/`UnmarshalJSON` normalize bare numeric IDs to
+  `qq:<digits>` (`message.NormalizeQQID`). Legacy bare-numeric QQ IDs in the DB are migrated
+  once at startup (`bot/core/qid_migration.go`, marker-guarded). Adapters strip the prefix
+  before calling platform APIs (`QID.TrimQQPrefix`, `AddPrefix`, `TrimPrefix`). Core routing
+  (`routeEntry`) picks the first adapter whose `IDPrefix` matches; then legacy bare-numeric QQ
+  IDs fall back to the `qq` platform adapter; then an adapter with no prefix; else the first
+  registered adapter.
+- Adding a platform = a new adapter package that implements `adapter.Adapter`, registers an
+  `adapter.Definition` (Name / Platform / IDPrefix / ConfigFields / New) in `init()`, plus one
+  blank import in `cmd/main.go`. The core stays untouched.
+- Platform capabilities are optional interfaces probed by type assertion — on the adapter
+  side (`adapter.QQExt`, `ContactsExt`, `MediaRefresherExt`, `StreamSenderExt`,
+  `MsgEditorExt`, `InteractiveExt`, `InteractionAnswerer`, `EventKeyer`, `SelfIDProvider`,
+  `SegmentSupport`) and on the plugin-facing facade (`bot.QQ`, `bot.GroupForwardSender`,
+  `bot.FriendForwardSender`, `bot.StreamSender`, `bot.MediaRefresher`, `bot.GroupMembers`,
+  `bot.Interactive`, `bot.MsgEditor`). Adapters register `adapter.BotWrapper`s at init; core
+  wraps the `bot.Bot` handed to a plugin with `adapter.WrapBot(base, sourceAdapter)`, so a QQ
+  plugin degrades gracefully on other platforms. Always check the returned `bool` afterwards.
+
+## Repository Map
+
+```
+cmd/                     Entry point. main.go blank-imports adapter packages + registers built-in
+                         plugins and parses -set-password; marketplace_plugins.go is GENERATED by
+                         tools/plugingen (never edit by hand)
+tools/plugingen/         Scans custom/plugins/*/plugin.json → regenerates cmd/marketplace_plugins.go
+common/                  Leaf packages (no upward deps): adapter, bot, aitool, model/{command,message},
+                         msgchain, plugin, pluginconfig, plugininfo, pluginmeta, storage, tracer, aniaerror
+bot/core/                Orchestrator: startup order, plugin lifecycle, event dispatch, ID routing,
+                         DI, dedup, QID migration, unload, send events, interaction, goroutine tracer,
+                         storage impls (memory/redis/sqlite/mysql), configstore/, CLI helpers
+bot/adminpanel/          Panel HTTP API (pure net/http) + embedded SPA (dist/ via go:embed);
+                         data-source adapters, auth, config presets/export, token stats, balance,
+                         quota, msg-log proxy/URL refresh, chat console, QR login, update, marketplace glue
+bot/marketplace/         Plugin marketplace service: GitHub index/detail + local cache, OAuth device
+                         flow, batch install/upgrade/uninstall/rollback pipelines (regenerate registry,
+                         go mod tidy, build, restart), manifest validation (common/pluginmeta)
+bot/adapter/{napcat,luckylilia,qqofficial,feishu,telegram,discord,weixin}/
+bot/component/           Engine components (no plugin lifecycle):
+  aichat/                  ChatBot, LLMClient + 3 format backends, MessageBuilder, ToolOrchestrator,
+                           token-budget messageWindow, HistoryStore (SQL), agent hooks wiring,
+                           prompt cache, error presentation
+  llmtool/                 Tool/BaseTool, ToolExecuter + SessionToolExecutor, MCP client (lazy/eager),
+                           SkillManager, reflection schema parser, builtinskills/ (embedded skills)
+  functool/                Built-in tools (time, private-file URL, images, file tools, bash,
+                           computer_use, read_tool_output, config/config_file tools)
+  computeruse/             Windows-only GDI screenshot + SendInput mouse/keyboard (x/sys/windows)
+  agenthook/               AI agent lifecycle hooks: shell hooks (files.hooks_json, Claude-Code
+                           semantics: JSON on stdin, exit 0 pass / 2 block) + in-process Go handlers
+  oplog/                   Operation audit log (SQL ania_op_log, package-level singleton)
+  msglog/                  Message log recorder (cache storage: survives restart only on redis)
+  consollog/               Console log ring buffer for the panel (memory only, ~2000 entries)
+  tasklog/                 Clock-task execution log (SQL ania_task_log)
+  querylog/                AI query execution log (SQL ania_query_log)
+  sysrestart/              Process self-restart hooks (panel restart/update, marketplace, /reboot)
+bot/plugins/             6 built-in plugins: pluginsys, pluginlog, plugininterceptor, pluginrepeat,
+                         pluginnews, pluginaichat (the AI engine's plugin shell)
+bot/utils/               Command parsing, message extraction, URL/time helpers
+bot/version/             Version (ldflags `-X`), UserAgent(), Ldflags() helpers
+custom/                  custom/plugins/ = marketplace installs (gitignored; pluginexample is the
+                         tracked skeleton), custom/mvp/ = minimal main example
+web/                     Admin panel frontend (Vite + Vue 3 + Tailwind v4 + animal-island-vue);
+                         src/mock/ = static demo mode used by the docs site (/demo/)
+docs/                    VitePress site: guide/, plugin/, api/, internals/
+README/                  Images referenced by README.md
+```
+
+**Dependency rules (strictly top-down).** `common/*` are leaf packages — they never import
+`bot/*`. Adapters import `common/*` plus external SDKs, never `bot/core` or `bot/plugins`.
+Plugins import `common/*` and `bot/component/*`. Components import `common/*` and lower
+components (`aichat` → `llmtool`/`agenthook`/`utils`/`version`; `functool` → `llmtool`/
+`computeruse`/`oplog`/`pluginconfig`/`utils`; `llmtool` → `common/aitool`; log components →
+`common/storage`; `agenthook` → `functool` for shell resolution). `bot/core` wires everything:
+it imports `common/*`, `bot/utils`, `bot/adminpanel`, `bot/marketplace` and the components it
+initializes, but never adapters or plugins (those are registered from `cmd/main.go`).
+`bot/adminpanel` imports components, `bot/core/configstore`, `bot/marketplace` and `bot/version`
+— it must never import the `bot/core` package itself (core depends on the panel, not the
+reverse). `bot/marketplace` imports `common/pluginmeta`, `oplog`, `sysrestart` and `bot/version`.
+The entry points (`cmd/main.go` and the `custom/mvp` example) are the only places that import
+adapters, plugins and core together.
+
+## Commands
+
+### Run
+
+```bash
+go run ./cmd    # NOT `go run cmd/main.go` — cmd/ also contains the generated marketplace registry
+```
+
+First start seeds defaults from the embedded `config_tmpl.yaml`, enters the setup wizard and
+prints a random panel password. `./AniaBot -set-password 新密码` resets it (open the same DB
+via env, then exit — useful when locked out).
+
+### Build (cross-compile)
+
+Requires Go 1.25+ and Node.js for the panel (see `go.mod`). The panel `dist/` is gitignored
+but embedded with `go:embed`, so a fresh clone must build the frontend before any `go build`
+/ `go vet` that compiles `bot/adminpanel`.
+
+```bash
+make web       # cd web && npm ci && npm run build  → bot/adminpanel/dist
+make linux     # web build + GOOS=linux   GOARCH=amd64 → build/AniaBot
+make windows   # web build + GOOS=windows GOARCH=amd64 → build/AniaBot.exe
+make clean     # remove build/*
+
+# Manual (version is injected into the binary at release time)
+cd cmd && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+  -trimpath -ldflags="-s -w -X github.com/jeanhua/AniaBot/bot/version.Version=v4.x.y" \
+  -o ../build/AniaBot
+```
+
+Docker image is a golang-alpine runtime that keeps `git`/`go`/`node`/`npm` so the panel's
+auto-update and the marketplace's compile-and-restart pipelines work inside the container.
+
+### Test & verify
+
+```bash
+go test ./...                    # all tests
+go test -v -race ./...           # what CI runs
+go test ./bot/component/...      # one subtree
+go test -run TestParseCommand ./...
+
+go vet ./...                     # CI runs it after `make web`
+go mod verify
+```
+
+### Frontend / docs / registry
+
+```bash
+cd web && npm ci && npm run dev        # Vite dev server, proxies /api → 127.0.0.1:7700
+cd web && npm run dev:demo             # static panel with mocked API (demo data lives in src/mock/)
+cd docs && npm install && npm run docs:dev|docs:build
+
+go run ./tools/plugingen               # after manually adding/removing custom/plugins/*/plugin.json
+```
+
+## Configuration
+
+Everything is configured in the **database** (persistent storage KV table `ania_kv`), edited
+through the web panel; there is no `config.yaml` anymore. Keys are dot-paths identical to the
+historical viper keys (`plugin.ai_chat_bot.base_url`, …), values JSON-encoded, case-insensitive.
+
+- `bot/core/configstore/` — config center. `Init()` seeds framework defaults from the embedded
+  `config_tmpl.yaml` on first run and sets the setup-wizard flag (`meta.setup_pending`);
+  `EnsureDefaults` fills registered defaults without overwriting; `ToViper()` builds the
+  in-memory viper so plugin `Start(ctx, *viper.Viper)` keeps working. Also owns config presets
+  (named snapshots) and admin-password hashing under the `__admin` namespace.
+- `common/pluginconfig/` — field registry + struct binding. A plugin implements optional
+  `plugin.ConfigSchemaProvider` (`ConfigSchema() any`) returning a pointer to a struct with
+  `cfg` tags: `cfg` (key), `label`, `type` (`string|password|int|float|bool|text|strings|ints|
+  select|multiselect|slider`), `options`, `min/max/step/ticks` (slider), `group` (two levels,
+  `父.子`), `help`, `sensitive`, `default`. Types are inferred from Go types; slices are
+  comma-separated; pointer scalars become optional params that stay nil when unset. Core calls
+  it **before DI** (`RegisterStruct`: registers panel fields + seeds defaults), then fills the
+  struct **before `Start`** (`Load`) — so read typed fields instead of `cfg.Get*`. Must return
+  the same pointer every call and must not touch injected fields. `plugin.ConfigRegistrar`
+  (`ConfigFields() []pluginconfig.Field`) is the lower-level form used by framework fields and
+  dynamic declarations; both share one registry (same key → later registration overrides in
+  place). The panel renders its form entirely from this registry.
+- **Bootstrap env vars** (read before the DB opens): `ANIABOT_STORE_DRIVER` (`sqlite|mysql`),
+  `ANIABOT_SQLITE_PATH` (default `./data/aniabot.db`), `ANIABOT_MYSQL_DSN`.
+- **Per-key env overrides**: any config key can be overridden at startup with
+  `ANIA_<KEY_UPPERCASED>` (dots/dashes → underscores), e.g. `ANIA_BOT_ADMIN_PANEL_LISTEN`,
+  `ANIA_PLUGIN_AI_CHAT_BOT_API_KEY`. Non-strings are parsed as JSON. Startup logs each override.
+  This takes precedence over the DB value and is the escape hatch when the panel is disabled.
+- **`files.*` JSON keys** (raw JSON text, edited via the panel 扩展配置 page or the AI's
+  `config_file_get/set` tools): `files.mcp_json` (MCP servers), `files.prompt_json` (per-group/
+  friend prompt overrides), `files.hooks_json` (AI agent hooks), `files.commands_json` (custom
+  slash commands). `prompt`/`hooks`/`commands` hot-reload within seconds (TTL re-read); `mcp`
+  needs a restart. Key constants live in `bot/core/configstore/configstore.go`.
+- **Panel auth**: random initial password printed to the console, salted SHA-256 hash in
+  `__admin`; login lockout guard; session cookie 24h sliding. Most config changes take effect
+  after a restart — the panel/`aniabot` skill list the exceptions (`/proactive`, skill toggles,
+  prompt/hooks/commands JSON, balance config).
+
+### Startup order (`bot/core/core.go` `Run()`)
+
+1. Sort plugins by `Meta.Order`.
+2. Persistent storage from env → 3. one-time legacy QQ-ID prefix migration → 4. `oplog.Init`.
+5. Collect config fields: framework (`frameworkConfigFields`) + every registered adapter
+   `Definition.ConfigFields` + plugin `ConfigRegistrar`/`ConfigSchemaProvider`.
+6. Config center `Init()` → legacy `bot.admin_id` → `bot.admin_ids` migration → `EnsureDefaults`
+   → `ToViper()`.
+7. Instantiate every enabled adapter (`bot.platform.<name>.enable`; NapCat/Luckylilia sub-mode
+   via `bot.adapter.mode` / `bot.luckylilia.mode`: `ws|http`). If none is enabled the bot
+   **degrades to panel-only** instead of exiting (avoids a self-lockout).
+8. `pluginconfig.Load` every plugin schema struct.
+9. Cache storage → resty client.
+10. For each plugin: DI (`Storage`/`PersistentStorage` clones namespaced by `base64(name)`,
+    `RestyClient`, `Logger`, `SystemConfig`, `ConfigEditor`) then `Start` (1 min timeout each).
+11. Register `sysrestart` pre-restart callback → collect `agenthook.Handler` plugins and inject
+    into `agenthook.HandlerRegistry` implementations.
+12. `StartCron` per plugin (1 min each) → `cron.Start`.
+13. Print logo, log startup, then `Awake` after 1s (skipped while the setup wizard is pending).
+14. Start admin panel; if the wizard is pending, wait for it instead of connecting adapters.
+15. `Serve` every adapter in its own goroutine.
 
 ## Plugin Development (entry point)
 
-Plugin authoring docs live in `docs/plugin/` (VitePress, Chinese). Start from the overview, then read the topic you need — no need to reverse-engineer the framework:
+Docs live in `docs/plugin/` (VitePress, Chinese). Read them instead of reverse-engineering:
 
 | Topic | Doc |
 | --- | --- |
 | Concepts, `Meta`, ordering, middleware | `docs/plugin/overview.md` |
 | Minimal runnable plugin | `docs/plugin/first-plugin.md` |
 | End-to-end tutorial (config + storage + cron + panel) | `docs/plugin/tutorial.md` |
-| `ConfigSchema` / config struct tags / panel form | `docs/plugin/configuration.md` |
+| `ConfigSchema` / `cfg` tags / panel form | `docs/plugin/configuration.md` |
 | Lifecycle, DI, timeouts, unload, testing | `docs/plugin/lifecycle.md` |
 | Command parsing | `docs/plugin/commands.md` |
 | Message chains (text/image/forward/keyboard) | `docs/plugin/message-builder.md` |
@@ -27,7 +254,9 @@ Plugin authoring docs live in `docs/plugin/` (VitePress, Chinese). Start from th
 | Multi-platform capability probing | `docs/plugin/platforms.md` |
 | Patterns & complete examples | `docs/plugin/patterns.md`, `docs/plugin/examples.md` |
 | API reference | `docs/api/events.md`, `docs/api/bot.md`, `docs/api/storage.md` |
-| Marketplace `plugin.json` spec | AniaBot-Plugins repo `docs/plugin-spec.md` |
+| Internals (framework + AI engine) | `docs/internals/framework.md`, `agent-llm.md`, `agent-context.md`, `agent-tools.md` |
+| User guide (deploy, config, panel, built-ins) | `docs/guide/*.md` |
+| Marketplace `plugin.json` spec | AniaBot-Plugins repo `docs/plugin-spec.md` (validated by `common/pluginmeta`) |
 
 Minimal plugin (current signatures — `Group()`/`Friend()` take no target):
 
@@ -59,179 +288,382 @@ func (p *MyPlugin) OnGroupMsg(ctx context.Context, b bot.Bot, cmd command.Comman
 
 Rules that most often break plugins:
 
-1. Embed `plugin.Meta`; set `ShowFor`; keep `Name` globally unique; constructor `func NewPlugin() *XxxPlugin`.
+1. Embed `plugin.Meta`; set `ShowFor`; keep `Name` globally unique; export constructor
+   `func NewPlugin() *XxxPlugin`. `AdminOnly` hides the plugin from non-admin `/help`.
 2. Group commands: `cmd.Mention && cmd.Name == "..."`; friend commands: only `cmd.Name`.
-3. Return `false` when you handled the message, `true` otherwise.
-4. `ConfigSchema() any` must return the **same pointer** every call and must not use injected fields (`Logger`/`Storage` are not ready yet). Use `cfg` tags, not `cfg.Get*` per field.
-5. `Start(ctx, ...)`: the ctx is canceled when `Start` returns — do **not** pass it to long-running goroutines. Create your own context and cancel it in `OnUnload`.
-6. Background goroutines use `b.Go(name, f)` (panic recovery + `OnPanic`), never bare `go`; cron callbacks must wrap work in `b.Go`.
-7. Optional capabilities are type-asserted (`bot.QQ`, `bot.GroupForwardSender`, `bot.StreamSender`, `bot.MediaRefresher`, `bot.Interactive`, `bot.MsgEditor`, `bot.GroupMembers`); after asserting, still check the call's `bool` result — core routes some interfaces for backend paths and non-supporting platforms return `false`.
-8. `OnUnload`: `UnloadShutdown` = exit/restart (do **not** delete persistent data); `UnloadUninstall` = marketplace removal (safe to clear). Set a `closed atomic.Bool` before cleanup to block concurrent events.
-9. Tests: extract pure logic and use table-driven `go test ./...`; run `go test -v -race ./...` for concurrent state.
+3. Return `false` when you handled the message, `true` otherwise (panic is recovered and treated
+   as `true`, so a crashing plugin never blocks the rest of the chain).
+4. `ConfigSchema() any` must return the **same pointer** every call and must not use injected
+   fields (`Logger`/`Storage` are not ready yet). Read typed fields after `Start`.
+5. `Start(ctx, *viper.Viper)`: the ctx is canceled when `Start` returns — do **not** pass it to
+   long-running goroutines; create your own context and cancel it in `OnUnload`.
+6. Background goroutines use `b.Go(name, f)` (panic recovery + `OnPanic` broadcast), never bare
+   `go`; cron callbacks must wrap their work in `b.Go`.
+7. Optional capabilities are type-asserted (`bot.QQ`, `bot.GroupForwardSender`,
+   `bot.FriendForwardSender`, `bot.StreamSender`, `bot.MediaRefresher`, `bot.GroupMembers`,
+   `bot.Interactive`, `bot.MsgEditor`); after asserting, still check the call's `bool` — core
+   routes some interfaces for backend paths and non-supporting platforms return `false`.
+8. `OnUnload(ctx, reason)`: `UnloadShutdown` = exit/restart (do **not** delete persistent data);
+   `UnloadUninstall` = marketplace removal (safe to clear). Set a `closed atomic.Bool` before
+   cleanup to block concurrent events.
+9. Opt-in `plugin.PlatformEventHandler` for platform-specific events (Feishu card actions, bot
+   added to group, …) — broadcast, filtered by `Meta.Platforms`; event `Data` types are defined
+   by the producing adapter package.
+10. `plugin.InteractionHandler` receives inline-button callbacks routed by
+    `Meta.CallbackData(payload)` (`"<plugin name>:<payload>"`, name must not contain `:`);
+    platform callback-data limits apply (Telegram 64 bytes). `event.AnswerText` is shown to the
+    clicker; platforms without keyboard support get the `keyboard` segment stripped on send.
+11. Tests: extract pure logic and use table-driven `go test ./...`; run `go test -v -race ./...`
+    for concurrent state.
 
-## Commands
+### Plugin system & event pipeline
 
-### Run
-
-```bash
-go run ./cmd    # 不能用 go run cmd/main.go：cmd 下有插件市场生成的注册文件，单文件运行会编译失败
-```
-
-### Build (cross-compile)
-
-Requires Go 1.25+ (see `go.mod`).
-
-```bash
-make linux     # → build/AniaBot     (GOOS=linux GOARCH=amd64)
-make windows   # → build/AniaBot.exe
-make web       # rebuild admin panel frontend (cd web && npm ci && npm run build → bot/adminpanel/dist)
-make clean     # remove build/
-
-# Manual
-cd cmd && GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../build/AniaBot
-```
-
-The panel frontend's built `dist/` is gitignored (build artifact). `bot/adminpanel` embeds it via `go:embed`, so run `make web` (or `cd web && npm run build`) at least once before `go build` on a fresh clone.
-
-Panel styling uses the animal-island theme (`animal-island-vue`, the Vue port of `animal-island-ui`): `web/scripts/sync-theme.mjs` runs before `npm run dev`/`build` and emits `web/src/styles/animal-island.vendor.css` from the package (dropping the 3.4MB CJK font subsets), `web/src/style.css` holds the design tokens plus the Tailwind-utility → theme mapping layer. Page controls (Button/Input/Select/Switch/Checkbox/Tabs/Table/Modal/Tag/Progress/DatePicker/…) are the library components themselves — prefer them over hand-written HTML controls when editing views. Both generated files are gitignored.
-
-Panel appearance is user-configurable (`web/src/appearance.js` + the `/#/appearance` page): theme color, palette tone (page background + the whole paper: card/table/modal/input surfaces, borders and text colors), background pattern, sidebar style, corner radius, motion and chart series colors are applied as CSS custom properties and `data-*` attributes on `<html>` (overriding the `:root` defaults in `style.css`), persisted per browser in localStorage. New views should therefore consume the tokens (`var(--accent*)`, `var(--surface*)`, `var(--ink*)`, `var(--line*)`, `var(--r-*)`, `var(--code-*)`, `var(--chart-*)`, sidebar tokens) instead of hard-coding the theme's hex values; when a library component hard-codes the primary color, a cream paper background or a yellow focus ring, add a token-based override in the "组件库主题色联动" / "组件库纸张联动" sections of `style.css` — those overrides are scoped with `:root` (not `.app-shell`) because the library teleports modals to `<body>`.
-
-### Test
-
-```bash
-go test ./...                           # all tests
-go test -v -race ./...                  # verbose with race detector
-go test ./bot/utils/...                 # specific package
-go test -run TestParseCommand ./...     # single test by name
-```
-
-### Vet & Verify
-
-```bash
-go vet ./...
-go mod verify
-```
-
-## Configuration
-
-All configuration lives in the **database** (the persistent storage's `ania_kv` table), managed via the built-in **Web admin panel** (`bot/adminpanel`, Vue 3 + Tailwind frontend in `web/`, embedded via `go:embed`). There is no `config.yaml` anymore.
-
-- `bot/core/configstore/` — config center. Keys are dot-paths identical to the historical viper keys (`plugin.ai_chat_bot.base_url`, ...), values JSON-encoded. `Init()` seeds framework defaults from the embedded `config_tmpl.yaml` on first run and flags the first-run setup wizard. `ToViper()` builds an in-memory viper so plugin `Start(ctx, *viper.Viper)` semantics are unchanged. `EnsureDefaults()` fills registered defaults for missing keys (never overwrites).
-- `common/pluginconfig/` — config field registry + struct binding. Plugins implement the optional `plugin.ConfigSchemaProvider` interface (`ConfigSchema() any`) returning a pointer to a config struct with `cfg` tags (key/label/type/group/help/sensitive/default as struct tags; type inferred from the Go field type, slices comma-separated defaults, pointer scalars = optional params that stay nil when unset). Core reflects the struct before `ToViper()` (`RegisterStruct` — registers panel fields and seeds defaults), then fills it before the plugin's `Start` (`Load`) — plugins read typed struct fields instead of hand-writing `cfg.Get*` calls. The lower-level `plugin.ConfigRegistrar` interface (`ConfigFields() []pluginconfig.Field`) is kept for framework fields (`bot/core/configfields.go`) and dynamic declarations; both share one registry, same-key later registration overwrites in place. The admin panel renders its form dynamically from this registry — adding/removing plugins requires no panel code changes. Called before DI, so implementations must not use injected fields and must return the same pointer on every call.
-- **Bootstrap env vars** (needed before the DB opens): `ANIABOT_STORE_DRIVER` (sqlite|mysql), `ANIABOT_SQLITE_PATH` (default `./data/aniabot.db`), `ANIABOT_MYSQL_DSN`.
-- MCP servers and per-group/friend prompt overrides are config keys `files.mcp_json` / `files.prompt_json` (raw JSON text), edited graphically in the panel's 扩展配置 (Files) page with an optional raw-JSON source mode.
-- Panel auth: random initial password printed to console on first run, SHA-256+salt hash in the `__admin` namespace; config changes take effect after restart.
-
-Config is assembled in `bot/core/core.go` `Run()`: persistent storage (env) → configstore init → collect field registrations (framework + each registered adapter `Definition.ConfigFields` + `RegisterStruct` plugin schemas) → `EnsureDefaults` → `ToViper()` → instantiate every enabled adapter from the registry (each `Definition.New` gated by `bot.platform.<name>.enable`; NapCat sub-mode still picked by `bot.adapter.mode`: ws|http), wiring each with its own `TriggerWrapper` → `Load` each plugin schema struct → cache storage → plugins. Plugins declaring `ConfigSchema()` read typed struct fields in `Start()`; framework-level shared keys (e.g. `files.mcp_json`) are still read from the whole viper passed to `Start()`.
+- **Ordered execution**: `LevelLog = -1000`, `LevelNormal = 0`, `LevelPostHandle = 1000`.
+  Plugins are sorted by `Order` at startup (built-ins: sys `-1100`, log `-1000`, interceptor
+  `900`, repeat/news `0`, aichat `1000`).
+- **Middleware chain**: `OnGroupMsg`/`OnFriendMsg` return `(bool, error)`; `false` stops
+  propagation. Each call runs under `safeExecute*`; message events get a fresh
+  `context.WithTimeout` from `bot.msg_event_timeout_sec` (default 300s, capped at 24h).
+- **Broadcast notices**: all 14 notice types (upload/admin/decrease/increase/ban/friend-add/
+  recall×2/poke/lucky-king/honor/emoji-like/essence/card) go to every plugin with no
+  short-circuit, 5 min timeout. QQ-only notices simply never fire on other platforms.
+- **Platform scoping**: `Meta.Platforms []string` (`qq`, `qqofficial`, `feishu`, `telegram`,
+  `discord`, `weixin`); empty = all. Core skips plugins that don't support the event's platform.
+- **Bot send events**: optional `plugin.SendMsgInterceptor` (`OnBeforeSendMsg`, `false` cancels;
+  may rewrite `Segments`/`Forward`) and `plugin.SendMsgObserver` (`OnAfterSendMsg`, success or
+  failure) wrap every core send — group/friend messages, merge-forwards and stream replies
+  (after fires at stream end with the final text). Payloads are `message.OutgoingMessage` /
+  `message.SentMessage`; sends from inside a hook don't re-trigger (per-goroutine recursion
+  guard); 10s timeout.
+- **Inline interaction**: `plugin.InteractionHandler` (see rules above); core answers the
+  platform via `adapter.InteractionAnswerer` when available.
+- **Dedup**: core deduplicates at-least-once deliveries before the plugin chain, using
+  `adapter.EventKeyer` when implemented, else `platform + MessageId` for messages (notices have
+  no fallback key); TTL 10 min. Feishu additionally has its own early dedup inside the SDK
+  handler (different namespace, no conflict).
+- **Self messages**: `msg.Sender.UserId == msg.SelfId` is dropped; `SelfId` is backfilled from
+  `adapter.SelfIDProvider` when the platform omits it.
+- **DI**: `Storage` (cache) + `PersistentStorage` clones, `RestyClient`, `Logger`,
+  `SystemConfig` (`AdminIds []message.QID` from `bot.admin_ids`, platform-prefixed, multiple
+  allowed; `AdminId` keeps the first for old plugins — use `IsAdmin(qid)` / `Admins()`),
+  `ConfigEditor` (config-center read/write; **nil** when persistent storage is unavailable).
+- **Lifecycle**: `ConfigSchema()` → DI → `Start()` → `StartCron()` → `Awake()` → events →
+  `OnUnload(reason)` (reverse order, at most once each, 1 min per hook). `Start`/`StartCron`/
+  `Awake` contexts are canceled when the method returns.
+- **Goroutine tracer**: `bot.Bot` embeds `tracer.Tracer` (`Go(name, f)`); core tracks the count,
+  recovers panics and broadcasts `OnPanic` to plugins (each recovered separately).
+- **Admin-panel data sources**: a plugin may implement optional `adminpanel.XxxSource`
+  interfaces. Core collects one provider per interface in plugin registration order and stops
+  after the 9 core ones are found (`TaskLogSource`, `ClockTaskSource`, `MsgLogSource`,
+  `SkillSource`, `MemorySource`, `KnowledgeBaseSource`, `TeamSource`, `QuotaSource`,
+  `QueryLogSource`), so third-party plugins registered after `pluginaichat` are not discovered —
+  remove the built-in provider to take over a page. `ChatConsoleSource` is one of the collected
+  sources, and core also probes the `MsgLog*` extensions (`MsgLogSessionSource`,
+  `MsgLogMediaSource`, `MsgLogDeleteSource`, `MsgLogSessionDeleteSource`) while collecting,
+  turning them into plain function pointers on the panel options. The panel server itself then
+  probes `SkillToggleSource`/`SkillDetailSource` (on the skill provider) and
+  `MemoryBatchDeleteSource`/`KnowledgeBatchDeleteSource` (on the memory/KB providers) for the
+  multi-select and detail pages. Adapters may implement `adapter.ContactsExt` (address book) and
+  `adminpanel.QRLoginSource` (WeChat QR login) — core collects all of them across adapters.
 
 ## Architecture
 
-### Layered Structure
+### AI engine — `bot/component/aichat` + `bot/component/llmtool` + `bot/plugins/pluginaichat`
 
-```
-cmd/main.go              Entry point: blank-imports platform adapter packages (init registers them), registers plugins, runs bot
-common/                  Shared interfaces and models (adapter, plugin, storage, bot, msgchain, aitool)
-  adapter/                 Platform adapter abstraction: Adapter (public contract) + QQExt (optional capability) + Definition/Register registry + BotWrapper
-  bot/                     bot.Bot (public capability facade) + bot.QQ (optional QQ-only capability interface)
-  aitool/                  Platform AI-tool injection contract (Tool/Context/Provider/SideEffector) + per-platform tool sets (QQ over adapter.QQExt)
-bot/core/                AniaBot orchestrator: plugin lifecycle, event dispatch, multi-adapter container + ID-prefix routing, DI, storage impls
-  configstore/             DB-backed config center (seed/migrate/ToViper)
-bot/adminpanel/          Web admin panel: config/status APIs + embedded SPA (dist/)
-bot/marketplace/         Plugin marketplace: GitHub API index/detail, online install/uninstall/rollback pipelines (rebuild + restart)
-bot/adapter/napcat/      NapCat protocol adapters (WebSocket and HTTP), QQ platform
-bot/adapter/luckylilia/  Luckylilia (LLBot) OneBot v11 adapters (WebSocket and HTTP), QQ platform (ID prefix lil:)
-bot/adapter/qqofficial/  QQ Official adapter (QQ Open Platform API v2: WebSocket gateway + REST, hand-rolled)
-bot/adapter/feishu/      Feishu/Lark adapter (larksuite/oapi-sdk-go/v3), WebSocket long-connection + webhook
-bot/adapter/telegram/    Telegram adapter (hand-rolled Bot API client, long polling; proxy/api_base config)
-bot/adapter/discord/     Discord adapter (bwmarrin/discordgo, Gateway WebSocket; proxy config)
-bot/adapter/weixin/      WeChat adapter (iLink bot HTTP long-poll; QR login via panel QRLoginSource API or console, credentials in ./data/weixin, CDN media)
-bot/component/           AI chat engine
-  aichat/                  ChatBot, LLMClient, MessageBuilder, ToolOrchestrator, messageWindow
-  llmtool/                 Tool interface, ToolExecuter, MCP client, SkillManager, schema parser
-  functool/                Built-in tools (time, file, image loading, computer use; web search moved to the built-in web skill + CLI)
-  oplog/                   Operation audit log (panel + AI tool actions; SQL ania_op_log row-level storage, disabled if SQL probe/DDL fails, package-level singleton)
-  sysrestart/              Process self-restart (panel restart/auto-update + /reboot command in pluginsys)
-bot/plugins/             Six built-in plugins (sys, log, repeat, interceptor, aichat, news)
-bot/utils/               Command parsing, message extraction, URL helpers, time formatting
-custom/                  Custom plugin examples/templates (custom/plugins/example is the marketplace skeleton, custom/mvp is the minimal main)
-web/                     Admin panel frontend (Vite + Vue 3 + Tailwind v4, builds into bot/adminpanel/dist)
-docs/                    VitePress documentation site (plugin authoring: docs/plugin/, API reference: docs/api/)
-```
+`aichat.ChatBot` is one conversation: `LLMClient` + `MessageBuilder` + `ToolOrchestrator` +
+`messageWindow`. `pluginaichat` is the plugin shell: it builds clients from config, keeps the
+per-session `ChatBot` cache, owns memory/KB/clock/proactive/team/quota/hooks/approval and owns
+all session-scoped tool registration.
 
-### Dependency Flow (strictly top-down)
+**LLM client**
 
-```
-cmd/main.go → bot/core, bot/adapter/napcat, bot/adapter/luckylilia, bot/adapter/qqofficial, bot/adapter/feishu, bot/adapter/telegram, bot/adapter/discord, bot/adapter/weixin, bot/plugins/*
-bot/adapter/weixin → common/adapter, common/bot, common/model/message, common/msgchain, external (resty, go-qrcode)
-bot/core → common/*, bot/utils
-bot/adapter/napcat → common/adapter, common/aitool, common/bot, common/model/message, common/msgchain
-bot/adapter/luckylilia → common/adapter, common/aitool, common/bot, common/model/message, common/msgchain, external (gorilla/websocket, resty)
-bot/adapter/qqofficial → common/adapter, common/bot, common/model/message, common/msgchain, external (resty, gorilla/websocket)
-bot/adapter/feishu → common/adapter, common/bot, common/model/message, common/msgchain, external (lark SDK)
-bot/adapter/telegram → common/adapter, common/bot, common/model/message, common/msgchain, external (resty, x/net/proxy)
-bot/adapter/discord → common/adapter, common/bot, common/model/message, common/msgchain, external (discordgo, gorilla/websocket, x/net/proxy)
-bot/plugins/* → common/plugin, common/bot, common/storage, bot/component/*
-bot/marketplace → common/pluginmeta, bot/component/oplog, bot/component/sysrestart, external (GitHub API)
-bot/component/aichat → bot/component/llmtool, external (openai-go, anthropic-sdk-go)
-bot/component/functool → bot/component/llmtool, bot/component/oplog, bot/component/sysrestart, common/pluginconfig, bot/utils
-bot/component/llmtool → common/aitool, external (openai-go, MCP SDK)
-common/* → leaf packages (no upward dependencies)
-```
+- Thin shell over pluggable format backends (`llmbackend.go`): `chat_completions`
+  (`openai-go/v3`), `responses` (same SDK's responses package), `anthropic`
+  (`anthropics/anthropic-sdk-go`). Format is chosen per client via `WithAPIFormat`; the main /
+  compressor / fallback model configs each have `api_format` (empty inherits the main format);
+  sub-agent and team-member clients always follow the main format.
+- The shell owns app-level retry (`retry.*`: 429/5xx/network with exponential backoff) and
+  fallback-model switching (`fallback.*`, one extra attempt after the main model is exhausted).
+- Anthropic extended thinking maps `thinking.mode` → `budget_tokens`; thinking blocks
+  (signature / redacted data) persist on `Message.ThinkingBlocks` and replay verbatim across
+  tool-calling turns. DeepSeek-style `reasoning_content` is still extracted on chat_completions.
+- Prompt caching: `chat_completions`/`responses` rely on provider prefix caching (system prompt
+  must stay byte-stable); `anthropic` needs explicit `cache_control` breakpoints (enabled by
+  default, `prompt_cache.enable` / `.ttl` 5m|1h). Dynamic per-turn content (memory/KB blocks,
+  todo reminder, plan note, hook context) is appended to the **user message tail**, never the
+  system prompt.
+- Custom request headers (`plugin.ai_chat_bot.headers`) apply to every LLM request (main/sub/
+  clock/compressor/OCR/fallback) and support session placeholders `${session}` (unique per
+  conversation, renewed on new conversation), `${session_id}`, `${session_type}`.
+- Context window: `messageWindow` is token-budget based, not turn based — when the last prompt
+  token count exceeds 80% of `max_context_tokens` it compresses earlier history via the
+  compressor model. `ToolOrchestrator` runs LLM → tool → result loops up to `max_iterations`
+  (default 100 in config; plugin fallback 20).
 
-### Plugin System
+**History & sessions**
 
-Plugins implement `common/plugin.Plugin` by embedding `plugin.Meta` and overriding only needed methods. Key mechanics:
+- History persists row-level on SQL backends (`storage.SQLBackend` probe) in
+  `ania_chat_session` (one row per session, `msg_count` doubles as the seq allocator) +
+  `ania_chat_message` (one row per message, `(session_id, seq)` PK). Plain appends INSERT only
+  new rows; compression/truncation rewrite via `Replace`; `clear` wipes. If the probe/DDL fails,
+  history stays in-memory only (lost on restart).
+- Image parts degrade to `[图片 <hash>]` text markers before persist, so history replays
+  text-only.
+- Per-session cache in `pluginaichat` (`sync.Map` of `chatEntry` with last-active time): a
+  1-minute janitor evicts idle sessions (`session.max_idle_minutes`, default 120) and enforces
+  an LRU cap (`session.max_sessions`, default 128); 0 disables either. Eviction skips sessions
+  mid-response and drops only the in-memory object (persisted history reloads; dynamically
+  loaded MCP tools die with it, like a restart).
+- Group un-@ chatter: `session.no_mention_clear` (default 30) auto-clears the group history
+  after N consecutive non-mentioned messages (count persisted across restarts).
 
-- **Ordered execution**: `LevelLog = -1000`, `LevelNormal = 0`, `LevelPostHandle = 1000`. Plugins sorted by `Order` at startup.
-- **Middleware chain**: `OnGroupMsg`/`OnFriendMsg` return `(bool, error)`. Return `false` to stop propagation to subsequent plugins; panic is recovered and treated as `true`.
-- **Broadcast notices**: All 14 notice event types (recall, poke, ban, etc.) are delivered to every plugin — no short-circuit. QQ-only notices (poke/lucky_king/honor/essence/card/ban/upload) simply never fire on non-QQ platforms.
-- **Platform scoping**: `plugin.Meta.Platforms []string` declares which platforms a plugin supports (`[]string{"qq"}` or `[]string{"qq","feishu"}`); empty = all platforms. Platform IDs: `qq`, `qqofficial`, `feishu`, `telegram`, `discord`, `weixin`.
-- **Platform-specific events**: optional `plugin.PlatformEventHandler` — `OnPlatformEvent(ctx, bot, message.PlatformEvent) error` receives events that can't map to public notices (e.g. Feishu card actions, bot-added). Broadcast (non-interrupting), filtered by `Meta.Platforms`.
-- **Bot send events**: optional `plugin.SendMsgInterceptor` (`OnBeforeSendMsg`, return false to cancel) and `plugin.SendMsgObserver` (`OnAfterSendMsg`, success/failure broadcast) fire around every core send — group/friend messages, merge-forward (QQ) and stream replies (after fires at stream end with the final text). Payloads are `message.OutgoingMessage` / `message.SentMessage`; the before event can rewrite `Segments` / `Forward`. Platform-filtered like other events; sends issued from inside a hook do not re-trigger events (per-goroutine guard against recursion). Timeout 10s.
-- **Inline interaction**: optional `plugin.InteractionHandler` — `OnInteraction(ctx, bot, *message.InteractionEvent) error` receives button callbacks routed by `Meta.CallbackData(payload)` (`"<plugin name>:<payload>"`, name must not contain `:`). `event.AnswerText` is shown to the clicker; platforms without keyboard support get the `keyboard` segment stripped on send. `bot.Interactive` / `bot.MsgEditor` / `bot.StreamSender` are probed by assertion.
-- **Platform capabilities via type assertion**: in message/notice handlers the `bot.Bot` argument is the event source's capability-wrapped facade (`adapter.WrapBot`). Probe optional interfaces: `bot.QQ`, `bot.GroupForwardSender`, `bot.FriendForwardSender`, `bot.StreamSender`, `bot.MediaRefresher`, `bot.GroupMembers`, `bot.Interactive`, `bot.MsgEditor`. `bot.QQ` is QQ-only; the core-routed ones may assert successfully on other platforms and still return `false` — always check the call's bool.
-- **Config schema**: optional `plugin.ConfigSchemaProvider` (`ConfigSchema() any`) returns a pointer to a `cfg`-tagged struct. Core reflects it before DI to register panel fields + defaults, then fills it before `Start`. Must return the same pointer and must not use injected fields. `plugin.ConfigRegistrar` (`ConfigFields() []pluginconfig.Field`) is the lower-level alternative for dynamic fields. Panel config is stored in the DB; changes take effect after restart.
-- **DI injection**: Core injects `Storage` (cache) and `PersistentStorage` alongside `RestyClient`, `Logger`, `SystemConfig`, and `ConfigEditor` before calling `Start()`. `SystemConfig` carries the admin list (`AdminIds []message.QID` from `bot.admin_ids`, multiple allowed, IDs may carry a platform prefix; `AdminId` keeps the first for older plugins — use `IsAdmin(qid)` / `Admins()`). `ConfigEditor` is the config-center read/write facade (nil when persistent storage is unavailable — check before use).
-- **Lifecycle**: `ConfigSchema()` → DI → `Start()` → `StartCron()` → `Awake()` → message/notice/platform/interaction/send events → `OnUnload(reason)` (optional `plugin.UnloadEvent`; reverse order, once, 1min). `Start`/`StartCron`/`Awake` contexts are canceled when the method returns — background work needs its own context.
-- **Unload**: `OnUnload(ctx, plugin.UnloadShutdown | plugin.UnloadUninstall)`; shutdown = exit/restart (keep persistent data), uninstall = marketplace removal (safe to clear). Runs concurrently with events: set a `closed atomic.Bool` before cleanup. See `docs/plugin/lifecycle.md`.
-- **Admin panel data sources**: optional `adminpanel.XxxSource` interfaces (`TaskLogSource`, `ClockTaskSource`, `MsgLogSource`, `SkillSource`, `MemorySource`, `KnowledgeBaseSource`, `TeamSource`, `QuotaSource`, `QueryLogSource`, plus `ChatConsoleSource` and optional extensions). Core wires one provider per interface and stops after the 9 core interfaces are found — custom plugins registered after `pluginaichat` are not discovered; remove the built-in provider to take over a page. See `docs/plugin/panel-services.md`.
-- **Panic recovery**: Every plugin call is wrapped in `safeExecute`; goroutines spawned via `b.Go()` have crash recovery that notifies all plugins. Cron callbacks are NOT wrapped — use `b.Go` inside them.
+**Conversation behavior (`pluginaichat`)**
 
-### LLM Tool System
+- Message pipeline: self-filter → approval-reply intercept → (group) record proactive scene →
+  mention gate → commands (`/proactive`, `/clock`, `/stop`, `/plan`, `/cmd`, `/status`,
+  `#新对话` handling) → AI request. While a response is running, further messages are silently
+  queued per session (`pendingqueue.go`) and processed in batches; `/stop` cancels the request
+  and drains its queue.
+- Reply rendering: `|||` always splits a reply into multiple messages (content inside code
+  fences is exempt; in groups >3 parts are merged into one forward when the platform supports
+  it); stream replies (`stream.enable`) update a single message on platforms that support
+  edit/patch and render `|||` as a line break, falling back to one-shot.
+- `chatconsole.go` backs the panel 试聊室: same pipeline (prompt/memory/KB/tools) but replies
+  only render in the panel, are written to the query log/token stats, and don't consume quota.
+- `promptmanager.go` applies per-group/friend prompt overrides (`files.prompt_json`), hot
+  reloaded via TTL; `customcmd.go` expands custom slash commands (`files.commands_json`);
+  `imagefetch.go` normalizes images (BMP etc.) for multimodal models / OCR fallback.
 
-Tools are defined as structs embedding `llmtool.BaseTool[ParamsType]`. Parameter structs use `json` tags for names and `desc` tags for descriptions. The `parser.go` reflection engine auto-generates OpenAI-compatible function schemas from these structs — no manual JSON schema needed.
+**Sub-agents, teams, todo, plan, approval, hooks**
+
+- **Sub-agents** (`subagent.go`, `subagent_async.go`, `subagenttool.go`): `subagent_run` /
+  `subagent_list` / `subagent_cancel` are registered on main sessions only. A sub-agent is an
+  ephemeral `ChatBot` (nil history store) with its own `SessionToolExecutor` and scoped tools but
+  no `subagent_run`, no team tools and no parent image callbacks, so runs cannot recurse. Session
+  runs are **asynchronous**: the tool starts a tracked goroutine (`b.Go`) and returns immediately;
+  on completion the formatted result (`【子代理执行完成】…`) is enqueued as a synthetic message in
+  the session's pending queue and the session is kicked, so the main AI picks it up in a
+  follow-up turn. `/stop` cancels running sub-agents. Timeout: default = the framework
+  per-message budget (`bot.msg_event_timeout_sec`, fallback 5 min), a per-call `timeout_sec`
+  overrides it (capped at 1800s), then the value is shrunk to fit the parent context deadline
+  minus a reserve — insufficient budget refuses the launch. Clock tasks get their own async
+  variant that drains all runs at wrap-up instead of enqueuing; agent-team members reuse the
+  synchronous `runSubagentWithOptions`.
+- **Agent teams** (`team.go`, `teamroles.go`, `teamtool.go`): persistent teams per scope
+  (`g:`/`f:` in KV, `global` managed from the panel only), each member = name + role prompt.
+  `team_run` runs members in parallel as ephemeral agents and synthesizes their outputs;
+  `team_create`/`team_list`/`team_delete` manage teams; caps: 20 teams/scope, 10 stored
+  members, 5 concurrent members, name ≤20 runes, role ≤500 runes.
+- **Todo list** (`todo.go`): `todo_write` (main sessions, `todo.enable`, default on) replaces the
+  session's checklist; unfinished items are injected as a tail reminder.
+- **Plan mode** (`plan.go`, `plancmd.go`): `/plan on|off`. `planBlockedTools` plus dynamic legs
+  block side-effect tools — `bash`, `file`, `write_file`/`edit_file`, `config_set`/
+  `config_file_set`, memory/KB writes, clock writes, skill install/remove, MCP management and
+  discovery, loaded MCP tools, `subagent_run`, team mutations, computer-use input, and platform
+  tools declaring `aitool.SideEffector` (voice/poke/sign) — while read-only tools (screenshots,
+  `config_get`, searches, lists) stay available.
+- **Tool approval** (`approval.go`): `approval.tools` (comma-separated names, default `file`)
+  makes a tool ask the requester/admin via a chat message ("允许/拒绝", timeout auto-deny);
+  bash adds a three-tier check on top — blacklist deny → whitelist allow → manual approval
+  (commands matching neither list are allowed when approval is off); `config_set` /
+  `config_file_set` always require admin approval regardless of config.
+- **Agent hooks** (`bot/component/agenthook`): shell hooks from `files.hooks_json` on
+  `SessionStart`/`UserPromptSubmit`/`PreToolUse`/`PostToolUse`/`Stop`/`SubagentStop`/
+  `PreCompact` (JSON payload on stdin, exit 0 pass / 2 block / else non-blocking error; only
+  PreToolUse and UserPromptSubmit can block; PostToolUse `Context` is appended to the tool
+  result). Other plugins can implement `agenthook.Handler` to receive the same events in
+  process; core injects them into `agenthook.HandlerRegistry` implementers.
+
+**Memory, knowledge base, clock, proactive, quota, logs**
+
+- **Long-term memory** (`memory.go`, `memory_sql.go`, `memorytool.go`): per-scope
+  (`g:<group>` / `f:<user>`) rows in `ania_memory` (`(scope,id)` PK, tags/embedding JSON,
+  fixed-width UTC `created_at`). Tools `memory_save/search/update/forget` are registered with the
+  scope bound at registration (no cross-session leakage). Identical content deduped; near
+  duplicates (token-set Dice ≥ 0.55) answered with a merge hint; `memory.max_entries` (200)
+  caps. Optional `memory.auto_inject` prepends a `【长期记忆】` tail block, and
+  `ChatOptions.PersistUserText` keeps injected content out of history.
+- **Knowledge base** (`knowledge.go`, `knowledge_sql.go`, `knowledgetool.go`): documents per
+  scope (`global` / `g:` / `f:`) in `ania_kb_doc`; long docs chunked at retrieval time
+  (600 runes / 60 overlap); `kb_add`/`kb_search` plus auto-inject; optional embeddings
+  (`kb.embedding.*`, shared `embedder` with memory, single embed per turn reused by both) and a
+  background backfill; `kb.max_docs` (500) cap; legacy `kb:` KV blobs are migrated once.
+- **Clock (AI scheduled tasks)** (`clock*.go`): its **own `*cron.Cron`**, dynamic tasks in
+  `PersistentStorage` (`clock:` namespace), tool set `clock_create/list/get/update/delete/log`
+  (the AI can also manage them via chat), `/clock` for humans. A trigger runs a fresh ephemeral
+  ChatBot under a per-task timeout, logs to `tasklog`, sends only the final reply, and supports
+  `skip_output` for silent patrol tasks; `clocksubagent.go` adds async sub-agents with a
+  wrap-up drain (up to 5 synthesis rounds, 30s reserve) before pushing the result. Successful
+  pushes leave a one-shot `【定时任务播报】` hint for the target session.
+- **Proactive interaction** (`proactive*.go`): an intention queue (`ania_intention`) with a 60s
+  tick rather than a cron. Intents pass a gate chain (scope enabled → quiet hours → daily caps →
+  min gap → cooldown after ignored → live-conversation recheck) before any LLM spend, then run an
+  ephemeral ChatBot. Pacing is a single 0–100 `proactive.activity` slider interpolated across 5
+  anchors (`proactivelevel.go`); only `quiet_hours`, `timeout_sec`, `max_context_messages` are
+  separate keys. Per-session enablement is the single source of truth
+  `proactive.scopes` (`g:`/`f:`), mutated by `/proactive on|off` through `ConfigEditor` and
+  re-readable via `/proactive reload`. Outcomes are observed (`replied`/`ignored`) and strikes
+  trigger cooldown. SQL required; default off.
+- **Quota** (`quota.go`): optional per-session / global daily token caps (`quota.daily_tokens`,
+  `quota.global_daily_tokens`); exceeding rejects new AI requests. Panel can reset.
+- **Logs**: every AI request writes a query-log row (`querylog`, kinds chat/proactive, chat
+  types group/friend/panel), clock runs write task-log rows (`tasklog`), management actions write
+  op-log rows (`oplog`). Token stats and the panel's Token 统计 page derive from the query log.
+
+**Tool result length governance**
+
+Every tool result passes one chokepoint — `aichat.ToolOrchestrator.executeToolCalls` — before it
+enters context (built-in/session/platform/MCP alike). Successful results above
+`plugin.ai_chat_bot.tool_result.max_inline_runes` (default 16000) are written to a per-session
+temp file under `./data/tool-outputs` (handle = sanitized tool name + random hex, path contains a
+session-key digest so handles can't be read across sessions) and replaced by a preview (default
+4000 runes, head 3/4 + tail 1/4) plus handle. The AI reads them back on demand with
+`read_tool_output` (`offset`/`limit`/`from_end`/literal `pattern`; exempt from spilling, so it
+never recurses). Error results are never spilled — only head/tail truncated. Failures or
+`tool_result.enable=false` fall back to truncation. A janitor deletes files past
+`retention_hours` (24h) / over `max_total_mb` (512MB); clearing a conversation purges its
+directory. In-tool truncations were deliberately removed (content discarded inside a tool cannot
+be recovered by the central limiter).
+
+### LLM tool system
+
+Tools are structs embedding `llmtool.BaseTool[ParamsType]` (created with
+`llmtool.MakeBaseTool(name, description, params)`); parameter structs use `json` tags for names
+and `desc` tags for descriptions. `llmtool/parser.go` reflects them into OpenAI-compatible
+function schemas. Execution receives `llmtool.CallBackFuncs` (send text/image/file, private-file
+URL, image loading, approval, result limiting, `read_tool_output`).
 
 Registration hierarchy:
 
-1. `functool.CreateDefaultTools()` — registers built-in tools. Always on: `time`, `private_file`, `load_images` (LLM-invoked, hash-based selective loading: image messages shown to the AI carry `[图片 <hash> url:<url>]` markers, and the tool loads only the images whose hashes the AI passes — covering current/quoted messages, platform history-tool results and merged forwards; recognition via the multimodal model or OCR fallback in the callback). History viewing is NOT a built-in tool anymore — it moved to the platform tool injection mechanism (see item 4, `aitool.NewMsgHistoryTool`). Web search/browsing is NOT a built-in tool either: the embedded built-in `web` skill (`llmtool/builtinskills`, materialized to `<skillsDir>/.builtin`) ships `webctl.py`, which the AI runs through `skill_read` + `bash` (currently `--deepseek` → DeepSeek `POST /v1/tools/search` / `POST /v1/tools/fetch`; requires `DEEPSEEK_API_KEY`). Opt-in (gated behind config flags for safety): `bash` (executes on the host with whitelist/blacklist regex; configurable timeout; oversized output is spilled to a per-session temp file by the unified tool-result limiter and read back via `read_tool_output`; optional fixed or persisted-across-calls working directory — the persisted cwd is shared by all sessions), the `read_file`/`write_file`/`edit_file`/`glob`/`grep` file tools group (`plugin.ai_chat_bot.file_tools.enable`, default off; optional root jail via `file_tools.root`, plan mode blocks `write_file`/`edit_file` while the read-only ones stay allowed), `file`/`send_file`, `local_image` (reads host-local image files for the LLM to view; served as a data URI to the multimodal model or OCR fallback in the callback), and `computer_use` — `screenshot`/`mouse_click`/`mousemove`/`mouse_scroll`/`keyboard_type`/`keyboard_press`/`active_window`/`list_windows` (`plugin.ai_chat_bot.computer_use.enable`, default off; Windows hosts only — `bot/component/computeruse` implements GDI screen capture + SendInput mouse/keyboard via pure syscalls, no CGO, other platforms compile to `ErrUnsupported` stubs; screenshots reuse the `LoadLocalImage` pipeline for multimodal/OCR display and downscale to `computer_use.max_width`; the AI operates in the pixel space of its most recent screenshot, mapped to screen coords by a shared `View`; input actions are audited via oplog and blocked by plan mode, per-call approval available via `approval.tools`). Registered separately by the aichat plugin (not in `CreateDefaultTools`): `config_get`/`config_set` (`plugin.ai_chat_bot.config_tool.enable`, default off — read/modify framework config via the DI-injected `ConfigEditor`; sensitive fields masked against the pluginconfig registry, only registered keys writable, changes take effect after restart — the AI is instructed to tell the user an admin must send the `/reboot` command, handled by pluginsys via `bot/component/sysrestart`).
-2. `functool.CreateToolsWithMCP()` — adds MCP tools (`mcpLazyLoad` selects discovery mode vs eager registration)
-3. `functool.CreateToolsWithSkill()` — adds `skill_read` and `skill_reload` tools, loads external skills from `skillsDir` (whitelist `plugin.ai_chat_bot.skills`) plus built-in skills, and applies `plugin.ai_chat_bot.skills_disabled`. Built-in skills are embedded via `go:embed` (`llmtool/builtinskills`), cannot be deleted or disabled, and bypass the whitelist — currently `web` (search/fetch CLI) and `aniabot` (the bot's own manual: architecture, config keys + effect timing, panel pages, chat commands, troubleshooting — **keep it in sync when config keys, panel pages or commands change**, its reference docs live in `builtinskills/skills/aniabot/reference/`); disabled external skills are excluded from the prompt registry (description stays out of context) and `skill_read` refuses them. The manager exposes `List` (enabled only) / `ListAll` (panel) / `SetEnabled` / `SetDisabled` / `DisabledNames`, and `Reload`/`Refresh` preserve built-ins and the disabled set; the panel toggles persist to `plugin.ai_chat_bot.skills_disabled` via `ConfigEditor`.
-4. **Platform tool injection** (`common/aitool`) — platform adapters contribute their own AI tools: an adapter's bot-facade wrapper (registered via `adapter.RegisterBotWrapper`) implements the optional `aitool.Provider` interface (`AITools(ctx) []aitool.Tool`); the aichat plugin asserts it on the event-source facade when creating a session (`registerPlatformTools`, also applied to subagents) and bridges each tool into the `SessionToolExecutor` via `llmtool.AdaptProviderTool`. The `aitool.Tool` contract lives in common (structural: `Name`/`Description`/`Params`/`Execute(ctx, params)` — no `CallBackFuncs`; tools close over the `aitool.Context{Bot, Target, IsGroup, OnMessages}` captured at session creation), so adapter packages don't import llmtool. `Context.OnMessages` (optional `MessageSink`) hands fetched history messages back to the host so images get registered for `load_images`. QQ (shared by NapCat and Luckylilia, implemented once in `aitool.QQTools` over `adapter.QQExt`): `qq_get_group_list`/`qq_get_friend_list`/`qq_get_group_user_info`/`qq_get_group_member_list`/`qq_get_ai_characters`/`qq_get_msg_history` (read-only) + `qq_send_ai_voice`/`qq_send_poke`/`qq_send_group_sign` (declare the optional `aitool.SideEffector` interface → collected at registration into a plugin-level name set that extends the plan-mode gate's `planBlockedTools`, so `/plan on` blocks them too). Telegram injects `tg_get_msg_history` via its `tgBot` wrapper. The history tool supports per-member filtering (`user_id` param paginates back through recent messages collecting that member's messages, capped at `historyMaxFetched` fetched with loop guards for adapters that ignore the seq cursor). Clock-task sessions (no platform facade) register the same tool directly as `get_msg_history` bound to the task target, and facades that don't implement `Provider` get the same implementation injected as a generic `get_msg_history` fallback (built on the required `bot.Bot` history interface), so history viewing stays available on every platform. Naming: platform-prefixed (`qq_`, `tg_`, …); collisions with built-in shared tools are skipped with a log (session-level registration would silently shadow). **Deterministic ordering**: providers must build their slice in a fixed literal order (no map ranges), and the final serialization order is guaranteed by `ToolExecuter.toolsWithSession` sorting all tool names — the `tools` array stays byte-stable across requests so upstream prompt prefix caches are never invalidated.
+1. `functool.CreateDefaultTools()` — always on: `time`, `get_private_file_url`, `load_images`
+   (hash-based selective image loading: messages carry `[图片 <hash> url:<url>]`, the AI passes
+   the hashes it needs). `read_tool_output` is registered by `pluginaichat` itself when result
+   spilling is enabled (the default). Opt-in: `file` (send host file),
+   `local_image` (host image → data URI / OCR), the file-tools group
+   `read_file`/`write_file`/`edit_file`/`glob`/`grep` (`file_tools.enable`, optional `root` jail,
+   plan mode blocks writes), `bash` (host shell; whitelist/approval/blacklist; `env`,
+   `working_dir`, `persist_cwd` shared across sessions), and `computer_use` —
+   `screenshot`/`mouse_click`/`mousemove`/`mouse_scroll`/`keyboard_type`/`keyboard_press`/
+   `active_window`/`list_windows` (`computer_use.enable`, default off; Windows hosts only).
+2. `functool.CreateToolsWithMCP()` — MCP servers from `files.mcp_json`; `mcp.lazy_load` (default
+   on) registers `mcp_discover_<server>` / `mcp_load_<server>` discovery instead of every tool;
+   off registers everything eagerly (stable tool list, cache-friendly, higher context cost).
+3. `functool.CreateToolsWithSkill()` — external skills from `skills_dir` (whitelist `skills`,
+   `skills_disabled` from the panel) plus embedded built-ins (`llmtool/builtinskills`,
+   materialized to `<skillsDir>/.builtin`, always loaded, never deletable/disable-able): `web`
+   (search/fetch CLI `webctl.py`; DeepSeek/Tavily/Exa/Firecrawl/Jina providers, requires
+   `bash` + a provider API key) and `aniabot` (the bot's own manual — **keep it in sync when
+   config keys, panel pages or commands change**). Exposes `skill_read`, `skill_reload` and — with
+   `skill_tool.enable` — `skill_list`/`skill_install`/`skill_remove` (download zip/GitHub or write
+   SKILL.md content, hot-reloaded).
+4. **Platform tool injection** (`common/aitool`): an adapter's `BotWrapper` may implement
+   `aitool.Provider` (`AITools(ctx) []aitool.Tool`); `pluginaichat` asserts it on the event-source
+   facade when building a session (also for sub-agents) and bridges tools via
+   `llmtool.AdaptProviderTool`. Contracts live in `common` (structural: Name/Description/Params/
+   Execute, no `CallBackFuncs`); tools close over `aitool.Context{Bot, Target, IsGroup,
+   OnMessages}`. `Context.OnMessages` (optional `MessageSink`) hands fetched history back so
+   images register for `load_images`. QQ tools (shared by NapCat + Luckylilia over
+   `adapter.QQExt`): `qq_get_group_list`, `qq_get_friend_list`, `qq_get_group_user_info`,
+   `qq_get_group_member_list`, `qq_get_ai_characters`, `qq_get_msg_history` (read-only) and
+   side-effecting `qq_send_ai_voice`, `qq_send_poke`, `qq_send_group_sign` (declare
+   `aitool.SideEffector` → plan mode blocks them). Telegram injects `tg_get_msg_history`. Clock
+   sessions register the history tool directly as `get_msg_history`; facades without `Provider`
+   get the same generic fallback, so history viewing works everywhere. Providers must build tool
+   slices in fixed literal order; `ToolExecuter.toolsWithSession` finally sorts tool names so the
+   serialized `tools` array stays byte-stable for upstream prompt caches.
+5. **Session-scoped tools** (`registerScopedTools` in `llm.go`, plus `getChat`): every session
+   gets `clock_*`, `memory_*`, `kb_*`, `proactive_*`, platform-injected tools, and — when
+   enabled — `skill_*` management (`skill_tool.enable`) and `mcp_*` management
+   (`mcp_tool.enable`, persists to `files.mcp_json` and hot-registers/unregisters). Main sessions
+   additionally get `todo_write` (`todo.enable`), `subagent_run/list/cancel` and
+   `team_run/create/list/delete`; clock sessions get `skip_output` plus their own async
+   `subagent_*` set; chat-console sessions register only the shared scoped tools. Each session
+   gets its own `SessionToolExecutor`; MCP tools loaded via `mcp_load` are per-session.
+6. **Config tools** (`config_tool.enable`, default off): `config_get`/`config_set` (registered
+   keys only, sensitive fields masked, admin approval, restart needed) and
+   `config_file_get`/`config_file_set` (the four `files.*` JSON blobs; `mcp` needs restart).
+   The AI is told to ask an admin to run `/reboot`.
 
-Each user session gets a `SessionToolExecutor` with isolated dynamic tools. MCP tools default to a two-phase lazy loading pattern (discover → load per session) to avoid context window explosion; `plugin.ai_chat_bot.mcp.lazy_load` (default on) toggles this — off means all MCP tools are registered upfront (stable tool list, better upstream prompt-cache hit rate, higher context cost). The `ToolExecuter` is RWMutex-guarded and supports runtime `AddMCP`/`RemoveMCP`/`ReconnectMCP`, backing the AI's MCP self-management tools (`mcp_list`/`mcp_add`/`mcp_remove`/`mcp_reconnect`, gated by `plugin.ai_chat_bot.mcp_tool.enable`, default off — add/remove persist to `files.mcp_json` via the DI-injected `ConfigEditor` and hot-register/unregister immediately). `skill_reload` re-reads skill files from disk after the AI edits them directly (e.g. via `bash`); panel/tool-driven install/remove already hot-reloads on its own.
+### Storage
 
-**Tool result length governance** — every tool result passes through one chokepoint, `aichat.ToolOrchestrator.executeToolCalls`, before it enters context (built-in/session/platform/MCP tools alike). Results above `plugin.ai_chat_bot.tool_result.max_inline_runes` (default 16000) are written to a per-session temp file under `./data/tool-outputs` (handle = sanitized tool name + random hex; path contains a session-key digest, so handles cannot be read across sessions) and replaced by a preview (default 4000 runes, head 3/4 + tail 1/4) plus handle; the AI reads the full content on demand with the shared `read_tool_output` tool (`offset`/`limit`/`from_end`/literal `pattern`, bounded output, exempt from spilling — so it never recurses). Error results are never spilled, only head/tail truncated; a write failure or `tool_result.enable=false` also falls back to head/tail truncation. The old in-tool truncations (`bash.max_output`, MCP 8000-rune, `skill_read` 16000-rune) were removed because content already discarded inside a tool cannot be recovered by the central limiter. A janitor deletes files past `retention_hours` (24h) / over `max_total_mb` (512MB); history clear (`#新对话`, no-mention auto-clear) purges the session directory. Query log and PostToolUse hooks see the post-limit preview, not the raw multi-MB result.
+Two injected layers, both `Clone`-namespaced per plugin with `base64(pluginName)`:
 
-### AI Chat Component
+- **CACHE** (`common/storage.Storage`, injected as `p.Storage`): volatile; TTL, list ops,
+  `ScanKeys`, `Clone`. Backends: `memory` (default, process-local) | `redis` (opt-in, shared
+  across instances) — configured under `bot.store.cache.*`.
+- **PERSISTENT** (`common/storage.PersistentStorage`, injected as `p.PersistentStorage`): durable
+  KV/document store, survives restart, no TTL/list semantics. Backends: `sqlite` (default, file
+  `./data/aniabot.db`) | `mysql` (opt-in), bootstrapped by `ANIABOT_*` env vars; factories in
+  `bot/core/storage_factory.go`.
 
-`ChatBot` orchestrates per-session conversations:
+SQL persistent backends additionally implement the **optional** `storage.SQLPersistentStorage`
+(`SQLDB()`/`SQLDialect()`); probe with `storage.SQLBackend(store)` and create tables with
+`storage.EnsureTables(ctx, db, dialect, storage.TableDDL{Name, SQLite, MySQL}...)` (idempotent,
+per-dialect). Namespace sub-stores share the same `*sql.DB` and probe successfully. Built-in
+row-level components disable themselves with an error log when the SQL probe/DDL fails —
+degradation must never block startup, and plugin-created tables must follow the same rule.
+Use the `ania_` prefix. Existing tables: `ania_kv` (config/KV), `ania_chat_session`,
+`ania_chat_message`, `ania_memory`, `ania_kb_doc`, `ania_intention`, `ania_query_log`,
+`ania_task_log`, `ania_op_log`. Conventions: MySQL string keys `VARCHAR(255) COLLATE
+utf8mb4_bin`, large payloads `MEDIUMTEXT`, timestamps as INTEGER unix seconds or fixed-width UTC
+text (lexicographic = chronological); redundant filter columns only narrow candidates in WHERE —
+the Go-side matcher stays the final judge so SQL and KV paths stay semantically identical.
 
-- `LLMClient` is a thin shell around pluggable per-format backends (`llmBackend` interface in `llmbackend.go`): `chat_completions` (OpenAI-compatible, via `openai-go/v3`), `responses` (OpenAI Responses API, same SDK's `responses` package), and `anthropic` (Anthropic Messages API via `anthropics/anthropic-sdk-go`). The shell owns app-level retry and fallback-model switching; each backend owns message conversion, tool defs, streaming accumulation, and usage mapping. Format is selected per client via `WithAPIFormat` (plugin config `api_format` on the main/compressor/fallback model configs, empty sub-config values inherit the main format; subagents/team members always follow the main format). Anthropic extended thinking is supported end-to-end: `thinking.mode` maps to `budget_tokens`, and thinking blocks (with signature / redacted data) are persisted on `Message.ThinkingBlocks` and replayed verbatim across tool-calling turns, as the API requires. DeepSeek-style `reasoning_content` is still extracted on the chat-completions format. Prompt caching: `chat_completions`/`responses` rely on provider automatic prefix caching (system prompt must stay byte-stable), while `anthropic` needs explicit `cache_control` breakpoints — enabled by default via `plugin.ai_chat_bot.prompt_cache.enable`/`.ttl` (5m/1h), `aichat.WithPromptCache` sets breakpoints on the last system block and the last cacheable block (text/image/tool_result) of the last message; dynamic content (e.g. long-term memory injection) must be appended to the message tail, never to system, otherwise the whole prefix cache is invalidated
-- `MessageBuilder` constructs message arrays with system prompt, skill registry, chat history, tool results
-- `messageWindow` (in `memorywindow.go`) is a token-budget context window, not a fixed-turn slider: it records prompt-token usage and, once that exceeds 80% of `max_context_tokens`, compresses prior history via an LLM summarizer (`MaybeCompress` / `NewContextCompressor`). History is persisted across restarts via an injected `HistoryStore` (namespaced per group/friend) with `Load`/`Append`/`Replace`/`Clear` semantics: plain appends sync **incrementally** (only new messages), compression/truncation rewrites the whole window (`Replace`), `clear` wipes it — all with a background context; `ChatBot.LoadHistory` replays on session creation. Each turn the window gets the user message plus the assistant/tool messages (`Chat` appends `updatedMessages[builtLen-1:]`); when the plugin injected per-turn context into the user message (memory/KB blocks, todo reminder, plan note), `ChatOptions.PersistUserText` carries the pre-injection original so only that is stored (`UserPromptSubmit` hook context is stripped in the same case) — injection reaches the current request but never replays. On SQL backends (probed via `storage.SQLBackend`, see Storage below) the store is row-level: `ania_chat_session` (one row per session, `msg_count` doubles as the seq allocator) + `ania_chat_message` (one row per message, `(session_id, seq)` PK, no FK), so appends only INSERT new rows; when the SQL probe or table creation fails history is not persisted at all (in-memory window only, lost on restart). Image parts (remote http(s) URLs and `data:` URIs alike) are degraded to `[图片 <hash>]` text markers before persist (base64 data URIs are MB-scale and would bloat the store), so history replays as text-only.
-- **Session cache reclamation** — `pluginaichat` keeps per-session `ChatBot` instances in a `sync.Map` of `chatEntry` (chat + last-active timestamp). A janitor (`chatcache.go`, 1-minute tick) evicts entries idle longer than `plugin.ai_chat_bot.session.max_idle_minutes` (default 120, 0 disables) and enforces an LRU cap of `session.max_sessions` (default 128, 0 disables), so memory no longer grows linearly with lifetime session count. Eviction probes the session lock (sessions mid-response are skipped) and re-checks the pending queue under the lock before `CompareAndDelete`; only the in-memory object is dropped — persisted history reloads on the next message (side effect: tools dynamically loaded via `mcp_load` die with the entry, same as a restart). Only AI-directed messages refresh activity (un-@'d group chatter does not).
-- `ToolOrchestrator` runs the multi-turn agent loop: LLM → tool call → result → LLM (up to `maxIterations`, built-in default 100). Main chats and clock-triggered chats get it from `plugin.ai_chat_bot.max_iterations` via `ChatBot.SetMaxIterations`
-- `CallBackFuncs` bridges tool execution back to QQ messaging (send text, image, file)
-- **AI scheduled tasks (clock)** — `pluginaichat/clock.go`'s `clockManager` owns its **own `*cron.Cron`** (separate from the framework's `StartCron` cron) and persists dynamic, AI/user-managed tasks to `PersistentStorage` (`clock:` namespace). On trigger it runs a **fresh ephemeral ChatBot** (nil history store → discarded after) with full tools, under a per-task timeout, logged via `bot/component/tasklog`. Trigger prompt = `【定时任务】<title>\n<content>`. On trigger execution, the `SendText` callback **discards** intermediate-round text (logs only); only the **final reply** is sent to the trigger target, while tools' own image/file sends (`SendImage`/`SendFile`, e.g. `file`) still go through. Successful pushes are recorded per target session (`noteDelivered`); the next user message in that session gets a one-shot `【定时任务播报】` hint injected at the tail of the prompt (committed only after a successful request, `PersistUserText` keeps it out of history), pointing the AI at the session's `*_get_msg_history` tool — otherwise the main conversation cannot see what the broadcast said. The task session also gets the **`skip_output`** tool (`pluginaichat/clockskip.go`): calling it makes the wrap-up output (`sendFinalOutput`, including the post-subagent synthesis round) stay in the execution log instead of being pushed — for silent patrol/monitor tasks; the skip flag/reason are recorded on the tasklog entry (`OutputSkipped`/`SkipReason`) and surfaced in the panel + `/clock log`. Clock tasks also get a dedicated **async subagent** variant (`pluginaichat/clocksubagent.go`, always on): the task AI can launch background sub-agents via `subagent_run` (plus `subagent_list`/`subagent_cancel`), tracked per run in a `clockSubagentSet` — unlike session subagents, results are NOT injected into any pending queue; instead `drainClockSubagents` waits for **all** subagents to finish at wrap-up (reserving `clockSubagentWaitReserve` = 30s of the task budget for the final synthesis, sub-agent timeouts already shrink to the remaining budget via `resolveSubagentTimeout`), feeds the collected results back into the same ephemeral ChatBot (up to `clockSubagentMaxRounds` = 5 synthesis rounds), and only the final synthesized reply is pushed to the target. Users manage via `/clock`; AI manages via `clock_create/list/update/delete/log` tools (registered per session in `getChat`). Gated by `plugin.ai_chat_bot.clock.enable`.
-- **Proactive interaction (proactive)** — `pluginaichat/proactive.go`'s `proactiveManager` implements an **intention queue** instead of a cron: triggers produce an intention row (`ania_intention`, one row per intention, fixed-width UTC time columns), a 60s tick (`proactive.go`'s `tickOnce`) settles outcome windows, generates idle intentions, and runs due ones through a **gate** chain (scope enabled → quiet hours → per-scope/global daily caps → min gap → cooldown after consecutive ignored → live-conversation recheck; hard conflicts cancel, time conflicts postpone). The gate is deliberately before the LLM call: generation is a full ephemeral ChatBot (`proactive_exec.go`, nil history store, `skip_output` + `get_msg_history` + memory/kb tools only, reusing `clockOutputState`), so AI cost is paid only for intentions that pass. The AI can book its own intentions via `proactive_create`/`proactive_list`/`proactive_cancel` (scope bound at registration, like memory tools; description explicitly separates them from `clock_*`). Per-session enablement has a **single source of truth** — the `plugin.ai_chat_bot.proactive.scopes` white list (`g:...`/`f:...`): `/proactive on|off` mutates it through `ConfigEditor.Set` (re-reading the current value first so panel edits made after start are not clobbered) and applies it in memory immediately, so the panel always reflects reality; `/proactive reload` re-reads the list without a restart. Activity recording runs in `OnGroupMsg`/`OnFriendMsg` **before** the mention gate, while the `/proactive` command itself is handled **after** it (group commands require an @, like other plugins); non-@ group messages are recorded per enabled scope as the 「现场」ring buffer (`proactiveMaxTextRunes`/`max_context_messages`) that feeds both the gate and the prompt. After sending, the intention enters an observation window; a human message in scope within `outcome_minutes` marks `replied` (via `markReplied`), otherwise the tick marks `ignored`, and `strike_limit` consecutive `ignored` triggers `cooldown_minutes`. Every execution is also written to the Query log (`querylog` `Kind=proactive`: a human-readable trigger summary instead of the user input, tool calls, token usage, and the sent text — or, when the AI chooses silence, status `skipped` plus the reason in `Note`), so it shows up in the panel's Query 日志 page (filterable by 主动互动) and in Token 统计 as a separate `proactive` source; gate-rejected intentions never reach the LLM and remain only in the intention store / `/proactive log`. Default off; SQL required (feature disabled when the probe/DDL fails). Pacing (idle threshold, min gap, per-scope/global daily caps, intention TTL, outcome window, cooldown, strike limit) is **not** a pile of config keys: the panel exposes a single 0–100 `plugin.ai_chat_bot.proactive.activity` slider (冷淡 ↔ 活跃) that `proactivelevel.go`'s `proactiveActivityPresetFor` interpolates across 5 anchors (0/25/50/75/100 = 冷淡/克制/均衡/活跃/话痨), with 50 reproducing the historical defaults; only `quiet_hours`, `timeout_sec` and `max_context_messages` remain as separate keys.
-- **AI long-term memory** — `pluginaichat/memory.go`'s `memoryManager` persists AI-managed long-term memories per session scope (`g:<group>` / `f:<qq>`) behind a small `memoryStore` backend interface: each memory is one row in `ania_memory` (`(scope, id)` PK, tags/embedding as JSON columns, `created_at` stored in a fixed-width UTC layout so text order = chronological order); when the SQL probe or table creation fails the whole feature is disabled (`newMemoryManager` returns nil, callers nil-check). Dedup/cap/search logic lives in the manager and is backend-agnostic. The AI manages memories itself via `memory_save`/`memory_search`/`memory_update`/`memory_forget` tools (registered per session in `getChat` with the scope bound at registration, so memories can never leak across groups/chats). `memory_search` returns all entries in scope when no query is given (newest first); with a query it keyword-scores entries (tag hits weigh more than content hits), drops zero-score entries, and sorts by score. `memory_update` overwrites content by ID while preserving untouched fields (nil `user_id`/`tags` keep the old values; explicit empty clears) and recomputes the embedding. Identical content is deduped; near-duplicates (token-set Dice ≥ 0.55 over the shared CJK tokenizer) are not blocked but answered with a merge hint (update the kept entry, forget the extra one); `memory.max_entries` (default 200) caps per-scope count. Optional **proactive injection** (`memory.auto_inject`, default off, plus `inject_max` default 3): `autoInject` searches the scope per turn and prepends hits as a `【长期记忆】` block (header tells the AI to correct stale entries via `memory_update`) to the user message — tail injection only (system untouched → prefix cache preserved; `ChatOptions.PersistUserText` makes the history store the pre-injection original instead, so injected content never pollutes history or replays stale IDs). Retrieval is keyword scoring via `queryTerms` (shared CJK tokenizer), upgraded to keyword+semantic hybrid when the shared `embedder` (`kb.embedding`) is enabled: the plugin embeds the user message once per turn (`EmbedOneCached`, 128-entry FIFO cache, 10s timeout) and both knowledge-base and memory injection reuse that vector; both managers also run a background backfill goroutine on startup that recomputes embeddings for pre-vector entries. Gated by `plugin.ai_chat_bot.memory.enable`. The plugin also implements the panel's optional `adminpanel.MemorySource` interface (`memorypanel.go`), so the 记忆管理 page can list scopes and create/update/delete entries with live effect (scope input is validated against `^[gf]:\d+$`), plus `adminpanel.MemoryBatchDeleteSource` (`MemoryDeleteMany`, one SQL `DELETE ... IN (...)`) backing the page's multi-select batch delete.
-- **AI knowledge base** — `pluginaichat/knowledge.go`'s `knowledgeManager` stores AI/panel-managed documents per scope (`global` / `g:<group>` / `f:<qq>`) behind a small `kbStore` backend interface; the SQL implementation lives in `knowledge_sql.go`. Each document is one row in `ania_kb_doc` (`(scope, id)` PK, tags/embedding as JSON columns, `created_at` fixed-width UTC text); when the SQL probe or table creation fails the feature is disabled (`newKnowledgeManager` returns nil, callers nil-check). `newKnowledgeManager` also performs a one-time idempotent migration of legacy per-scope JSON-array blobs from the old `kb:` KV namespace into the table (empty-array residue keys are dropped; unreadable keys are kept for the next attempt). Long documents are chunked (600 runes/block, 60 rune overlap) at retrieval time; `add`/`update` compute per-chunk embeddings when the shared `embedder` is enabled, otherwise retrieval is pure keyword scoring. `kb_search` and per-turn `autoInject` (session KB + global KB) rank chunks by keyword score plus cosine-similarity bonus; `backfillEmbeddings` fills missing vectors in the background on startup by updating single rows. Dedup (normalized title+content, via a vector-less digest listing), the `kb.max_docs` (default 500) per-scope cap (via `COUNT(*)`), and 8000-rune content truncation are enforced in the manager. The plugin implements the panel's `adminpanel.KnowledgeBaseSource` interface (`knowledgepanel.go`), backing the 知识库 page (scope list with `SELECT DISTINCT scope` counts, vector-less document listing, CRUD); `KnowledgeBatchDeleteSource` (`KnowledgeDeleteMany`) backs the page's multi-select batch delete.
-- **AI subagents** — the `subagent_run` session tool (registered per session in `getChat`, always on) lets the main AI delegate a complex/time-consuming subtask to an **ephemeral sub-agent**: a fresh `ChatBot` (nil history store → discarded after) with its own `SessionToolExecutor`, running synchronously inside the parent's tool call. The sub-agent gets the same session-scoped tools (clock/memory via the shared `registerScopedTools` helper) but **not** `subagent_run` itself (no recursive delegation). Its intermediate-round `SendText` is discarded (logged only) while image/file sends and history reads pass through to the current session; the image-loading callbacks are NOT inherited (they close over per-request `loadedImages`/`loaded` state and the two tool loops would drain the same queue) — following the `makeClockCallback` pattern, the sub-agent gets its own image queue for `LoadLocalImage` and a stub `LoadImages` deferring to the main AI. Only the final reply returns to the parent as the tool result, prefixed with run metadata (duration, LLM iterations, tokens); the result is fed back in full, subject to the unified tool-result limiter (oversized results spill to a session temp file and the parent AI reads them back with `read_tool_output`). Sub-agents follow the main model's execution parameters: `ChatBot.SetMaxIterations(p.mainMaxIterations())` (the main model's max tool-iteration config) and the same generation params via `buildChatOptions`. Timeout resolution (`resolveSubagentTimeout`): default timeout is `p.subagentTimeout()` = the framework's per-message budget (`bot.msg_event_timeout_sec`, default 5min — read in `Start`), per-call override clamped as int **before** multiplying by `time.Second` (1800s cap, overflow-proof), then shrunk to fit the parent context deadline minus a 30s reserve so the sub-agent's own deadline fires first and the timeout surfaces as a graceful tool result instead of killing the whole request; `/stop` still cancels it through the parent request context.
+All SQL drivers are pure Go (`modernc.org/sqlite`, `go-sql-driver/mysql`) — no CGO,
+cross-compile friendly.
 
-### Message Chain Builder
+### Logs & observability
 
-Fluent builder pattern for constructing bot responses:
+| Component | Backing store | Panel page |
+| --- | --- | --- |
+| `consollog` | in-memory ring (~2000 entries), wraps slog + `log` | 控制台日志 (`/#/console`) |
+| `msglog` | `p.Storage` (memory: cleared on restart; redis: survives) | 消息日志 (`/#/msglogs`) |
+| `oplog` | SQL `ania_op_log` (package singleton) | 操作日志 (`/#/oplogs`) |
+| `tasklog` | SQL `ania_task_log` | AI 定时任务 (`/#/tasklogs`) |
+| `querylog` | SQL `ania_query_log` | Query 日志 (`/#/querylogs`) |
+
+`msglog` records inbound group/friend messages, notice events and Bot-sent messages (including
+merge-forwards and stream replies, with failure flags) through a chat-style session index; the
+panel proxies media and refreshes expired QQ URLs via `bot.MediaRefresher`. Only `pluginlog`
+writes to it. `querylog` feeds Token 统计/配额 pages; `tasklog` records clock runs including
+`OutputSkipped`/`SkipReason`.
+
+### Web admin panel, marketplace & auto-update
+
+- `bot/adminpanel` is a pure `net/http` API plus an embedded Vue SPA (`go:embed dist`), hash
+  router, default `http://127.0.0.1:7700` (`bot.admin_panel.listen`; env override
+  `ANIA_BOT_ADMIN_PANEL_ENABLE` if the panel is disabled in config). Same process as the bot;
+  session cookie `ania_session`, 24h sliding; login lockout. `-set-password` CLI helper.
+- Pages: 状态总览, 控制台日志, 操作日志, 消息日志, 试聊室, Query 日志, Token 统计, 配额管理,
+  AI 定时任务, 技能管理, 记忆管理, 知识库, Agent 团队, 配置管理 (with export + presets),
+  扩展配置 (`mcp`/`prompt`/`hooks`/`commands`), 通讯录, 插件市场, 自动更新, 外观设置.
+- First run: `meta.setup_pending=true` → panel forces the setup wizard and adapters do **not
+  connect** until it completes and the bot restarts.
+- Marketplace (`bot/marketplace`): reads the AniaBot-Plugins GitHub repo (cached), supports
+  GitHub OAuth device-flow login (optional token raises rate limits), then batch
+  install/upgrade/uninstall pipelines — sync sources → `go run ./tools/plugingen` registry
+  regeneration → `go mod tidy` → `go build` → restart via `sysrestart` — plus a `Rollback` that
+  restores the previous binary and the backed-up plugin manifest. Dev (`go run`) mode is refused.
+  Installed plugin copies live in `./data/plugins`, cache in `./data/marketplace`.
+- Auto-update (`bot/adminpanel/update.go`): driven by `bot.update.source_dir` (auto-cloned when
+  empty + `bot.update.git_url` is set) on `bot.update.branch`; replays installed marketplace
+  plugins, installs deps, rebuilds frontend + Go binary, swaps the executable (keeping `.old`)
+  and restarts; version comes from `bot/version.Ldflags`. `go run` mode is refused.
+- Frontend: Vite + Vue 3 + Tailwind v4 + `animal-island-vue`. `web/scripts/sync-theme.mjs` runs
+  before dev/build and emits the gitignored `web/src/styles/animal-island.vendor.css`; the
+  generated `files/` font subsets are gitignored too. Page controls should be library components
+  (Button/Input/Select/Switch/Checkbox/Tabs/Table/Modal/Tag/Progress/DatePicker/…), not
+  hand-written HTML. Styling consumes the design tokens (`var(--accent*)`, `var(--surface*)`,
+  `var(--ink*)`, `var(--line*)`, `var(--r-*)`, `var(--code-*)`, `var(--chart-*)`); user
+  appearance overrides live in `web/src/appearance.js` + `/#/appearance` and are applied as CSS
+  variables / `data-*` attributes on `<html>` (localStorage, per browser). Library components
+  that hard-code primary colors/cream backgrounds/yellow focus rings need token-based overrides
+  in the "组件库主题色联动" / "组件库纸张联动" sections of `style.css`, scoped with `:root`
+  because modals teleport to `<body>`.
+- `web/src/mock/` implements the static demo (`npm run build:demo` → `dist-demo`), tree-shaken
+  out of the real build; the docs workflow merges it into GitHub Pages at `/demo/`.
+
+### Message chain builder
 
 ```go
 msgchain.Builder().Group().Text("hello").Mention(qid).Build()
@@ -239,52 +671,70 @@ fb := msgchain.Builder().GroupForward()
 fb.Message(userId, nickname, msgchain.Builder().Group().Text("content").Build())
 ```
 
-### Storage
-
-AniaBot exposes two interface-adapted storage layers, both with Clone-based `base64(pluginName)` namespacing injected per plugin:
-
-- **CACHE** (`common/storage.Storage`, injected as `p.Storage`): volatile; supports TTL + Redis-list semantics. Backends: `memory` (default, process-local) | `redis` (opt-in, shared across instances).
-- **PERSISTENT** (`common/storage.PersistentStorage`, injected as `p.PersistentStorage`): durable KV/document store, survives restart, no TTL/list semantics. Backends: `sqlite` (default) | `mysql` (opt-in).
-
-SQL persistent backends additionally implement the **optional** `storage.SQLPersistentStorage` interface (`SQLDB()`/`SQLDialect()`); probe it with `storage.SQLBackend(store)` (type assertion, same convention as `bot.QQ`) and create plugin-owned relational tables via `storage.EnsureTables(ctx, db, dialect, storage.TableDDL{Name, SQLite, MySQL}...)` (idempotent, per-dialect DDL). Clone-derived namespace sub-stores share the same `*sql.DB` and probe successfully too. Built-in row-level components (chat history, memory, knowledge base, query/task/op logs) disable themselves with an error log when the SQL probe or DDL fails — degradation must never block startup. Plugin-created tables likewise: probe/DDL failures must only log and degrade, never block plugin start. Plugin-created tables use the `ania_` prefix (built-ins so far: `ania_chat_session`/`ania_chat_message`, `ania_memory`, `ania_kb_doc`, `ania_intention`, `ania_query_log`, `ania_task_log`, `ania_op_log`). Conventions for these tables: MySQL string keys `VARCHAR(255) COLLATE utf8mb4_bin`, large payloads `MEDIUMTEXT`, timestamps as INTEGER unix seconds or fixed-width UTC text (lexicographic = chronological); redundant filter columns only narrow candidates in WHERE — the Go-side matcher remains the final judge so SQL/KV paths stay semantically identical.
-
-All SQL backends use pure-Go drivers (`modernc.org/sqlite`, `github.com/go-sql-driver/mysql`) — no CGO, cross-compile friendly. Cache config lives under `bot.store.cache` in the DB config; the persistent backend itself is bootstrapped via env vars (`ANIABOT_STORE_DRIVER` / `ANIABOT_SQLITE_PATH` / `ANIABOT_MYSQL_DSN`); factories in `bot/core/storage_factory.go`.
+Chain builders expose `Friend()`, `Group()`, `FriendForward()`, `GroupForward()`; segment
+helpers cover text/face/image/video/file/record (URL, local file, base64), mention, reply, raw
+segments and `Keyboard(rows ...[]message.InlineButton)`.
 
 ## Key Conventions
 
-- **Language**: Code comments and user-facing strings are in Chinese
-- **Logging**: Mixed `log/slog` (core/plugins) and `log.Printf` (adapter/tools). Use `slog` for new code.
-- **Error handling**: Adapter/storage methods return `(value, bool)` not `(value, error)`. Use `fmt.Errorf` with `%w` wrapping in component-layer code.
-- **Package naming**: Lowercase, concatenated (e.g., `pluginaichat`, `llmtool`, `functool`, `aniaerror`)
-- **No linting config**: CI runs `go vet ./...` only. No golangci-lint.
-- **Generics**: Used for `BaseTool[T]`, `MessageQueue[T]`, `safeExecuteWithReturn[T]`
-- **Functional options**: `Option func(*AniaBot)` pattern for bot configuration
-- **OneBot v11**: All QQ message types use the OneBot v11 segment format (`OB11Segment`)
-- **Changelog**: Only record in `CHANGELOG.md` changes that alter behavior relative to previously released versions (features, fixes, behavior changes); trivial tweaks don't need entries. Bugs introduced and fixed within the same unreleased version are never recorded (no released version was affected). Add entries under the current unreleased/next version section, one concise sentence each — no long explanations
+- **Language**: code comments, docs and user-facing strings are Chinese; code identifiers are
+  English.
+- **Logging**: `log/slog` in core/plugins/components, `log.Printf` in adapters/tools. Use slog
+  for new code.
+- **Error style**: adapter/storage APIs return `(value, bool)`; component-layer code uses
+  `fmt.Errorf` with `%w`. Tool implementations return `(string, error)` where the error text is
+  fed back to the model.
+- **Package naming**: lowercase, concatenated (`pluginaichat`, `llmtool`, `functool`, `aniaerror`).
+- **Generics**: `BaseTool[T]` (tools), `safeExecuteWithReturn[T]` (plugin calls); generic
+  collections are written per use-site rather than as a shared package.
+- **Functional options**: `Option func(*AniaBot)` for bot config, `...Option` for components.
+- **OneBot v11**: all QQ message types use `message.OB11Segment`; platform adapters translate.
+- **Changelog**: only behavior changes relative to a released version go into `CHANGELOG.md`
+  (features, fixes, behavior changes; no trivial tweaks, no bugs introduced+fixed within the same
+  unreleased version). One concise sentence per entry under the unreleased/next version section.
+- **Tests**: table-driven; extract pure logic; `-race` when touching shared state; degradation
+  paths (SQL probe failure, missing config, nil managers) must be tested or at least nil-checked.
 
 ## CI/CD
 
 Four GitHub Actions workflows in `.github/workflows/`:
 
-- **test.yaml** — runs on push/PR to `main`: `go vet`, `go test -v -race -coverprofile=coverage.out ./...`
-- **release.yaml** — runs on version tags (`v*.*.*`): tests, then creates the GitHub Release with the body extracted from the tag's section in `CHANGELOG.md` (falls back to conventional-commit generation if the section is missing) — update `CHANGELOG.md` before tagging
-- **docs.yaml** — builds VitePress docs and deploys to GitHub Pages on `main` push
-- **docker.yaml** — builds and pushes the AniaBot Docker image: version + short-sha tags on `v*.*.*` tag pushes, and `latest` on manual `workflow_dispatch`; the image's `org.opencontainers.image.description` label is taken from the corresponding `CHANGELOG.md` section
+- **test.yaml** — on push/PR to `main`: `go mod download`, `go mod verify`, `make web && go vet
+  ./...`, `go test -v -race -coverprofile=coverage.out ./...`, coverage report.
+- **release.yaml** — on `v*.*.*` tags: test job then release job; builds frontend once and
+  cross-compiles five binaries (linux/darwin amd64+arm64, windows amd64) with
+  `-X github.com/jeanhua/AniaBot/bot/version.Version=<tag>`, packages tar.gz/zip and creates the
+  GitHub Release. Release body is extracted from the tag's `CHANGELOG.md` section (falls back to
+  conventional-commit grouping from git log) — update `CHANGELOG.md` before tagging.
+- **docs.yaml** — on `main` pushes touching `docs/**`, `web/**` or the workflow file itself
+  (and manual dispatch): builds VitePress docs, builds the panel demo (`npm run build:demo`),
+  merges demo into the Pages artifact at `/demo/`, deploys to GitHub Pages (only runs in
+  `AniaBot-Project/AniaBot`).
+- **docker.yaml** — on `v*.*.*` tags (pushes a version-tagged image) and manual dispatch from
+  `main` (pushes `latest` only): builds `jeanhua/aniabot` for linux/amd64, injects the `VERSION`
+  build arg (tag name, or short SHA for manual runs) and derives the OCI description from
+  `CHANGELOG.md`.
 
 ## External Dependencies
 
-| Dependency                       | Purpose                                    |
-| -------------------------------- | ------------------------------------------ |
-| `openai-go/v3`                   | OpenAI-compatible LLM API client (Chat Completions + Responses) |
-| `anthropics/anthropic-sdk-go`    | Anthropic Messages API client (Claude)                          |
-| `modelcontextprotocol/go-sdk`    | MCP protocol client                        |
-| `gorilla/websocket`              | WebSocket for NapCat / QQ Official / Discord adapters |
-| `bwmarrin/discordgo`             | Discord adapter (Gateway WebSocket + REST)            |
-| `skip2/go-qrcode`                | WeChat adapter QR login (terminal QR rendering)       |
-| `go-resty/resty/v2`              | HTTP client                                |
-| `redis/go-redis/v9`              | Redis cache storage backend                |
-| `modernc.org/sqlite`             | Pure-Go SQLite, persistent storage default |
-| `github.com/go-sql-driver/mysql` | Pure-Go MySQL, persistent storage opt-in   |
-| `robfig/cron/v3`                 | Cron scheduling for timed plugins          |
-| `spf13/viper`                    | In-memory config view for plugins           |
-| `lmittmann/tint`                 | Colored slog handler                       |
+| Dependency | Purpose |
+| --- | --- |
+| `openai-go/v3` | OpenAI-compatible client (Chat Completions + Responses formats) |
+| `anthropics/anthropic-sdk-go` | Anthropic Messages API client (Claude) |
+| `modelcontextprotocol/go-sdk` | MCP client (stdio / streamable / SSE) |
+| `gorilla/websocket` | NapCat, QQ Official, Discord gateway WebSockets |
+| `bwmarrin/discordgo` | Discord adapter (Gateway + REST) |
+| `larksuite/oapi-sdk-go/v3` | Feishu/Lark adapter |
+| `skip2/go-qrcode` | WeChat QR login rendering (terminal + panel) |
+| `go-resty/resty/v2` | HTTP client (QQ Official, Telegram, Feishu webhook, plugin RestyClient) |
+| `redis/go-redis/v9` | Redis cache storage backend |
+| `modernc.org/sqlite` | Pure-Go SQLite, default persistent storage |
+| `go-sql-driver/mysql` | Pure-Go MySQL, opt-in persistent storage |
+| `robfig/cron/v3` | Framework cron (`StartCron`) and the AI clock scheduler |
+| `spf13/viper` | In-memory config view passed to plugins |
+| `lmittmann/tint` | Colored slog handler |
+| `tidwall/gjson` | Panel API-balance response template paths |
+| `gopkg.in/yaml.v3` | Skill frontmatter parsing |
+| `golang.org/x/net` | Proxy dialers for Telegram/Discord; HTTP header validation |
+| `golang.org/x/image` | Computer-use screenshot downscale; BMP decoding for image inputs |
+| `golang.org/x/sys` | Windows screen capture / SendInput for `computeruse` |
