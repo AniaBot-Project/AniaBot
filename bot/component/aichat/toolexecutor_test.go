@@ -529,3 +529,86 @@ func TestExecuteToolCallsPostToolUseContextFeedback(t *testing.T) {
 		t.Fatalf("空 Context 不应拼接反馈: %q", plain)
 	}
 }
+
+// TestExecuteToolCallsLimitResult 统一长度治理：LimitToolResult 在错误合并后、
+// 回填/观察者/PostToolUse 之前执行；错误结果以 isError=true 传入，便于宿主只做
+// 截断而不落盘。
+func TestExecuteToolCallsLimitResult(t *testing.T) {
+	exec := &fakeToolExecutor{fn: func(ctx context.Context, call llmtool.ToolCall, _ llmtool.CallBackFuncs) (string, error) {
+		if call.Name == "bad" {
+			return "", errors.New("boom")
+		}
+		return strings.Repeat("x", 50000), nil
+	}}
+	o := newTestOrchestrator(exec)
+
+	var observed []string
+	o.SetToolObserver(func(info ToolCallInfo) { observed = append(observed, info.Result) })
+	var hookResults []string
+	var hookMu sync.Mutex
+	o.SetHookRunner(&fakeHookRunner{run: func(ctx context.Context, ev agenthook.Event, p agenthook.Payload) agenthook.Result {
+		if ev == agenthook.EventPostToolUse {
+			hookMu.Lock()
+			hookResults = append(hookResults, p.ToolResult)
+			hookMu.Unlock()
+		}
+		return agenthook.Result{}
+	}}, agenthook.Payload{SessionKey: "g:1", AgentKind: agenthook.AgentKindMain})
+
+	var flags []bool
+	var flagMu sync.Mutex
+	cbs := llmtool.CallBackFuncs{LimitToolResult: func(toolName, result string, isError bool) string {
+		flagMu.Lock()
+		flags = append(flags, isError)
+		flagMu.Unlock()
+		if isError {
+			return "ERR_LIMITED"
+		}
+		return "LIMITED"
+	}}
+	results, err := o.executeToolCalls(context.Background(), []llmtool.ToolCall{
+		{ID: "c1", Name: "good", Arguments: "{}"},
+		{ID: "c2", Name: "bad", Arguments: "{}"},
+	}, cbs, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("期望 2 条结果消息, got %d", len(results))
+	}
+	if got := ExtractMessageText(results[0]); got != "LIMITED" {
+		t.Fatalf("成功结果应被治理: %q", got)
+	}
+	if got := ExtractMessageText(results[1]); got != "ERR_LIMITED" {
+		t.Fatalf("错误结果应走错误治理: %q", got)
+	}
+	if len(observed) != 2 || !containsString(observed, "LIMITED") || !containsString(observed, "ERR_LIMITED") {
+		t.Fatalf("观察者应拿到治理后的结果: %v", observed)
+	}
+	if len(hookResults) != 2 || !containsString(hookResults, "LIMITED") {
+		t.Fatalf("PostToolUse 载荷应为治理后的结果: %v", hookResults)
+	}
+	if len(flags) != 2 || !containsBool(flags, true) || !containsBool(flags, false) {
+		t.Fatalf("isError 标记不符: %v", flags)
+	}
+}
+
+// containsString 判断切片中是否包含目标字符串（并行执行下回调顺序不固定）。
+func containsString(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+// containsBool 判断切片中是否包含目标布尔值。
+func containsBool(list []bool, want bool) bool {
+	for _, b := range list {
+		if b == want {
+			return true
+		}
+	}
+	return false
+}

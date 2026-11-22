@@ -378,9 +378,24 @@ python3 "<webctl.py 绝对路径>" fetch  "https://example.com/article" [--<平�
 | `plugin.ai_chat_bot.bash.env` | `[]` | 环境变量，如 `["HOME=/root"]` |
 | `plugin.ai_chat_bot.bash.whitelist` | `[]` | 命中这些正则的命令直接放行；黑白名单都不命中（含均未配置）时经工具审批确认后执行 |
 | `plugin.ai_chat_bot.bash.blacklist` | `["config(\\.dev)?\\.(yaml|yml|json)", "^mkfs", "^shutdown", "^reboot"]` | 匹配这些正则的命令被禁止（优先于白名单） |
+| `plugin.ai_chat_bot.bash.timeout_sec` | `300` | 单条命令最长执行时间（秒），超时终止并提示 |
 | `plugin.ai_chat_bot.local_image.enable` | `false` | 允许 AI 读取宿主机本地图片 |
 | `plugin.ai_chat_bot.computer_use.enable` | `false` | 电脑操作工具：AI 可截图查看宿主机屏幕并控制鼠标键盘（`screenshot` / `mouse_click` / `mousemove` / `mouse_scroll` / `keyboard_type` / `keyboard_press` / `active_window` / `list_windows`）；仅支持 Windows 宿主机。可把 `mouse_click` 等加入 `approval.tools` 实现每次操作人工确认，所有操作写入操作审计日志 |
 | `plugin.ai_chat_bot.computer_use.max_width` | `1280` | 截图最大宽度（像素），超出时等比缩小以节省 token，`0` 表示不缩放 |
+
+### 工具结果长度治理（tool_result）
+
+所有工具回填给 AI 的结果都经过同一道长度治理：成功结果超过内联上限时，完整内容写入会话临时文件，AI 收到「预览 + handle」并可用 `read_tool_output` 按需读取；落盘失败、功能关闭或错误结果则退化为头尾截断。默认落盘目录为 `./data/tool-outputs`（Docker 中位于 `./data` 挂载卷内），文件默认保留 24 小时。
+
+| 配置键 | 默认值 | 说明 |
+| --- | --- | --- |
+| `plugin.ai_chat_bot.tool_result.enable` | `true` | 超长工具结果落盘；关闭后超长结果直接头尾截断（仍防上下文爆炸，但不保留完整内容） |
+| `plugin.ai_chat_bot.tool_result.max_inline_runes` | `16000` | 内联字符上限（rune），超过则落盘/截断；建议 8000~30000 |
+| `plugin.ai_chat_bot.tool_result.preview_runes` | `4000` | 落盘后回填的预览总长度（头 3/4 + 尾 1/4），另加固定读取提示 |
+| `plugin.ai_chat_bot.tool_result.dir` | 空 | 落盘目录；留空使用 `./data/tool-outputs`，创建失败自动回退系统临时目录 |
+| `plugin.ai_chat_bot.tool_result.max_file_mb` | `16` | 单个落盘文件体积上限，超出时文件内保留头尾并标注省略 |
+| `plugin.ai_chat_bot.tool_result.retention_hours` | `24` | 落盘文件保留时长，过期由后台清理删除 |
+| `plugin.ai_chat_bot.tool_result.max_total_mb` | `512` | 落盘目录总容量上限，超出时优先删除最旧文件 |
 
 ### 任务清单（todo）
 
@@ -444,7 +459,7 @@ AI 也可以用 `proactive_create` / `proactive_list` / `proactive_cancel` 自�
 
 子代理默认启用、无独立配置项：AI 通过 `subagent_run` 工具把复杂/耗时的子任务委派给一次性子代理执行，子代理以全新一次性上下文运行、拥有与主 AI 一致的工具能力，但**不能再委派子代理**。
 
-执行参数全部跟随主模型：模型与 API 格式、生成参数（深度思考等）取「AI 对话 · 模型」配置；工具调用轮数取主模型的「最大工具调用轮数」；超时取框架级「消息处理超时」（`bot.msg_event_timeout_sec`，默认 5 分钟，单次调用可覆盖、上限 1800 秒，实际还会按主请求剩余预算自动收缩并预留收尾时间）。子代理结果不截断，完整回填给主 AI。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
+执行参数全部跟随主模型：模型与 API 格式、生成参数（深度思考等）取「AI 对话 · 模型」配置；工具调用轮数取主模型的「最大工具调用轮数」；超时取框架级「消息处理超时」（`bot.msg_event_timeout_sec`，默认 5 分钟，单次调用可覆盖、上限 1800 秒，实际还会按主请求剩余预算自动收缩并预留收尾时间）。子代理结果完整回填给主 AI；超过统一工具结果内联上限时，完整内容落盘、主 AI 收到预览 + handle，可用 `read_tool_output` 读取。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
 
 
 ### AI 知识库（knowledge）
@@ -467,7 +482,7 @@ AI 也可以用 `proactive_create` / `proactive_list` / `proactive_cancel` 自�
 
 多代理编排，默认启用、无独立配置项：主 AI 可组建团队，把子任务派发给多个带角色描述的成员代理**并行执行**，全部完成后汇总结果；团队定义可在会话内保存复用，也可在 Web 面板「Agent 团队」页管理。
 
-每个成员复用子代理执行路径（独立一次性上下文），模型与执行参数同样跟随主模型（详见上一节），**不能递归组建团队**；单次最多并行 5 个成员，成员结果完整汇总、不截断。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
+每个成员复用子代理执行路径（独立一次性上下文），模型与执行参数同样跟随主模型（详见上一节），**不能递归组建团队**；单次最多并行 5 个成员，成员结果完整汇总后回填（超过统一内联上限时落盘为预览 + handle）。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
 
 ### 每日 Token 配额（quota）
 
@@ -483,7 +498,7 @@ AI 也可以用 `proactive_create` / `proactive_list` / `proactive_cancel` 自�
 
 ### Query 日志（query_log）
 
-Query 日志默认开启且无独立配置项，在面板记录每次 AI 回复的完整执行过程。日志全量保留（不做容量淘汰、不截断工具结果，单条日志的工具调用明细也完整保存），由管理员在「Query 日志」页按当前筛选条件**导出**（JSON）或**清除**；前端展示工具结果超过 1000 字符时默认折叠，点击可展开。
+Query 日志默认开启且无独立配置项，在面板记录每次 AI 回复的完整执行过程。日志全量保留（不做容量淘汰；工具调用明细记录的是统一长度治理后的结果文本，超长结果以预览 + handle 落盘，完整内容可在对话中由 AI 用 `read_tool_output` 读取），由管理员在「Query 日志」页按当前筛选条件**导出**（JSON）或**清除**；前端展示工具结果超过 1000 字符时默认折叠，点击可展开。
 
 每条日志包含：触发会话、发送者、用户输入、LLM 轮数、工具调用明细（名称/参数/结果/耗时）、token 用量与最终回复，状态区分 `running` / `success` / `skipped`（主动互动中 AI 判断无需发言）/ `stopped` / `timeout` / `error`。面板「Query 日志」页可筛选查看；主动互动的执行（来源标记为「主动互动」）也会记录在这里，以触发说明替代用户输入。
 

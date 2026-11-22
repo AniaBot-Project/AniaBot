@@ -238,6 +238,10 @@ func (p *AIChatPlugin) makeSubagentCallbacks(ctx context.Context, parent llmtool
 			}
 			return "子代理无法直接加载图片；如确需查看，请在最终结果中说明，由主 AI 自行调用 load_images 并传入对应图片哈希", nil
 		},
+		// 工具结果长度治理与读回沿用父会话（同会话目录）：子代理的工具结果同样
+		// 需要限制，超长结果落盘后主子代理都能用 read_tool_output 读回。
+		LimitToolResult: parent.LimitToolResult,
+		ReadToolOutput:  parent.ReadToolOutput,
 		TakeLoadedImages: func() []string {
 			imgs := loadedImages
 			loadedImages = nil

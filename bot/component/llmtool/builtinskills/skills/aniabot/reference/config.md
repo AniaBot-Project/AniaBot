@@ -174,7 +174,6 @@
 | `bash.working_dir` | 空 | 起始目录 |
 | `bash.persist_cwd` | `false` | 命令内 `cd` 是否延续到后续调用（该目录所有会话共享） |
 | `bash.timeout_sec` | `300` | 单条命令超时，0 用默认 |
-| `bash.max_output` | `30000` | 输出保留字符数，超出保留头尾 |
 | `file.enable` | `false` | `file` 读宿主机文件并发送 |
 | `local_image.enable` | `false` | `local_image` 查看宿主机本地图片 |
 | `file_tools.enable` | `false` | `read_file` / `write_file` / `edit_file` / `glob` / `grep` 文件工具组 |
@@ -186,6 +185,18 @@
 | `mcp_tool.enable` | `false` | `mcp_list` / `mcp_add` / `mcp_remove` / `mcp_reconnect` |
 | `todo.enable` | `true` | `todo_write` 任务清单 |
 | `mcp.lazy_load` | `true` | MCP 工具懒加载（先 discover 再 load）；关掉则启动全量注册，工具列表恒定更利于上游缓存 |
+
+### 工具结果长度治理（tool_result）
+
+| 键 | 默认 | 说明 |
+| --- | --- | --- |
+| `tool_result.enable` | `true` | 超长工具结果落盘，AI 用 `read_tool_output` 读回；关闭后超长结果头尾截断 |
+| `tool_result.max_inline_runes` | `16000` | 内联字符上限（rune），超过则落盘/截断 |
+| `tool_result.preview_runes` | `4000` | 落盘后回填的预览长度（头 3/4 + 尾 1/4） |
+| `tool_result.dir` | 空 | 落盘目录，空使用 `./data/tool-outputs` |
+| `tool_result.max_file_mb` | `16` | 单个落盘文件体积上限 |
+| `tool_result.retention_hours` | `24` | 落盘文件保留时长，过期自动清理 |
+| `tool_result.max_total_mb` | `512` | 落盘目录总容量上限，超出优先删除最旧文件 |
 
 ### 备用识图（主模型不支持多模态时把图片转文字）
 

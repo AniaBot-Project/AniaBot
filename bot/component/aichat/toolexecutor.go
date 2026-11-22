@@ -309,14 +309,6 @@ func (o *ToolOrchestrator) executeToolCalls(
 
 			result, err := o.executor.Execute(ctx, call, lockedCbs)
 
-			o.observe(&obsMu, ToolCallInfo{
-				Name:       call.Name,
-				Arguments:  call.Arguments,
-				Result:     result,
-				DurationMs: time.Since(start).Milliseconds(),
-				Err:        err,
-			})
-
 			if err != nil {
 				if ctx.Err() != nil {
 					mu.Lock()
@@ -334,6 +326,21 @@ func (o *ToolOrchestrator) executeToolCalls(
 					result = result + "\nError executing tool: " + err.Error()
 				}
 			}
+			// 统一长度治理：成功结果超长时由宿主落盘并回填"预览 + handle"，
+			// 完整内容供 AI 用 read_tool_output 按需读取；错误文本只做头尾截断。
+			// 必须在 observe/PostToolUse 之前执行：Query 日志与钩子载荷拿到的是
+			// 治理后的文本，避免把数 MB 的工具结果再写一份进日志。
+			if lockedCbs.LimitToolResult != nil {
+				result = lockedCbs.LimitToolResult(call.Name, result, err != nil)
+			}
+
+			o.observe(&obsMu, ToolCallInfo{
+				Name:       call.Name,
+				Arguments:  call.Arguments,
+				Result:     result,
+				DurationMs: time.Since(start).Milliseconds(),
+				Err:        err,
+			})
 			// PostToolUse 钩子：结果文本截断后随载荷上报；Context 非空时作为附加
 			// 反馈拼到工具结果后回填给模型（可做「编辑后自动 lint/编译、告警喂回
 			// 模型自动修复」的闭环）；Block 被忽略（工具已执行，无法撤回）。
@@ -387,6 +394,10 @@ func (o *ToolOrchestrator) lockedCallbacks(callbacks llmtool.CallBackFuncs) llmt
 		// 进互斥锁会卡死同轮并行工具的 SendText 等回调；并发安全由实现方
 		// （approvalManager 的会话级锁）负责。
 		RequestApproval: callbacks.RequestApproval,
+		// 结果落盘/读回也刻意不加锁：落盘与读文件自带文件级并发安全，且
+		// read_tool_output 需要与同轮其他工具并行执行，串行化只会拖慢整轮。
+		LimitToolResult: callbacks.LimitToolResult,
+		ReadToolOutput:  callbacks.ReadToolOutput,
 	}
 }
 

@@ -709,16 +709,10 @@ func (t *SkillReadTool) Execute(ctx context.Context, params any, callbacks CallB
 		result = sb.String()
 	}
 
-	// 防御性截断：异常巨大的 SKILL.md/附属内容不能直接撑爆 LLM 上下文
-	if r := []rune(result); len(r) > maxSkillReadRunes {
-		return string(r[:maxSkillReadRunes]) + "\n...(skill 内容过长已截断，可通过 file_name 参数按需读取附属文件)", nil
-	}
+	// 完整返回：长度由上层统一治理（超长结果落盘，AI 用 read_tool_output 读回），
+	// 这里不再做局部截断，避免中段内容提前丢失。
 	return result, nil
 }
-
-// maxSkillReadRunes skill_read 单次返回的 rune 上限（宽松于工具结果截断：
-// skill 是核心指令，正常内容远小于该值）。
-const maxSkillReadRunes = 16000
 
 // ─────────────────────────────────────────────
 // SkillReloadTool：让 Agent 在直接编辑本地 skill 文件后刷新缓存
