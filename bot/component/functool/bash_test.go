@@ -186,23 +186,26 @@ func TestBashPersistCwd(t *testing.T) {
 	}
 }
 
-// TestBashMaxOutputTruncate max_output：超长输出按头尾保留，中段隐藏。
-func TestBashMaxOutputTruncate(t *testing.T) {
+// TestBashReturnsFullOutput 工具内不再截断输出：完整内容交给上层统一治理
+//（超长结果落盘 + read_tool_output 读回），中段不能在这里被提前丢弃。
+func TestBashReturnsFullOutput(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("windows cmd 生成超长输出较繁琐，truncateMiddle 已单测覆盖")
+		t.Skip("windows cmd 生成超长输出较繁琐")
 	}
-	tool := mustBash(t, BashConfig{Whitelist: []string{`.*`}, MaxOutput: 100})
+	tool := mustBash(t, BashConfig{Whitelist: []string{`.*`}})
 	cmd := "printf 'H%.0s' $(seq 120); echo; printf 'T%.0s' $(seq 120)"
 	out, err := tool.Execute(context.Background(), &BashParams{Command: cmd}, llmtool.CallBackFuncs{})
 	if err != nil {
 		t.Fatalf("执行失败: %v", err)
 	}
-	if !strings.Contains(out, "已截断") {
-		t.Fatalf("超长输出应触发中段截断: %q", out)
+	if strings.Contains(out, "已截断") {
+		t.Fatalf("bash 工具内不应再截断: %q", out)
 	}
-	r := []rune(out)
-	if len(r) > 200 {
-		t.Fatalf("截断后应明显变短: %d runes", len(r))
+	if !strings.HasPrefix(out, "HHHH") || !strings.HasSuffix(strings.TrimSpace(out), "TTTT") {
+		t.Fatalf("应返回完整头尾输出: %q", out)
+	}
+	if r := []rune(out); len(r) < 240 {
+		t.Fatalf("完整输出应保留全部内容: %d runes", len(r))
 	}
 }
 
@@ -265,21 +268,5 @@ func TestBashEnv(t *testing.T) {
 	}
 	if !strings.Contains(out, "inherited-ok") || !strings.Contains(out, "configured-ok") {
 		t.Fatalf("子进程环境应同时含继承值与配置值: %q", out)
-	}
-}
-
-// TestTruncateMiddle 头尾保留式截断的比例与标记。
-func TestTruncateMiddle(t *testing.T) {
-	s := strings.Repeat("a", 120) + strings.Repeat("b", 120)
-	got := truncateMiddle(s, 40)
-	if !strings.Contains(got, "已截断") {
-		t.Fatalf("应包含截断标记: %q", got)
-	}
-	if !strings.HasPrefix(got, "aaaa") || !strings.HasSuffix(got, "bbbb") {
-		t.Fatalf("应保留头尾: %q", got)
-	}
-	// 不超长原样返回
-	if got := truncateMiddle("short", 40); got != "short" {
-		t.Fatalf("不超长不应截断: %q", got)
 	}
 }

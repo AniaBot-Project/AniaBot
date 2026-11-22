@@ -522,6 +522,8 @@ func (m *proactiveManager) callbacks(ctx context.Context, b bot.Bot, id message.
 	// 本地图片（主模型多模态或配置了备用识别模型时可用），与定时任务同一套实现
 	if p != nil {
 		p.attachLocalImageCallback(&cbs, ctx, &loadedImages, extra.add)
+		// 工具结果长度治理：超长结果落盘到本会话目录，由 read_tool_output 读回
+		p.attachToolResultLimit(&cbs, sessionKey(id, isGroup))
 	}
 	// 命令级人工审批（bash 三段式）：主动互动无人值守，requester=0 即仅管理员可批，
 	// 提示发到本会话（与定时任务同口径）

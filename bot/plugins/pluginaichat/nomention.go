@@ -144,6 +144,8 @@ func (p *AIChatPlugin) clearChatHistory(ctx context.Context, groupID message.QID
 		p.Logger.Error("自动清理AI对话信息失败（保留计数待下次重试）", "group", groupID, "error", err.Error())
 		return false
 	}
+	// 历史已清空，旧的落盘工具结果不再被引用，顺手删除（其余靠后台 TTL 清理）
+	p.toolResultLimiter.Purge(sessionKey(groupID, true))
 	p.Logger.Info("自动清理AI对话信息", "group", groupID, "reason", "未@消息达到阈值")
 	if cleared := chat.ClearDynamicTools(); cleared > 0 {
 		p.Logger.Info("清理动态加载的 MCP 工具", "count", cleared)

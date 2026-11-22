@@ -693,6 +693,9 @@ func (m *chatConsoleManager) callbacks(ctx context.Context, s *chatConsoleSessio
 	}
 	// 本地图片读取（多模态主模型 / 备用识别模型）与线上一致可用
 	m.plugin.attachLocalImageCallback(&cbs, ctx, &loaded, nil)
+	// 工具结果长度治理：试聊使用独立会话目录（与线上会话隔离），
+	// handle 只能在本次试聊中读回
+	m.plugin.attachToolResultLimit(&cbs, chatConsoleHistoryKey(s.info.ID))
 	return cbs
 }
 

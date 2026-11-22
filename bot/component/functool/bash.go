@@ -22,8 +22,6 @@ const (
 	// bashDefaultTimeoutSec 默认命令超时（秒）：编码任务的编译/测试动辄数十秒，
 	// 太短会频繁中断；仍受请求级超时（bot.msg_event_timeout_sec）兜底约束
 	bashDefaultTimeoutSec = 300
-	// bashDefaultMaxOutput 默认输出保留字符数：编译错误列表等长输出按头尾保留
-	bashDefaultMaxOutput = 30000
 	// bashCwdMarker persist_cwd 模式下包装脚本回传当前目录的标记前缀
 	bashCwdMarker = "__ANIABOT_CWD__"
 	// bashCwdFail 标记值：起始目录不存在（cd 失败）时回传，不更新 cwd
@@ -60,8 +58,6 @@ type BashConfig struct {
 	PersistCwd bool `json:"persist_cwd" mapstructure:"persist_cwd"`
 	// TimeoutSec 单条命令超时（秒），<=0 时取默认值（bashDefaultTimeoutSec）
 	TimeoutSec int `json:"timeout_sec" mapstructure:"timeout_sec"`
-	// MaxOutput 输出最多保留的字符数（按头尾保留、隐藏中段），<=0 时取默认值
-	MaxOutput int `json:"max_output" mapstructure:"max_output"`
 }
 
 type BashParams struct {
@@ -79,7 +75,6 @@ type BashTool struct {
 	workingDir string // 固定工作目录（persist_cwd 关闭时的起始目录）
 	persistCwd bool   // 是否跨调用持久化工作目录
 	timeout    time.Duration
-	maxOutput  int
 
 	// cwd persist_cwd 模式下记录的当前目录；同轮并行工具调用可能同时执行
 	// bash（如「编译并测试」拆两个调用），读写都需持锁
@@ -146,10 +141,6 @@ func NewBashTool(config BashConfig) (*BashTool, error) {
 	if config.TimeoutSec <= 0 {
 		timeout = bashDefaultTimeoutSec * time.Second
 	}
-	maxOutput := config.MaxOutput
-	if maxOutput <= 0 {
-		maxOutput = bashDefaultMaxOutput
-	}
 
 	cwdHint := ""
 	if config.PersistCwd {
@@ -158,8 +149,10 @@ func NewBashTool(config BashConfig) (*BashTool, error) {
 		cwdHint = fmt.Sprintf("命令固定从 %s 开始执行", config.WorkingDir)
 	}
 
-	desc := fmt.Sprintf("在宿主机上执行 shell 命令（由 %s 解释执行），超时 %s，输出超过 %d 字符时保留头尾截断。%s权限分三档：命中黑名单直接拒绝；命中白名单直接放行；两者都不命中时会向用户发起审批，等用户回复「允许」后才执行（审批未启用则默认放行）。注意：不要假设环境存在 bash，运行 .sh 脚本优先用 `sh 脚本路径`；需要 python3 等其他解释器时先用 `command -v` 确认其存在",
-		shell, timeout, maxOutput, cwdHint)
+	// 输出不做工具内截断：统一由 aichat 工具结果治理（超长结果落盘，AI 用
+	// read_tool_output 读回）处理，避免中段内容在这里被提前丢弃。
+	desc := fmt.Sprintf("在宿主机上执行 shell 命令（由 %s 解释执行），超时 %s。%s权限分三档：命中黑名单直接拒绝；命中白名单直接放行；两者都不命中时会向用户发起审批，等用户回复「允许」后才执行（审批未启用则默认放行）。输出过长时会自动落盘并提示用 read_tool_output 读取。注意：不要假设环境存在 bash，运行 .sh 脚本优先用 `sh 脚本路径`；需要 python3 等其他解释器时先用 `command -v` 确认其存在",
+		shell, timeout, cwdHint)
 	return &BashTool{
 		BaseTool:   llmtool.MakeBaseTool("bash", desc, BashParams{}),
 		shell:      shell,
@@ -170,7 +163,6 @@ func NewBashTool(config BashConfig) (*BashTool, error) {
 		workingDir: config.WorkingDir,
 		persistCwd: config.PersistCwd,
 		timeout:    timeout,
-		maxOutput:  maxOutput,
 	}, nil
 }
 
@@ -286,10 +278,6 @@ func (t *BashTool) Execute(ctx context.Context, params any, cbs llmtool.CallBack
 		result = t.consumeCwdMarker(result)
 	}
 
-	if r := []rune(result); len(r) > t.maxOutput {
-		result = truncateMiddle(string(r), t.maxOutput)
-	}
-
 	// ErrWaitDelay：命令本体已结束/已被杀，只是孙进程仍占着输出管道被强制放弃。
 	// 输出已收集完整，按成功返回，避免把「输出已拿到」误报为执行失败。
 	if errors.Is(err, exec.ErrWaitDelay) {
@@ -392,20 +380,4 @@ func (t *BashTool) consumeCwdMarker(result string) string {
 		t.cwdMu.Unlock()
 	}
 	return rest
-}
-
-// truncateMiddle 头尾保留式截断：多保留头部（错误通常在前面最先出现），
-// 中段以省略标记替代并注明被隐藏的字符数。
-func truncateMiddle(s string, max int) string {
-	r := []rune(s)
-	if len(r) <= max {
-		return s
-	}
-	head := max * 2 / 3
-	tail := max - head
-	if tail <= 0 {
-		return string(r[:head]) + fmt.Sprintf("\n…（尾部 %d 字符已截断）", len(r)-head)
-	}
-	hidden := len(r) - head - tail
-	return string(r[:head]) + fmt.Sprintf("\n…（中间 %d 字符已截断）…\n", hidden) + string(r[len(r)-tail:])
 }

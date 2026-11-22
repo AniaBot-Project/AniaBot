@@ -74,15 +74,28 @@ type CallBackFuncs struct {
     SendText          func(text string) (string, error)
     SendImage         func(bs64content string) (string, error)
     SendFile          func(name, bs64content string) (string, error)
-    GetMsgHistory     func(count, messageSeq int) (string, error)
     GetPrivateFileURL func(fileId string) (string, error)
     LoadImages        func() (string, error)
     TakeLoadedImages  func() []string
     LoadLocalImage    func(path string) (string, error)
+    // 工具结果长度治理与读回（超长结果落盘，AI 用 read_tool_output 读取）
+    LimitToolResult func(toolName, result string, isError bool) string
+    ReadToolOutput  func(handle string, offset, limit int, fromEnd bool, pattern string) (string, error)
 }
 ```
 
 主会话的回调把文本/图片/文件经 `bot.Bot` 发到当前群/私聊；框架不再自动用 `SendText` 发送工具轮中间文本（非流式只发最终回复，流式由 `streamReply` 覆盖式展示），该回调保留给工具显式发送消息。定时任务与子代理的回调则**丢弃 `SendText` 内容**（只记日志），只允许工具显式发送图片/文件，最终回复由编排层统一推送。
+
+### 工具结果长度治理（落盘 + read_tool_output）
+
+所有工具回填给 AI 的结果都在 `ToolOrchestrator.executeToolCalls` 统一治理（只有这一个出口，内置/会话/平台/MCP 工具一视同仁），避免单个工具返回 MB 级内容把一轮工具循环直接撑爆，或永久留在窗口历史里逐轮重发：
+
+- 成功结果 rune 数 ≤ `plugin.ai_chat_bot.tool_result.max_inline_runes`（默认 16000）→ 原样回填
+- 超过上限 → 完整内容写入会话临时文件（`<dir>/<sha256(会话键)[:8]>/<handle>.txt`，默认 `./data/tool-outputs`），回填「预览（默认 4000 字符，头 3/4 + 尾 1/4）+ handle + read_tool_output 读取方式」；Query 日志与 PostToolUse 钩子拿到的是治理后的文本
+- 错误结果 **不落盘**，只做头尾截断（模型必须当轮看到失败原因）；落盘失败/功能关闭同样退化为头尾截断
+- `read_tool_output` 是共享层工具（落盘启用时注册），支持 `offset`/`limit`/`from_end`/`pattern`（字面子串，非正则），自身输出有硬上限（8000 rune / 2000 行 / 单行 2000 rune），且**豁免**再次落盘；handle 只能读取所属会话目录，过期（默认 24h）提示重新执行原工具
+- 落盘文件由后台 janitor 按 `retention_hours` / `max_total_mb` 清理；`#新对话` 与未@自动清空历史时顺手删除对应会话目录
+- 原 `bash.max_output`、MCP 8000 rune、`skill_read` 16000 rune 的**工具内截断已移除**：内容在工具内部被截掉后统一层再也拿不回原文，统一交给本机制处理
 
 ## MCP 两阶段懒加载
 
@@ -116,7 +129,7 @@ sequenceDiagram
 
 其他细节：
 
-- MCP 工具结果按 8000 符文截断（超大结果会永久留在窗口历史、撑爆上下文）
+- MCP 工具结果与其他工具一样经过统一长度治理：超过 `tool_result.max_inline_runes` 时完整内容落盘、回填预览 + handle，由 AI 用 `read_tool_output` 读回（工具内不再单独截断）
 - 连接 HTTP 客户端不在整体 `http.Client.Timeout` 上设超时（会中断 SSE 长连接持续读取），改为 Transport 层 `DialContext` + `ResponseHeaderTimeout` 保护握手阶段
 - 可选 `ToolFilterFunc`（前缀/名单/关键词/组合过滤器）在连接时过滤工具
 - **运行时管理**：`ToolExecuter` 以 RWMutex 保护共享工具表与 manager 列表，支持启动后 `AddMCP` / `RemoveMCP` / `ReconnectMCP`（AI 的 `mcp_add` 等工具依赖此能力；重连后已加载到会话的旧工具句柄失效，需重新 `mcp_load`）
@@ -181,7 +194,7 @@ flowchart TB
 - 中间轮文本丢弃；发送图片/文件、读历史仍作用于当前会话
 - 图片状态隔离：子代理有自己的图片队列，`LoadImages` 是 stub（推迟给主 AI），避免两个工具循环互踩队列
 - 执行参数全部跟随主模型：模型与 API 格式直取主模型四元组（`subagentLLMConfig`），生成参数经 `buildChatOptions` 复用主模型配置，工具轮数取 `mainMaxIterations()`（主模型的最大工具调用轮数），超时取框架消息处理预算
-- 只有最终回复作为工具结果返回给主 AI，前缀运行元数据（时长、LLM 轮数、token）；结果不截断，完整回填主对话
+- 只有最终回复作为工具结果返回给主 AI，前缀运行元数据（时长、LLM 轮数、token）；结果完整回填，超过统一工具结果内联上限时落盘为预览 + handle（主 AI 可用 `read_tool_output` 读取）
 
 ### 超时预算
 
@@ -222,7 +235,7 @@ clock 任务里注册的是**异步**子代理变体（`clocksubagent.go`）：�
 
 - **quotaManager**：按「每会话每日」+「全局每日」两个维度限制 token 消耗，键 `daily:<日期>:<会话key>` 天然按天过期；Check-Add 为宽松语义（非硬实时），面板可查看用量
 - **usageAcc**：goroutine 安全的派生用量累加器，归集主循环之外的消耗（异步子代理、team 成员、备用识图），收尾并入统计与配额
-- **Query 日志**：一次「触发 → 最终响应」的完整记录（`ania_query_log` 行级），含用户输入、发送者、完整工具调用明细（不截断）、token、状态（running/success/skipped/stopped/timeout/error），日志不淘汰，面板「Query 日志」页按条件筛选并支持导出/清除；主动互动的执行同样落在这里（`kind=proactive`，以触发说明替代用户输入，保持安静时状态为 skipped 并在 note 记录原因），Token 统计按来源单列
+- **Query 日志**：一次「触发 → 最终响应」的完整记录（`ania_query_log` 行级），含用户输入、发送者、工具调用明细（工具结果记录统一长度治理后的文本，超长结果以预览 + handle 落盘）、token、状态（running/success/skipped/stopped/timeout/error），日志不淘汰，面板「Query 日志」页按条件筛选并支持导出/清除；主动互动的执行同样落在这里（`kind=proactive`，以触发说明替代用户输入，保持安静时状态为 skipped 并在 note 记录原因），Token 统计按来源单列
 
 ## 钩子系统（hooks）
 

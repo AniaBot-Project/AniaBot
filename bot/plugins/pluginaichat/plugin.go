@@ -83,6 +83,10 @@ type AIChatPlugin struct {
 
 	mcpConfigs   []*llmtool.MCPConfig
 	toolExecutor *llmtool.ToolExecuter
+	// toolResultLimiter 工具结果长度治理：超长成功结果落盘，回填预览+handle，
+	// AI 用 read_tool_output 按需读取。Start 时构造，始终非 nil（未启用落盘时
+	// 退化为头尾截断）。
+	toolResultLimiter *toolResultLimiter
 
 	skillManager *llmtool.SkillManager
 	// skillsDir skill 所在目录（供面板管理接口使用）
@@ -563,6 +567,8 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 			p.Logger.Error("无法清理AI聊天信息", "error", err)
 			return false
 		}
+		// 历史已清空，旧的落盘工具结果不再被引用，顺手删除（其余靠后台 TTL 清理）
+		p.toolResultLimiter.Purge(sessionKey(id, isGroup))
 		p.Logger.Info("清理AI对话信息成功")
 
 		if cleared := chat.ClearDynamicTools(); cleared > 0 {
@@ -586,6 +592,8 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 		p.addExtraUsage(sessionKey(id, isGroup), u)
 		p.quotaManager.Add(sessionKey(id, isGroup), u)
 	}, batch...)
+	// 工具结果长度治理回调（超长结果落盘/截断 + read_tool_output 读回）
+	p.attachToolResultLimit(&msgFuncs, sessionKey(id, isGroup))
 
 	// 命令级人工审批（bash 三段式中不在黑白名单的命令在工具内部调用）：与门禁
 	// 审批腿共用 approvalManager；提示同样走纯发送闭包（与流式消息互不干扰）。
@@ -1031,7 +1039,6 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 		WorkingDir: p.cfg.Bash.WorkingDir,
 		PersistCwd: p.cfg.Bash.PersistCwd,
 		TimeoutSec: p.cfg.Bash.TimeoutSec,
-		MaxOutput:  p.cfg.Bash.MaxOutput,
 	}
 	if bashConfig.Enable {
 		p.Logger.Info("已启用bash工具", "shell", bashConfig.Shell, "whitelist", bashConfig.Whitelist, "blacklist", bashConfig.Blacklist, "working_dir", bashConfig.WorkingDir, "persist_cwd", bashConfig.PersistCwd)
@@ -1066,6 +1073,30 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	p.skillManager.SetDisabled(p.cfg.SkillsDisabled)
 	if disabled := p.skillManager.DisabledNames(); len(disabled) > 0 {
 		p.Logger.Info("已禁用部分 skill（描述不进入上下文）", "skills", strings.Join(disabled, ", "))
+	}
+
+	// 工具结果长度治理：所有工具结果回填前统一经过 LimitToolResult。超长成功
+	// 结果落盘到会话临时文件，回填"预览 + handle"，AI 用 read_tool_output 读取；
+	// 落盘不可用或关闭时退化为头尾截断（仍然防止上下文爆炸）。
+	p.toolResultLimiter = newToolResultLimiter(p.cfg.ToolResult, p.Logger)
+	if p.toolResultLimiter.SpillEnabled() {
+		// 防御重名：MCP 服务器若恰好暴露 read_tool_output，内置读回工具无法注册，
+		// 此时落盘结果将无人可读，明确告警（此时同名工具的超大结果仍会被治理）。
+		if p.toolExecutor.Has("read_tool_output") {
+			p.Logger.Warn("工具名 read_tool_output 已被其他工具占用，内置结果读回工具未注册，落盘结果可能无法读回")
+		} else {
+			p.toolExecutor.Register(functool.NewReadToolOutputTool())
+		}
+		p.toolResultLimiter.startJanitor()
+		p.Logger.Info("已启用工具结果落盘",
+			"max_inline_runes", p.toolResultLimiter.InlineRunes(),
+			"preview_runes", p.toolResultLimiter.PreviewRunes(),
+			"dir", p.toolResultLimiter.StoreDir())
+	} else if p.cfg.ToolResult.Enable {
+		p.Logger.Warn("工具结果落盘不可用，超长结果将直接截断")
+	} else {
+		p.Logger.Info("工具结果落盘未启用，超长结果按统一上限截断",
+			"max_inline_runes", p.toolResultLimiter.InlineRunes())
 	}
 
 	// 配置管理工具（默认关闭，配置中心读写能力由 core 经 DI 注入）

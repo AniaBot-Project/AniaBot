@@ -937,6 +937,10 @@ func (m *clockManager) makeClockCallback(ctx context.Context, task *ClockTask, u
 
 	// 复用插件本地图片读取逻辑（主模型多模态或配置了备用识别模型时可用）
 	m.plugin.attachLocalImageCallback(&cbs, ctx, &loadedImages, usageSink)
+	// 工具结果长度治理：超长结果落盘到目标会话目录，由 read_tool_output 读回
+	if m.plugin != nil {
+		m.plugin.attachToolResultLimit(&cbs, sessionKey(qid, isGroup))
+	}
 	// 命令级人工审批（bash 三段式）：定时任务无人值守，requester=0 即仅管理员可批；
 	// 审批提示发到任务目标会话。仅在工具审批开关开启时注入：审批关闭时
 	// approvalManager 可能仅为配置修改工具构造，bash 未列名命令默认放行（只认黑名单）。
