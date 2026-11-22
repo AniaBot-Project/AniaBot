@@ -228,9 +228,28 @@ func (p *AIChatPlugin) mainMaxIterations() int {
 	return p.cfg.MaxIterations
 }
 
-// llmClientOptions 从插件配置构造 LLM 客户端可选参数（应用层重试 + 备用模型 +
-// 自定义请求头）。供主对话 / 子代理 / 定时任务 / 压缩器 / OCR 的所有客户端统一使用。
+// llmClientOptions 与会话无关的全局请求（备用识图 / 向量化）客户端可选参数：
+// 自定义请求头中的会话占位符按 global 渲染。
 func (p *AIChatPlugin) llmClientOptions() []aichat.LLMClientOption {
+	return p.llmClientOptionsWith(headerVarsGlobal, nil)
+}
+
+// llmClientOptionsFor 会话级请求的客户端可选参数：自定义请求头中的会话占位符
+// 按该会话渲染，并附加动态请求头提供者——每次请求重新取值，新建会话后
+// （token 换新）自动生效，无需重建客户端。配置里没有会话占位符时直接按静态
+// 头下发，不生成会话 token。
+func (p *AIChatPlugin) llmClientOptionsFor(scope headerScope) []aichat.LLMClientOption {
+	if !headersNeedSession(p.customHeaders) {
+		return p.llmClientOptionsWith(headerVarsGlobal, nil)
+	}
+	return p.llmClientOptionsWith(p.headerVarsFor(scope), p.headerProviderFor(scope))
+}
+
+// llmClientOptionsWith 组装公共可选参数：重试、prompt 缓存、自定义请求头、
+// 备用模型。vars 为构造时的静态头取值；provider 非空时每次请求按它重新渲染
+// 自定义头（覆盖静态层）。供主对话 / 子代理 / 定时任务 / 压缩器 / OCR 的
+// 所有客户端统一使用。
+func (p *AIChatPlugin) llmClientOptionsWith(vars headerVars, provider func() map[string]string) []aichat.LLMClientOption {
 	var opts []aichat.LLMClientOption
 	if p.cfg.Retry.MaxAttempts > 1 {
 		baseDelay := time.Duration(p.cfg.Retry.BaseDelaySec) * time.Second
@@ -246,9 +265,13 @@ func (p *AIChatPlugin) llmClientOptions() []aichat.LLMClientOption {
 		TTL:    p.cfg.PromptCache.TTL,
 	}))
 	// 自定义请求头：主模型与备用模型的后端客户端都会附加（WithHeaders 在
-	// 备用客户端构造时透传），空配置不影响原有行为
+	// 备用客户端构造时透传），空配置不影响原有行为；会话级请求的占位符
+	// 每请求重新渲染（如 ${session} 在 #新对话 后换新）
 	if len(p.customHeaders) > 0 {
-		opts = append(opts, aichat.WithHeaders(p.customHeaders))
+		opts = append(opts, aichat.WithHeaders(renderHeaders(p.customHeaders, vars)))
+		if provider != nil {
+			opts = append(opts, aichat.WithHeaderProvider(provider))
+		}
 	}
 	if p.cfg.Fallback.Model != "" {
 		opts = append(opts, aichat.WithFallback(p.cfg.Fallback.BaseURL, p.cfg.Fallback.APIKey, p.cfg.Fallback.Model, p.cfg.Fallback.APIFormat))
@@ -281,13 +304,14 @@ func (p *AIChatPlugin) compressorLLMConfig() (baseURL, apiKey, model, format str
 
 // buildCompressorClient 构造上下文压缩专用 LLM 客户端；配置三字段全空时
 // 返回 nil（压缩复用主对话客户端）。构造失败仅记日志并返回 nil 降级。
-func (p *AIChatPlugin) buildCompressorClient() *aichat.LLMClient {
+// scope 用于渲染该会话的请求头占位符（与主客户端一致）。
+func (p *AIChatPlugin) buildCompressorClient(scope headerScope) *aichat.LLMClient {
 	if p.cfg.Compressor.BaseURL == "" && p.cfg.Compressor.APIKey == "" && p.cfg.Compressor.Model == "" {
 		return nil
 	}
 	baseURL, apiKey, model, format := p.compressorLLMConfig()
 	client, err := aichat.NewLLMClient(baseURL, apiKey, model,
-		append(p.llmClientOptions(), aichat.WithAPIFormat(format))...)
+		append(p.llmClientOptionsFor(scope), aichat.WithAPIFormat(format))...)
 	if err != nil {
 		p.Logger.Error("创建压缩器 LLM 客户端失败，压缩将复用主对话模型", "error", err.Error())
 		return nil
@@ -341,6 +365,7 @@ func (p *AIChatPlugin) getChat(b bot.Bot, id message.QID, isGroup bool, prompt s
 		if p.historyDB != nil {
 			historyStore = newSQLHistoryStore(p.historyDB, key, p.Logger)
 		}
+		scope := sessionHeaderScope(id, isGroup)
 		c, err := aichat.NewChatBot(
 			p.cfg.BaseURL,
 			p.cfg.APIKey,
@@ -349,8 +374,8 @@ func (p *AIChatPlugin) getChat(b bot.Bot, id message.QID, isGroup bool, prompt s
 			p.cfg.MaxContextTokens,
 			sessionExecutor,
 			historyStore,
-			aichat.WithClientOptions(append(p.llmClientOptions(), aichat.WithAPIFormat(p.cfg.APIFormat))...),
-			aichat.WithCompressorClient(p.buildCompressorClient()),
+			aichat.WithClientOptions(append(p.llmClientOptionsFor(scope), aichat.WithAPIFormat(p.cfg.APIFormat))...),
+			aichat.WithCompressorClient(p.buildCompressorClient(scope)),
 			aichat.WithScenePrompt(scene),
 		)
 		if err != nil {

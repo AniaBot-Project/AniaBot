@@ -800,7 +800,7 @@ func (m *clockManager) executeTask(ctx context.Context, task *ClockTask, rec *ta
 	chat, err := aichat.NewChatBot(
 		saBaseURL, saAPIKey, saModel,
 		prompt, p.cfg.MaxContextTokens, sessionExecutor, nil,
-		aichat.WithClientOptions(append(p.llmClientOptions(), aichat.WithAPIFormat(saFormat))...),
+		aichat.WithClientOptions(append(p.llmClientOptionsFor(sessionHeaderScope(targetQID, isGroup)), aichat.WithAPIFormat(saFormat))...),
 		aichat.WithScenePrompt(scene),
 	)
 	if err != nil {

@@ -46,6 +46,19 @@ func newAnthropicBackend(baseURL, apiKey, model string, cache PromptCacheConfig,
 	return &anthropicBackend{client: anthropic.NewClient(opts...), model: model, cache: cache}
 }
 
+// anthropicRequestHeaderOptions 把每次请求的动态头转为 anthropic SDK 的请求选项：
+// 作为本次调用的 option 下发，同名时覆盖客户端构造时的静态头。
+func anthropicRequestHeaderOptions(headers map[string]string) []option.RequestOption {
+	if len(headers) == 0 {
+		return nil
+	}
+	opts := make([]option.RequestOption, 0, len(headers))
+	for name, value := range headers {
+		opts = append(opts, option.WithHeader(name, value))
+	}
+	return opts
+}
+
 // thinkingBlock 持久化到 Message.ThinkingBlocks 的元素：
 // 记录 Anthropic 思考块回放所需的最小字段（thinking+signature 或 redacted data）。
 type thinkingBlock struct {
@@ -72,7 +85,8 @@ func (b *anthropicBackend) generateStream(ctx context.Context, messages []Messag
 		return GenerateResponse{}, TokenUsage{}, false, err
 	}
 
-	stream := b.client.Messages.NewStreaming(ctx, params)
+	stream := b.client.Messages.NewStreaming(ctx, params,
+		anthropicRequestHeaderOptions(opts.requestHeaders)...)
 	defer stream.Close()
 
 	acc := newAnthropicStreamAccumulator(opts.OnStreamDelta)

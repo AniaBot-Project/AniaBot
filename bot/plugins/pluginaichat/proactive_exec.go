@@ -272,7 +272,7 @@ func (m *proactiveManager) chat(ctx context.Context, it *ProactiveIntention, id 
 	chat, err := aichat.NewChatBot(
 		baseURL, apiKey, model,
 		prompt, p.cfg.MaxContextTokens, sessionExecutor, history,
-		aichat.WithClientOptions(append(p.llmClientOptions(), aichat.WithAPIFormat(format))...),
+		aichat.WithClientOptions(append(p.llmClientOptionsFor(sessionHeaderScope(id, isGroup)), aichat.WithAPIFormat(format))...),
 		aichat.WithScenePrompt(scene),
 	)
 	if err != nil {

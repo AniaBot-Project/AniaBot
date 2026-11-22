@@ -133,7 +133,7 @@ func (p *AIChatPlugin) runSubagentWithOptions(ctx context.Context, b bot.Bot, id
 	chat, err := aichat.NewChatBot(
 		saBaseURL, saAPIKey, saModel,
 		prompt, p.cfg.MaxContextTokens, sessionExecutor, nil,
-		aichat.WithClientOptions(append(p.llmClientOptions(), aichat.WithAPIFormat(saFormat))...),
+		aichat.WithClientOptions(append(p.llmClientOptionsFor(sessionHeaderScope(id, isGroup)), aichat.WithAPIFormat(saFormat))...),
 		aichat.WithScenePrompt(scene),
 	)
 	if err != nil {

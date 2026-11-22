@@ -52,7 +52,8 @@ func (b *chatCompletionsBackend) generate(ctx context.Context, messages []Messag
 
 	b.applyOptions(&params, opts)
 
-	completion, err := b.client.Chat.Completions.New(ctx, params)
+	completion, err := b.client.Chat.Completions.New(ctx, params,
+		openaiRequestHeaderOptions(opts.requestHeaders)...)
 	if err != nil {
 		if ctx.Err() != nil {
 			return GenerateResponse{}, TokenUsage{}, ctx.Err()
@@ -83,7 +84,8 @@ func (b *chatCompletionsBackend) generateStream(ctx context.Context, messages []
 	b.applyOptions(&params, opts)
 	params.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
 
-	stream := b.client.Chat.Completions.NewStreaming(ctx, params)
+	stream := b.client.Chat.Completions.NewStreaming(ctx, params,
+		openaiRequestHeaderOptions(opts.requestHeaders)...)
 	defer stream.Close()
 
 	acc := newStreamAccumulator()

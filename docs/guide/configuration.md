@@ -267,7 +267,7 @@ bot.luckylilia.http.target_url    = http://localhost:6690 # LLBot HTTP 服务端
 | `plugin.ai_chat_bot.model` | `deepseek-chat` | 主模型名称 |
 | `plugin.ai_chat_bot.multimodal` | `false` | 主模型是否支持图片输入 |
 | `plugin.ai_chat_bot.rate_limit` | `2` | 同时处理的 AI 请求并发上限，超出后直接拒绝 |
-| `plugin.ai_chat_bot.headers` | `[]` | 自定义请求头，附加到全部 LLM 请求（主对话 / 子代理 / 定时任务 / 压缩器 / 备用识图 / 备用模型，以及启用向量检索时的 embedding 请求）；每行一个，格式 `Name: Value` 或 `Name=Value`，同名覆盖默认头（含 `User-Agent`），适合自建网关鉴权、路由标记等场景；非法行跳过并记日志 |
+| `plugin.ai_chat_bot.headers` | `[]` | 自定义请求头，附加到全部 LLM 请求（主对话 / 子代理 / 定时任务 / 压缩器 / 备用识图 / 备用模型，以及启用向量检索时的 embedding 请求）；每行一个，格式 `Name: Value` 或 `Name=Value`，同名覆盖默认头（含 `User-Agent`），适合自建网关鉴权、路由标记等场景；值中支持 `${session}` / `${session_id}` / `${session_type}` 会话占位符；非法行跳过并记日志 |
 
 ::: tip 关于自定义请求头
 配置示例（面板「自定义请求头」文本框每行一条）：
@@ -278,6 +278,25 @@ X-Proxy-Route: team-a
 ```
 
 请求头会原样下发，请只填写可信内容；值里有冒号时用 `=` 分隔（如 `X-Token=a:b`）更直观，反之亦然。修改后需重启 Bot 生效。
+:::
+
+::: tip 会话占位符
+请求头的值支持按会话替换的占位符，主对话、子代理、定时任务、主动互动、面板试聊都会各自取对应的会话值（备用识图、向量检索等不属于任何会话的请求统一取 `global`）：
+
+| 占位符 | 说明 | 示例 |
+| --- | --- | --- |
+| `${session}` | 会话实例标识，每个会话唯一；新建会话（`#新对话`、未 @ 自动清空、面板「清空上下文」）后换新，进程重启后重新生成 | `AniaBot-8f3a1c9e5b7d2046`（`AniaBot-` 为自行添加的前缀） |
+| `${session_id}` | 会话目标 ID（群号 / 对方 ID，含平台前缀） | `qq:123456` / `fs:oc_xxx` |
+| `${session_type}` | 会话类型 | `group` / `friend` / `panel`（面板试聊）/ `global`（无会话请求） |
+
+例如让网关按会话区分请求与缓存：
+
+```
+X-OpenCode-Session: AniaBot-${session}
+X-AniaBot-Session: ${session_type}-${session_id}
+```
+
+占位符区分大小写；未识别的 `${…}` 会原样下发，启动日志会给出告警。
 :::
 
 ::: tip 关于 API 格式

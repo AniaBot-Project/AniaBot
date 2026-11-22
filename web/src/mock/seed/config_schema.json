@@ -700,7 +700,7 @@
     "label": "自定义请求头",
     "type": "strings",
     "group": "AI 对话 · 模型",
-    "help": "附加到全部 LLM 请求（主对话/子代理/定时任务/压缩器/备用识图/备用模型），用于网关鉴权、路由标记等；每行一个，格式 Name: Value 或 Name=Value，同名覆盖默认头（含 User-Agent）；非法行跳过并记录日志"
+    "help": "附加到全部 LLM 请求（主对话/子代理/定时任务/压缩器/备用识图/备用模型），用于网关鉴权、路由标记等；每行一个，格式 Name: Value 或 Name=Value，同名覆盖默认头（含 User-Agent）；值支持会话占位符 ${session}（每个会话唯一，新建会话后换新）、${session_id}（群号或对方 ID）、${session_type}（group/friend）；非法行跳过并记录日志"
   },
   {
     "key": "plugin.ai_chat_bot.prompt",

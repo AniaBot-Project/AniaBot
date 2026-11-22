@@ -106,6 +106,11 @@ type ChatOptions struct {
 	// 已失效的记忆 ID 或过期资料）。非空时，Chat 内部 UserPromptSubmit 钩子
 	// 追加的上下文同样不写入历史（钩子每轮都会重新触发，同属当轮注入）。
 	PersistUserText string
+
+	// requestHeaders 本次请求的动态请求头（由 LLMClient 在发起请求前按
+	// WithHeaderProvider 填充，同名覆盖客户端构造时的静态自定义头）。
+	// 仅组件内部使用：调用方传入的 ChatOptions 无需设置该字段。
+	requestHeaders map[string]string
 }
 
 func TextPart(text string) ContentPart {

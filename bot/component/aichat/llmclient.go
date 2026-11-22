@@ -20,6 +20,10 @@ type LLMClient struct {
 	model    string
 	retry    *retryConfig
 	fallback *LLMClient
+	// headerProvider 动态请求头来源（可选）：每次请求前调用，返回值作为本次
+	// 请求的额外头（同名覆盖构造时的静态头）。用于会话内会变化的自定义头
+	// （如会话标识在 #新对话 后换新），无需重建客户端。
+	headerProvider func() map[string]string
 }
 
 // retryConfig 应用层重试配置：maxAttempts 为最大尝试次数（<=1 表示不重试），
@@ -54,6 +58,7 @@ type llmClientConfig struct {
 	fallbackFormat  string
 	promptCache     PromptCacheConfig
 	headers         map[string]string
+	headerProvider  func() map[string]string
 }
 
 // LLMClientOption 配置 LLMClient 的可选参数（函数选项模式）。
@@ -94,6 +99,16 @@ func WithHeaders(headers map[string]string) LLMClientOption {
 	}
 }
 
+// WithHeaderProvider 动态自定义请求头：每次发起 LLM 请求前调用 provider，
+// 返回的头作为本次请求的额外头下发（与 WithHeaders 同名时覆盖静态值）。
+// 用于会话内会变化的自定义头（如会话标识在 #新对话 后换新），调用方无需
+// 重建客户端；provider 必须并发安全。返回空 map 时本次请求只用静态头。
+func WithHeaderProvider(provider func() map[string]string) LLMClientOption {
+	return func(c *llmClientConfig) {
+		c.headerProvider = provider
+	}
+}
+
 // WithFallback 配置备用模型：主模型重试耗尽或遇到不可重试错误时，改用备用模型
 // 再请求一次（备用客户端内部自带同等重试）。fallbackModel 为空表示不启用。
 // baseURL / apiKey / format 留空时回退到主模型配置。
@@ -116,7 +131,7 @@ func NewLLMClient(baseURL, apiKey, model string, opts ...LLMClientOption) (*LLMC
 	if err != nil {
 		return nil, err
 	}
-	c := &LLMClient{backend: backend, model: model}
+	c := &LLMClient{backend: backend, model: model, headerProvider: cfg.headerProvider}
 	if cfg.maxAttempts > 1 {
 		c.retry = &retryConfig{maxAttempts: cfg.maxAttempts, baseDelay: cfg.baseDelay}
 	}
@@ -132,13 +147,23 @@ func NewLLMClient(baseURL, apiKey, model string, opts ...LLMClientOption) (*LLMC
 			WithRetry(cfg.maxAttempts, cfg.baseDelay),
 			WithAPIFormat(fbFormat),
 			WithPromptCache(cfg.promptCache),
-			WithHeaders(cfg.headers)) // 不传 WithFallback 防止递归
+			WithHeaders(cfg.headers),               // 不传 WithFallback 防止递归
+			WithHeaderProvider(cfg.headerProvider)) // 动态头同样适用于备用模型
 		if err != nil {
 			return nil, fmt.Errorf("create fallback client: %w", err)
 		}
 		c.fallback = fb
 	}
 	return c, nil
+}
+
+// withRequestHeaders 按 headerProvider 生成本次请求的动态头（无 provider 时原样返回）。
+func (c *LLMClient) withRequestHeaders(opts ChatOptions) ChatOptions {
+	if c.headerProvider == nil {
+		return opts
+	}
+	opts.requestHeaders = c.headerProvider()
+	return opts
 }
 
 type GenerateResponse struct {
@@ -159,6 +184,8 @@ type GenerateResponse struct {
 }
 
 func (c *LLMClient) Generate(ctx context.Context, messages []Message, opts ChatOptions) (GenerateResponse, TokenUsage, error) {
+	// 动态请求头在请求开始时定格：同一次请求的重试沿用同一组值
+	opts = c.withRequestHeaders(opts)
 	// 应用层重试循环：SDK 已内置 408/409/429/5xx 的指数退避重试，本层补充
 	// SDK 不重试的网络错误，并叠加自定义退避节奏。所有等待都尊重 ctx 剩余
 	// deadline：取消/超时立即返回，绝不拖长请求。
@@ -207,6 +234,8 @@ func (c *LLMClient) Generate(ctx context.Context, messages []Message, opts ChatO
 //   - 两者都不满足时保留旧行为——首字节后失败不重试、不切备用，返回已积累的
 //     部分内容与错误，避免用户看到重复拼接的输出。
 func (c *LLMClient) GenerateStream(ctx context.Context, messages []Message, opts ChatOptions) (GenerateResponse, TokenUsage, error) {
+	// 动态请求头在请求开始时定格：同一次请求的重试沿用同一组值
+	opts = c.withRequestHeaders(opts)
 	for attempt := 0; ; attempt++ {
 		resp, usage, started, err := c.backend.generateStream(ctx, messages, opts)
 		if err == nil {

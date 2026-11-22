@@ -49,7 +49,8 @@ func (b *responsesBackend) generate(ctx context.Context, messages []Message, opt
 		return GenerateResponse{}, TokenUsage{}, err
 	}
 
-	resp, err := b.client.Responses.New(ctx, params)
+	resp, err := b.client.Responses.New(ctx, params,
+		openaiRequestHeaderOptions(opts.requestHeaders)...)
 	if err != nil {
 		if ctx.Err() != nil {
 			return GenerateResponse{}, TokenUsage{}, ctx.Err()
@@ -66,7 +67,8 @@ func (b *responsesBackend) generateStream(ctx context.Context, messages []Messag
 		return GenerateResponse{}, TokenUsage{}, false, err
 	}
 
-	stream := b.client.Responses.NewStreaming(ctx, params)
+	stream := b.client.Responses.NewStreaming(ctx, params,
+		openaiRequestHeaderOptions(opts.requestHeaders)...)
 	defer stream.Close()
 
 	acc := newResponsesStreamAccumulator(opts.OnStreamDelta)

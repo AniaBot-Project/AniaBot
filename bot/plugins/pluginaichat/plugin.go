@@ -37,6 +37,10 @@ type AIChatPlugin struct {
 	// Start 时解析一次）；nil 表示未配置。经 llmClientOptions 附加到全部 LLM
 	// 客户端（主对话/子代理/定时任务/压缩器/备用识图/备用模型）
 	customHeaders map[string]string
+	// sessionTokens 会话键 → 会话实例 token（${session} 占位符取值）：每个会话
+	// 唯一，新建会话（#新对话 / 自动清空历史 / 面板新对话）后换新，进程生命周期内
+	// 稳定（会话对象被回收重建时沿用）。见 headers.go
+	sessionTokens sync.Map
 
 	// historyDB 对话历史的 SQL 后端连接（Start 时探测建表成功才赋值）；
 	// nil 表示历史不持久化（仅内存窗口）
@@ -567,6 +571,9 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 			p.Logger.Error("无法清理AI聊天信息", "error", err)
 			return false
 		}
+		// 新会话：换新会话 token，本次及之后的请求（含子代理/定时任务）的
+		// ${session} 请求头随之改变
+		p.renewSessionToken(sessionKey(id, isGroup))
 		// 历史已清空，旧的落盘工具结果不再被引用，顺手删除（其余靠后台 TTL 清理）
 		p.toolResultLimiter.Purge(sessionKey(id, isGroup))
 		p.Logger.Info("清理AI对话信息成功")
@@ -934,6 +941,10 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	}
 	if len(p.customHeaders) > 0 {
 		p.Logger.Info("已配置自定义 LLM 请求头", "headers", strings.Join(headerNames(p.customHeaders), ", "))
+		// 未知占位符（如拼错 ${sessoin}）会原样下发，启动时提示一次
+		if unknown := unknownHeaderPlaceholders(p.customHeaders); len(unknown) > 0 {
+			p.Logger.Warn("自定义请求头包含未知占位符，将原样发送", "placeholders", strings.Join(unknown, ", "))
+		}
 	}
 
 	// 加载群聊/好友独立 prompt 覆盖配置（框架级共享键，仍走 viper）

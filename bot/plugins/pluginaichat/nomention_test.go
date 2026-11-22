@@ -192,11 +192,16 @@ func TestNoMentionClearRetainedAndAppliedAtMentionAfterRestart(t *testing.T) {
 	}
 	chat.LoadHistory(context.Background())
 
+	tokenBefore := p2.sessionToken(sessionKey(gid, true))
 	p2.applyNoMentionClear(context.Background(), gid, chat)
 
 	// 历史应被清空（持久层删除），下次 @ 即开新对话
 	if msgs, _ := historyStore.Load(context.Background()); len(msgs) != 0 {
 		t.Fatalf("补清后持久化历史应清空, got %d 条", len(msgs))
+	}
+	// 新会话：${session} 请求头取值换新
+	if got := p2.sessionToken(sessionKey(gid, true)); got == tokenBefore {
+		t.Fatalf("自动清空后会话 token 应换新, still %q", got)
 	}
 	if got := p2.noMentionValue(gid); got != 0 {
 		t.Fatalf("补清后计数应清零, got %d", got)

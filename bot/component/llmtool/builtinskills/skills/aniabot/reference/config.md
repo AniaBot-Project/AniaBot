@@ -147,7 +147,7 @@
 | `rate_limit` | `2` | 同时处理的 AI 请求数上限，超出直接拒绝 |
 | `max_context_tokens` | `128000` | 上下文 Token 上限，超过 80% 触发历史压缩 |
 | `max_iterations` | `100` | 单次回复最多连续调用工具轮数 |
-| `headers` | 空 | 附加到全部 LLM 请求的自定义头，每行 `Name: Value` |
+| `headers` | 空 | 附加到全部 LLM 请求的自定义头，每行 `Name: Value`；值支持会话占位符 `${session}`（每会话唯一，新建会话后换新）/ `${session_id}` / `${session_type}` |
 | `prompt` | 内置默认提示词 | 系统提示词（人设/行为规则）。清空会回退默认 |
 | `thinking.enable` | `false` | 启用深度思考 |
 | `thinking.mode` | `auto` | `none` / `low` / `medium` / `high` / `auto` |

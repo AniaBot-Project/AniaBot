@@ -308,13 +308,14 @@ func TestBuildCompressorClientNilWhenEmpty(t *testing.T) {
 	p.cfg.BaseURL = "https://main.example.com"
 	p.cfg.APIKey = "main-key"
 	p.cfg.Model = "main-model"
+	scope := sessionHeaderScope(message.FromUint64(1), true)
 	// 三字段全空：返回 nil（压缩复用主对话客户端）
-	if c := p.buildCompressorClient(); c != nil {
+	if c := p.buildCompressorClient(scope); c != nil {
 		t.Fatalf("三字段全空时应返回 nil, got %v", c)
 	}
 	// 配置了模型则构造独立客户端
 	p.cfg.Compressor.Model = "summary-model"
-	if c := p.buildCompressorClient(); c == nil {
+	if c := p.buildCompressorClient(scope); c == nil {
 		t.Fatal("配置了模型应返回独立客户端")
 	}
 }

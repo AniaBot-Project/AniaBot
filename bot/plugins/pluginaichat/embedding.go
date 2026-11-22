@@ -86,7 +86,8 @@ func (p *AIChatPlugin) buildKBEmbedder() *embedder {
 	if embModel == "" {
 		embModel = "jina-embeddings-v3"
 	}
-	emb := newEmbedder(embBaseURL, embAPIKey, embModel, p.customHeaders, p.Logger.WithGroup("kb-embedding"))
+	emb := newEmbedder(embBaseURL, embAPIKey, embModel,
+		renderHeaders(p.customHeaders, headerVarsGlobal), p.Logger.WithGroup("kb-embedding"))
 	if emb == nil {
 		p.Logger.Warn("向量检索未启用：Embedding 配置不完整（base_url/api_key/model 缺项）")
 	}

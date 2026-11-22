@@ -3,6 +3,8 @@ package aichat
 import (
 	"context"
 	"fmt"
+
+	"github.com/openai/openai-go/v3/option"
 )
 
 // 支持的 LLM API 格式。
@@ -52,4 +54,17 @@ func newLLMBackend(format, baseURL, apiKey, model string, cache PromptCacheConfi
 	default:
 		return newChatCompletionsBackend(baseURL, apiKey, model, headers), nil
 	}
+}
+
+// openaiRequestHeaderOptions 把每次请求的动态头转为 openai SDK 的请求选项：
+// 作为本次调用的 option 下发，同名时覆盖客户端构造时的静态头。
+func openaiRequestHeaderOptions(headers map[string]string) []option.RequestOption {
+	if len(headers) == 0 {
+		return nil
+	}
+	opts := make([]option.RequestOption, 0, len(headers))
+	for name, value := range headers {
+		opts = append(opts, option.WithHeader(name, value))
+	}
+	return opts
 }

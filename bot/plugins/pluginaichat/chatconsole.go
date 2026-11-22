@@ -120,6 +120,31 @@ func chatConsoleHistoryKey(id string) string {
 	return chatConsoleHistoryPrefix + id
 }
 
+// panelHeaderScope 面板试聊会话的请求头占位符取值来源：token 按面板历史键
+// （panelchat:ID）隔离，不与线上同名会话共用；绑定真实会话时 ${session_id}
+// 用目标 ID，通用试聊用面板会话 ID。
+func panelHeaderScope(s *chatConsoleSession) headerScope {
+	scope := headerScope{
+		key:         chatConsoleHistoryKey(s.info.ID),
+		sessionID:   s.info.ID,
+		sessionType: "panel",
+	}
+	var sessionType string
+	switch s.info.TargetKind {
+	case plugininfo.ChatConsoleTargetGroup:
+		sessionType = "group"
+	case plugininfo.ChatConsoleTargetFriend:
+		sessionType = "friend"
+	}
+	if sessionType != "" {
+		scope.sessionType = sessionType
+		if targetID := strings.TrimSpace(s.info.TargetID); targetID != "" {
+			scope.sessionID = targetID
+		}
+	}
+	return scope
+}
+
 // load 启动时回放会话索引与各会话转录；正在生成中的消息归一化为「进程重启中断」。
 func (m *chatConsoleManager) load() {
 	if m.persist == nil {
@@ -338,6 +363,8 @@ func (m *chatConsoleManager) clearChatHistory(s *chatConsoleSession) {
 	if err := chat.ClearHistory(ctx); err != nil {
 		m.logger.Error("清空试聊上下文失败", "session", s.info.ID, "error", err.Error())
 	}
+	// 新会话：换新会话 token（${session} 请求头随新对话改变）
+	m.plugin.renewSessionToken(chatConsoleHistoryKey(s.info.ID))
 	chat.ClearDynamicTools()
 }
 
@@ -558,6 +585,7 @@ func (m *chatConsoleManager) ensureChat(s *chatConsoleSession) (*aichat.ChatBot,
 	if p.historyDB != nil {
 		historyStore = newSQLHistoryStore(p.historyDB, chatConsoleHistoryKey(s.info.ID), p.Logger)
 	}
+	scope := panelHeaderScope(s)
 	chat, err := aichat.NewChatBot(
 		p.cfg.BaseURL,
 		p.cfg.APIKey,
@@ -566,8 +594,8 @@ func (m *chatConsoleManager) ensureChat(s *chatConsoleSession) (*aichat.ChatBot,
 		p.cfg.MaxContextTokens,
 		executor,
 		historyStore,
-		aichat.WithClientOptions(append(p.llmClientOptions(), aichat.WithAPIFormat(p.cfg.APIFormat))...),
-		aichat.WithCompressorClient(p.buildCompressorClient()),
+		aichat.WithClientOptions(append(p.llmClientOptionsFor(scope), aichat.WithAPIFormat(p.cfg.APIFormat))...),
+		aichat.WithCompressorClient(p.buildCompressorClient(scope)),
 		aichat.WithScenePrompt(scene),
 	)
 	if err != nil {
