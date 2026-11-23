@@ -335,6 +335,7 @@ def exa_fetch(url):
 
 # ── Firecrawl 平台实现 ─────────────────────────────────────────────
 # 文档：https://docs.firecrawl.dev/features/search
+# v1 API 已于 2026-12-10 关停（返回 HTTP 410），这里只使用 v2。
 #   POST https://api.firecrawl.dev/v2/search  {query, limit, scrapeOptions}
 #   POST https://api.firecrawl.dev/v2/scrape   {url, formats: ["markdown"]}
 
@@ -361,13 +362,11 @@ def firecrawl_search(query, count, need_content, ori_question=""):
     container = data.get("data") if isinstance(data, dict) else None
     items = []
     if isinstance(container, dict):
-        # v2：{web: [...], news: [...]}；news 仅在指定 sources 时出现
+        # v2：搜索结果在 data.web；data.news 仅在指定 sources 时出现
         for key in ("web", "news"):
             values = container.get(key)
             if isinstance(values, list):
                 items.extend(values)
-    elif isinstance(container, list):
-        items.extend(container)  # 兼容 v1 的扁平数组
     results = []
     for item in items:
         if not isinstance(item, dict):

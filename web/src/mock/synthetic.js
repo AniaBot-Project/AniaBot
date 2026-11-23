@@ -539,7 +539,7 @@ const SKILLS = [
     location: '.builtin/web/SKILL.md', builtin: true, refs: [], extras: ['webctl.py'],
     content: '---\nname: web\ndescription: 联网搜索与网页抓取（内置 CLI，需启用 bash 工具，支持多个搜索平台）：查最新资料、核实外部事实、读取网页正文\n---\n\n# 联网搜索与网页抓取\n\n需要最新资讯、外部事实或网页正文时，先读取本技能，再按说明用 bash 执行附带脚本。\n\n## 命令\n\n```bash\npython3 "<webctl.py 的绝对路径>" providers\npython3 "<webctl.py 的绝对路径>" search "查询词" [--count 8] [--content]\npython3 "<webctl.py 的绝对路径>" fetch "https://example.com/article"\n```\n\n- 需要至少一个平台 API Key（DEEPSEEK_API_KEY / TAVILY_API_KEY / EXA_API_KEY / FIRECRAWL_API_KEY / JINA_API_KEY），不指定平台时自动检测\n- 搜索结果摘要够用就不必抓正文；fetch 返回完整正文\n',
     files: [
-      { name: 'webctl.py', kind: 'extra', size: 27770, content: '#!/usr/bin/env python3\n"""AniaBot 内置 web 技能 CLI：搜索与抓取（多平台）"""\n' },
+      { name: 'webctl.py', kind: 'extra', size: 27754, content: '#!/usr/bin/env python3\n"""AniaBot 内置 web 技能 CLI：搜索与抓取（多平台）"""\n' },
     ],
   },
   {
