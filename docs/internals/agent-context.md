@@ -37,6 +37,12 @@ flowchart TB
 - 切点需对齐 `tool_call` 边界：保留区第一条若是 tool 结果消息，其对应的 assistant tool_calls 已在被丢弃的一半中——孤立 tool 消息会被 OpenAI 兼容 API 拒绝（sticky 400）。因此切点后移越过所有孤立 tool 消息；极端情况下清空历史（等效新对话，请求合法）
 - 截断后 `lastPromptTokens` 置 0，若仍超阈值下一轮会再走压缩/截断，逐步收敛
 
+## 单请求内上下文保护（工具循环兜底）
+
+窗口压缩只在**每轮 `Chat` 开始时**做一次；一个回合内的多步工具循环仍可能把 messages 逐步撑过窗口，导致整批请求以「超上下文」失败。`ToolOrchestrator` 因此增加回合内兜底：每步 LLM 返回后检查 `usage.PromptTokens`，超过 `max_context_tokens × 85%` 时，把较旧的大工具结果裁成「标记 + 原始长度 + 头尾片段」（`contextPruneKeepRecent=6` 条最近消息与 tool_call 配对完全不动，被裁结果保留头尾各 1000 字符）。裁剪只改写当轮请求上下文，不改窗口与持久化历史——历史仍由回合开始时的 `MaybeCompress` 负责。
+
+这样长工具循环既不会因上下文溢出整批失败，也不会把几轮巨型工具输出永久写进历史。
+
 ## 历史持久化
 
 ### HistoryStore 抽象

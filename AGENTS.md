@@ -324,6 +324,9 @@ Rules that most often break plugins:
 - **Middleware chain**: `OnGroupMsg`/`OnFriendMsg` return `(bool, error)`; `false` stops
   propagation. Each call runs under `safeExecute*`; message events get a fresh
   `context.WithTimeout` from `bot.msg_event_timeout_sec` (default 300s, capped at 24h).
+  `pluginaichat` only uses this budget for its own legacy inner paths (the panel 试聊室 has an
+  inner deadline); IM chat turns are enqueued and run by the session runner, so this value no
+  longer limits AI turns (see "Session runner & task registry" below).
 - **Broadcast notices**: all 14 notice types (upload/admin/decrease/increase/ban/friend-add/
   recall×2/poke/lucky-king/honor/emoji-like/essence/card) go to every plugin with no
   short-circuit, 5 min timeout. QQ-only notices simply never fire on other platforms.
@@ -395,10 +398,27 @@ all session-scoped tool registration.
 - Custom request headers (`plugin.ai_chat_bot.headers`) apply to every LLM request (main/sub/
   clock/compressor/OCR/fallback) and support session placeholders `${session}` (unique per
   conversation, renewed on new conversation), `${session_id}`, `${session_type}`.
+- Request-level guards (`llm.*`): every LLM HTTP request (streaming included) gets
+  `request_timeout_sec` (default 600, per attempt — retries/fallback get a fresh budget) and a
+  stream-idle watchdog `stream_idle_timeout_sec` (default 120, reset by any upstream chunk;
+  anthropic's internally-streamed generate path also applies it). Both surface as
+  `context.DeadlineExceeded`-wrapped errors and therefore go through the normal retry/fallback
+  path. They replace the old "5-minute turn hard kill" as the upstream-hang backstop; 0 disables.
 - Context window: `messageWindow` is token-budget based, not turn based — when the last prompt
   token count exceeds 80% of `max_context_tokens` it compresses earlier history via the
-  compressor model. `ToolOrchestrator` runs LLM → tool → result loops up to `max_iterations`
-  (default 100 in config; plugin fallback 20).
+  compressor model. `ToolOrchestrator` runs LLM → tool → result loops with **no turn cap by
+  default** (`plugin.ai_chat_bot.max_iterations`, default 0 = unlimited; a positive value keeps
+  the old semantics including one forced tool-less final round). Within a single request it
+  also guards the window: when a step's prompt tokens exceed 85% of the window, older large
+  tool results are trimmed to a head/tail summary (keeping tool_call pairing; most recent 6
+  messages untouched) so a long tool loop cannot overflow mid-turn.
+- Tool-loop watchdog (`turn.*`, carried in `aichat.WatchdogOptions`, zero = all off): repeated
+  identical tool call (same name+args set) triggers reminders at `repeat_tool_warn` thresholds
+  (default `3,5,8`), aborts with `aichat.WatchdogAbortError` at `no_progress_limit` (default 12,
+  0 = remind only); `progress_reminder_after` (default 6) injects one delegation reminder;
+  `soft_timeout_sec` (default 600) injects one "wrap up / hand off" reminder without cancelling.
+  Reminders are appended as user-role messages and returned to the plugin, so they persist in
+  history deliberately.
 
 **History & sessions**
 
@@ -420,10 +440,20 @@ all session-scoped tool registration.
 **Conversation behavior (`pluginaichat`)**
 
 - Message pipeline: self-filter → approval-reply intercept → (group) record proactive scene →
-  mention gate → commands (`/proactive`, `/clock`, `/stop`, `/plan`, `/cmd`, `/status`,
-  `#新对话` handling) → AI request. While a response is running, further messages are silently
-  queued per session (`pendingqueue.go`) and processed in batches; `/stop` cancels the request
-  and drains its queue.
+  mention gate → commands (`/proactive`, `/clock`, `/tasks`, `/resume`, `/stop`, `/plan`, `/cmd`,
+  `/status`, `#新对话` handling) → **enqueue and return immediately** (`runner.go`). The
+  background session runner executes turns; further messages are silently queued per session
+  (`pendingqueue.go`) and processed in batches. `/stop` cancels the current turn and clears that
+  session's queue (explicit stop); `/stop <任务ID>` cancels only the named background subagent;
+  `/tasks` lists the session's running subagents plus the task registry's recent rows; `/resume
+  <任务ID>` re-queues an `interrupted` subagent/handoff task of this session as a continuation
+  prompt for the main AI.
+- Prompt: main sessions append a dynamic "任务编排与时间预算" guide after the scene description
+  (`orchestrationGuide` in `llm.go`): delegate multi-step work to `subagent_run`, launch
+  independent subagents in the same reply, never wait/poll after delegating, keep the main
+  dialogue for decompose/summarize/report, and prefer `task_handoff` over ending early when a
+  turn runs long. Sub-agent / clock one-shot sessions do not get it. The sub-agent prompt tells
+  it to return a self-contained result.
 - Reply rendering: `|||` always splits a reply into multiple messages (content inside code
   fences is exempt; in groups >3 parts are merged into one forward when the platform supports
   it); stream replies (`stream.enable`) update a single message on platforms that support
@@ -437,18 +467,46 @@ all session-scoped tool registration.
 **Sub-agents, teams, todo, plan, approval, hooks**
 
 - **Sub-agents** (`subagent.go`, `subagent_async.go`, `subagenttool.go`): `subagent_run` /
-  `subagent_list` / `subagent_cancel` are registered on main sessions only. A sub-agent is an
-  ephemeral `ChatBot` (nil history store) with its own `SessionToolExecutor` and scoped tools but
-  no `subagent_run`, no team tools and no parent image callbacks, so runs cannot recurse. Session
+  `subagent_list` / `subagent_cancel` are registered on main sessions only and only when
+  `subagent.enable=true`. A sub-agent is an ephemeral `ChatBot` (nil history store) with its own
+  `SessionToolExecutor` and scoped tools but no `subagent_run`, no team tools and no parent image
+  callbacks, so runs cannot recurse (depth is inherently 1; there is no `max_depth` key). Session
   runs are **asynchronous**: the tool starts a tracked goroutine (`b.Go`) and returns immediately;
   on completion the formatted result (`【子代理执行完成】…`) is enqueued as a synthetic message in
   the session's pending queue and the session is kicked, so the main AI picks it up in a
-  follow-up turn. `/stop` cancels running sub-agents. Timeout: default = the framework
-  per-message budget (`bot.msg_event_timeout_sec`, fallback 5 min), a per-call `timeout_sec`
-  overrides it (capped at 1800s), then the value is shrunk to fit the parent context deadline
-  minus a reserve — insufficient budget refuses the launch. Clock tasks get their own async
-  variant that drains all runs at wrap-up instead of enqueuing; agent-team members reuse the
-  synchronous `runSubagentWithOptions`.
+  follow-up turn. Timeout is independent from the framework event budget:
+  `subagent.default_timeout_sec` (default 1800 = 30 min; 0 = unlimited), a per-call `timeout_sec`
+  overrides it, and `subagent.max_timeout_sec` (default 0 = unlimited) caps the model-supplied
+  value; if the parent turn really has a deadline (hard cutoff), the timeout is shrunk to fit
+  that remaining budget with a 30s reserve (never below 10s). Concurrency is capped by
+  `subagent.max_concurrent_per_session` (4) and `subagent.max_concurrent_global` (8, a separate
+  pool from the `rate_limit` chat slots). Async results are length-governed:
+  `subagent.result_inline_runes` (default 8000) — longer results are spilled to a per-session
+  file and the synthetic message carries a preview + handle for `read_tool_output`. The UI
+  path is `/stop <任务ID>` / `/tasks`; the agent path is `subagent_list` / `subagent_cancel`.
+  Clock tasks get their own async variant that drains all runs at wrap-up instead of enqueuing;
+  agent-team members reuse the synchronous `runSubagentWithOptions` (its result is still
+  untruncated head-wise and goes through the central tool-result limiter). Named subagents,
+  in-run steering (`send_message`) and structured status returns are P2, not implemented:
+  subagents currently have only a generated task ID.
+- **Session runner & task registry** (`runner.go`, `taskstore.go`, `tasktrack.go`, `taskscmd.go`):
+  `OnGroupMsg`/`OnFriendMsg` only gate/command/enqueue and return at once; `submitTurn` enqueues
+  and starts a `b.Go` runner per session. The runner tries the session lock (one turn at a time
+  per session; cross-session concurrency is bounded by `rate_limit`, default 4), creates the
+  turn context with `context.WithoutCancel` + a lifecycle link to `p.runCtx` + an optional hard
+  deadline (`turn.hard_timeout_sec`, default 14400 = 4h; 0 = no limit), schedules the long-task
+  ack (`turn.ack_after_sec`, default 20s without visible output), and drains queued batches in a
+  loop. If the global rate-limit slots are full, the queue is dropped with a "too many requests"
+  reply. `OnUnload` cancels `runCtx` (all runners/subagents) and every async subagent group.
+  Every turn and async subagent writes a row to `ania_agent_task` (kind
+  `turn|subagent|handoff|bash_job|clock|proactive|goal_round`, status
+  `queued|running|waiting|completed|failed|timeout|cancelled|interrupted`, stop reason
+  `completed|aborted|max_tokens|error|watchdog|timeout|user_stop`, plus tokens/meta/timestamps);
+  task DB writes use short standalone contexts (3s) so a stuck DB never blocks a turn. Startup
+  marks leftovers `interrupted`; `/tasks` shows running subagents + the most recent rows; `/resume
+  <id>` re-queues an interrupted subagent/handoff task as a synthetic message (this session only);
+  a janitor deletes finished rows past `task.retention_days` (default 7, every 6h). If the SQL
+  probe/DDL fails, task persistence degrades to in-memory/no-op without blocking startup.
 - **Agent teams** (`team.go`, `teamroles.go`, `teamtool.go`): persistent teams per scope
   (`g:`/`f:` in KV, `global` managed from the panel only), each member = name + role prompt.
   `team_run` runs members in parallel as ephemeral agents and synthesizes their outputs;
@@ -575,9 +633,10 @@ Registration hierarchy:
    gets `clock_*`, `memory_*`, `kb_*`, `proactive_*`, platform-injected tools, and — when
    enabled — `skill_*` management (`skill_tool.enable`) and `mcp_*` management
    (`mcp_tool.enable`, persists to `files.mcp_json` and hot-registers/unregisters). Main sessions
-   additionally get `todo_write` (`todo.enable`), `subagent_run/list/cancel` and
-   `team_run/create/list/delete`; clock sessions get `skip_output` plus their own async
-   `subagent_*` set; chat-console sessions register only the shared scoped tools. Each session
+   additionally get `todo_write` (`todo.enable`), `subagent_run/list/cancel`, `task_handoff` and
+   `team_run/create/list/delete` (the first two only when `subagent.enable=true`); clock sessions
+   get `skip_output` plus their own async `subagent_*` set; chat-console sessions register only
+   the shared scoped tools. Each session
    gets its own `SessionToolExecutor`; MCP tools loaded via `mcp_load` are per-session.
 6. **Config tools** (`config_tool.enable`, default off): `config_get`/`config_set` (registered
    keys only, sensitive fields masked, admin approval, restart needed) and
@@ -604,7 +663,8 @@ row-level components disable themselves with an error log when the SQL probe/DDL
 degradation must never block startup, and plugin-created tables must follow the same rule.
 Use the `ania_` prefix. Existing tables: `ania_kv` (config/KV), `ania_chat_session`,
 `ania_chat_message`, `ania_memory`, `ania_kb_doc`, `ania_intention`, `ania_query_log`,
-`ania_task_log`, `ania_op_log`. Conventions: MySQL string keys `VARCHAR(255) COLLATE
+`ania_task_log`, `ania_op_log`, `ania_agent_task` (AI turn/subagent/handoff task registry, with
+`(session_key,status)` and `(status,updated_at)` indexes). Conventions: MySQL string keys `VARCHAR(255) COLLATE
 utf8mb4_bin`, large payloads `MEDIUMTEXT`, timestamps as INTEGER unix seconds or fixed-width UTC
 text (lexicographic = chronological); redundant filter columns only narrow candidates in WHERE —
 the Go-side matcher stays the final judge so SQL and KV paths stay semantically identical.

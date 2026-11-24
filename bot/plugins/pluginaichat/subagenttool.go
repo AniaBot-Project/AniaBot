@@ -60,7 +60,7 @@ func newSubagentTools(p *AIChatPlugin, b bot.Bot, id message.QID, isGroup bool) 
 
 type subagentRunParams struct {
 	Task       string `json:"task" desc:"完整自洽的任务指令：子代理看不到当前对话，必须把背景、目标、期望的输出格式都写清楚"`
-	TimeoutSec int    `json:"timeout_sec,omitempty" desc:"本次执行的超时秒数（上限 1800），不填用默认值"`
+	TimeoutSec int    `json:"timeout_sec,omitempty" desc:"本次执行的超时秒数，不填用默认值（subagent.default_timeout_sec，0 表示不限制）；受 subagent.max_timeout_sec 约束"`
 }
 
 type subagentRunTool struct {

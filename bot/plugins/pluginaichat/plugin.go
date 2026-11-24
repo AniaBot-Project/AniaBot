@@ -162,8 +162,8 @@ type AIChatPlugin struct {
 	historyTools sync.Map
 
 	// msgEventTimeout 框架级消息处理超时（bot.msg_event_timeout_sec，Start 时
-	// 从全量 viper 读取）：仅供历史遗留路径（试聊室等）兜底；AI 回合不再使用
-	// 该预算，改由 turnSoftTimeout / turnHardTimeout 与本包看门狗管理。
+	// 从全量 viper 读取）：仅供历史遗留路径（面板试聊室等）兜底；AI 回合不再使用
+	// 该预算，改由 turnSoftTimeout / turnHardTimeout 与本包看门狗管理（见 runner.go）。
 	msgEventTimeout time.Duration
 
 	// runCtx 插件生命周期上下文：回合运行器与后台任务继承它，OnUnload 时取消，

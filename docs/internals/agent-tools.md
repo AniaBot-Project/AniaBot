@@ -1,6 +1,6 @@
 # AI 引擎（三）工具、MCP 与高级编排
 
-本章介绍 Agent 的**能力扩展与高级编排**：工具如何定义与执行、MCP 如何两阶段懒加载、Skill 系统、AI 定时任务、子代理、Agent 团队、知识库与配额、钩子与工具门禁。
+本章介绍 Agent 的**能力扩展与高级编排**：工具如何定义与执行、MCP 如何两阶段懒加载、Skill 系统、AI 定时任务、会话运行器与任务注册表、子代理与后台交接、看门狗、Agent 团队、知识库与配额、钩子与工具门禁。
 
 ## 工具系统
 
@@ -63,7 +63,7 @@ type SessionToolExecutor struct { // 会话层：每个会话独立
 | `CreateToolsWithMCP()` | 追加 MCP 工具（`mcpLazyLoad` 决定发现/加载模式或全量注册） |
 | `CreateToolsWithSkill()` | 追加 `skill_read` / `skill_reload` 工具与 SkillManager（同时加载内置技能） |
 
-另由 aichat 插件在会话层注册：`config_get`/`config_set`（配置中心读写，敏感字段掩码、仅注册键可写、重启生效——重启由管理员发送 `/reboot` 命令执行，AI 只负责引导）、`config_file_get`/`config_file_set`（扩展配置读写：`files.mcp_json`/`files.prompt_json`/`files.hooks_json`/`files.commands_json`，只校验 JSON 语法，hooks/commands/prompt 保存后数秒热生效、mcp 重启生效）、`mcp_list`/`mcp_add`/`mcp_remove`/`mcp_reconnect`（MCP 服务器自管理，写 `files.mcp_json` 持久化 + 运行时热注册/注销）、会话绑定的 clock/memory/knowledge/team/subagent 工具。其中配置修改类工具（`config_set`/`config_file_set`）执行前恒需管理员审批（与审批开关无关，请求者本人不能批准）。
+另由 aichat 插件在会话层注册：`config_get`/`config_set`（配置中心读写，敏感字段掩码、仅注册键可写、重启生效——重启由管理员发送 `/reboot` 命令执行，AI 只负责引导）、`config_file_get`/`config_file_set`（扩展配置读写：`files.mcp_json`/`files.prompt_json`/`files.hooks_json`/`files.commands_json`，只校验 JSON 语法，hooks/commands/prompt 保存后数秒热生效、mcp 重启生效）、`mcp_list`/`mcp_add`/`mcp_remove`/`mcp_reconnect`（MCP 服务器自管理，写 `files.mcp_json` 持久化 + 运行时热注册/注销）、会话绑定的 clock/memory/knowledge/team/subagent 工具，以及主会话的 `task_handoff`（后台交接）。其中配置修改类工具（`config_set`/`config_file_set`）执行前恒需管理员审批（与审批开关无关，请求者本人不能批准）。
 
 ### 回调桥（CallBackFuncs）
 
@@ -186,31 +186,54 @@ flowchart TB
 - 播报提示（`noteDelivered` / `deliveryHint`）：成功推送（最终回复、工具发出的图片/文件）后按目标会话记一个投递序号；用户在该会话的下一轮发言里，提示以尾部注入的方式拼在用户消息前（请求成功后才 `commitDeliveryHint` 记账，失败轮次会重新注入；`PersistUserText` 保证它不进入历史回放），指引 AI 先用该会话可用的 `*_get_msg_history` 工具确认播报内容——任务会话与主对话的历史互不相通，不提示的话用户对着播报追问时 AI 只能反问
 - 用户经 `/clock` 管理，AI 经 `clock_create/list/update/delete/log` 工具管理
 
+## 会话运行器与任务注册表
+
+AI 消息入口不再在框架事件 goroutine 里跑完整个回合（`runner.go`）：`OnGroupMsg`/`OnFriendMsg` 只做去重、自过滤、命令与 mention 门，然后把消息入队并立即返回；后台 goroutine 按会话串行接管队列。
+
+- **入口零阻塞**：`submitTurn` 入队后 `b.Go("runner:<session>")` 唤醒运行器；同一会话同一时刻只有一个回合（会话锁），跨会话并发受 `rate_limit`（默认 4）槽位限制。长回合不再占用框架事件 worker，也不受 `bot.msg_event_timeout_sec` 约束。
+- **回合上下文**：`context.WithoutCancel(parent)` 保留 Value（追踪、图片注册表）但丢弃框架 deadline；关联插件生命周期 `p.runCtx`（`OnUnload` 取消）；`turn.hard_timeout_sec`（默认 14400s，0=不限）叠加硬截止。
+- **长任务受理提示**：回合运行超过 `turn.ack_after_sec`（默认 20s）仍无可见输出（流式首字/最终发送）时，先发一条「正在处理」提示，每回合最多一条。
+- **排空循环**：每批处理完继续 drain 队列；出错/取消时该批用户消息之外的行为由错误处理决定（`/stop` 是显式停止，会清空该会话排队队列）。
+- **任务注册表**（`taskstore.go` + `tasktrack.go`）：回合与异步子代理各写一行 `ania_agent_task`（`id` 形如 `t-<36进制纳秒>-<4位hex>`，含 `session_key/parent_id/kind/status/title/prompt/result/error/stop_reason/tokens/meta/时间戳`），状态机 `queued → running → completed|failed|timeout|cancelled|interrupted`，停止原因 `completed|aborted|max_tokens|error|watchdog|timeout|user_stop`。任务表写入走 3 秒独立 ctx，DB 卡住不影响回合；建表失败降级为不持久化（不阻断启动）。
+- **重启恢复**：启动时 `MarkInterrupted` 把残留的 `queued/running/waiting` 标记为 `interrupted`；默认不自动续跑，用户发 `/resume <任务ID>` 把本会话的 `interrupted` 子代理/交接任务重新入队（任务目标作为系统来源消息），由主 AI 带着会话历史继续。
+- **清理**：按 `task.retention_days`（默认 7 天）每 6 小时删除已结束且过期的任务记录。
+- **用户命令**：`/tasks`（本会话运行中子代理 + 最近任务，含状态/耗时/类型/停止原因/token）、`/stop`（取消当前回合并清空本会话排队）、`/stop <任务ID>`（只取消指定后台子代理）、`/resume <任务ID>`。
+
 ## 子代理（subagent）
 
-`subagent_run` 让主 AI 委派复杂/耗时子任务给**一次性子代理**（默认启用，无配置开关）：
+`subagent_run` 让主 AI 委派复杂/耗时子任务给**一次性子代理**（`subagent.enable` 默认开启；关闭后不注册子代理与交接工具）：
 
-- 子代理是全新 `ChatBot`（nil historyStore，执行完丢弃），独立 `SessionToolExecutor`，拥有与主 AI 一致的会话级工具（clock/memory/knowledge），但**不再注册 subagent 自身**（防递归）
+- 子代理是全新 `ChatBot`（nil historyStore，执行完丢弃），独立 `SessionToolExecutor`，拥有与主 AI 一致的会话级工具（clock/memory/knowledge），但**不再注册 subagent 自身与团队工具**（防递归，深度天然为 1）
 - 中间轮文本丢弃；发送图片/文件、读历史仍作用于当前会话
 - 图片状态隔离：子代理有自己的图片队列，`LoadImages` 是 stub（推迟给主 AI），避免两个工具循环互踩队列
-- 执行参数全部跟随主模型：模型与 API 格式直取主模型四元组（`subagentLLMConfig`），生成参数经 `buildChatOptions` 复用主模型配置，工具轮数取 `mainMaxIterations()`（主模型的最大工具调用轮数），超时取框架消息处理预算
-- 只有最终回复作为工具结果返回给主 AI，前缀运行元数据（时长、LLM 轮数、token）；结果完整回填，超过统一工具结果内联上限时落盘为预览 + handle（主 AI 可用 `read_tool_output` 读取）
+- 执行参数全部跟随主模型：模型与 API 格式直取主模型四元组（`subagentLLMConfig`），生成参数经 `buildSubagentChatOptions` 复用主模型配置，工具轮数取 `mainMaxIterations()`（主模型的最大工具调用轮数）
+- **异步语义**：工具启动受跟踪的 goroutine（`b.Go`）后立即返回任务 ID；完成时格式化结果（`【子代理执行完成】…`）作为合成消息入该会话 pending 队列并唤醒运行器，由主 AI 在后续回合处理。主回合不等待、不轮询
+- **结果治理**：同步路径（团队/定时任务复用 `runSubagentWithOptions`）的最终文本作为工具结果返回、仍经过统一工具结果治理；异步路径按 `subagent.result_inline_runes`（默认 8000）处理——超长结果由 `toolResultLimiter.LimitAt` 落盘为会话私有文件，合成消息只带摘要 + handle，主 AI 用 `read_tool_output` 读取
+- **并发边界**：每会话 `subagent.max_concurrent_per_session`（4）与全局 `subagent.max_concurrent_global`（8）两个信号量，全局池与对话回合的 `rate_limit` **分开计算**；超出直接返回可读错误，不静默排队。`/stop` 与 `subagent_cancel`/`/stop <ID>` 按 ID 取消；`OnUnload` 取消全部后台子代理
+- **命名与运行中通信（P2 未实现）**：当前子代理只有启动时生成的任务 ID（`t-…`），不支持自定义名字、`send_message` 追加指令、结构化 `status/summary/artifacts` 返回或跨重启续跑；这些属于方案文档 P2 的 Subagent 2.0 计划，`subagent_list` 目前返回 ID/任务摘要/运行时长
 
 ### 超时预算
 
 ```go
-func resolveSubagentTimeout(defaultTimeout, timeoutSec int, parentCtx) (timeout, error) {
-    // 1. 默认超时 = p.subagentTimeout()，即 bot.msg_event_timeout_sec（未配置兜底 5m），与主请求预算同源
-    // 2. timeoutSec 先限幅 int 再乘 time.Second（防溢出为负 duration），上限 1800s
-    // 3. 父上下文带 deadline 时，为主请求预留 30s 收尾，压缩子代理超时
+func resolveSubagentTimeout(defaultTimeout time.Duration, timeoutSec int, parentCtx) (timeout, error) {
+    // 1. 默认超时 = subagent.default_timeout_sec（默认 1800s=30min，0=不限制）
+    // 2. timeoutSec>0 时覆盖默认值，先限幅 int 再乘 time.Second（防溢出）；业务上限 subagent.max_timeout_sec（0=不限）
+    // 3. 仅当父上下文真有 deadline（父回合硬截止）时，预留 30s 收尾并压缩到剩余预算；不足时缩到剩余量一半、保底 10s
 }
 ```
 
-设计动机：框架对单次消息处理有总预算（`bot.msg_event_timeout_sec`，默认 5 分钟，面板可调）。子代理超时必须**早于**父 deadline 触发，超时才能作为工具结果优雅返回、让主 AI 用剩余时间完成最终回复；否则父 deadline 先触发，整个主请求以「请求超时」中止。`/stop` 通过父请求 context 一并取消子代理。
+超时与框架消息事件预算**彻底解耦**：`bot.msg_event_timeout_sec` 只约束框架事件入口，不再作为子代理默认超时。子代理自身超时以错误结果返回，让主 AI 用剩余时间收尾；`/stop` 通过异步子代理组的 cancel 取消。
 
 ### 定时任务专属：异步子代理
 
 clock 任务里注册的是**异步**子代理变体（`clocksubagent.go`）：子代理在后台并发执行（`subagent_run`/`subagent_list`/`subagent_cancel`），任务收尾时 `drainClockSubagents` 等待全部完成（预留 30s 合成预算），把结果回喂给同一个一次性 ChatBot 做多轮合成（上限 5 轮），只推送最终合成的回复。子代理超时随剩余预算收缩。
+
+## 后台交接（task_handoff）与看门狗
+
+- **`task_handoff`**（主会话、`subagent.enable=true` 时注册）：模型把「已完成摘要 `summary` + 剩余工作 `remaining` + 验收标准 `acceptance`」交给后台子代理继续，当前回合立即结束。工具内部把三段拼成自包含的后台任务提示词，复用异步子代理通道（kind=`handoff`），完成后结果照常回到会话。软截止提醒会明确引导模型调用它，把「超时」变成「换一个地方继续做」。
+- **委派提醒**：同一回合工具轮数达到 `turn.progress_reminder_after`（6）时注入一次「考虑用 `subagent_run` 拆出独立部分」提醒。
+- **重复/无进展看门狗**（`bot/component/aichat/toolwatchdog.go`）：同一轮工具调用的签名 = 排序后的 `name+args`；签名连续不变时按 `turn.repeat_tool_warn`（`3,5,8`）各注入一次换方案提醒，达到 `turn.no_progress_limit`（12）时返回 `aichat.WatchdogAbortError` 终止工具循环（`0` 只提醒）；提醒以 user 角色追加并随本轮返回进入历史，后续回合模型仍能看到。
+- **单请求内上下文保护**：每步 LLM 返回的 prompt token 超过窗口 85% 时，把较旧的大工具结果裁剪为「标记 + 原始长度 + 头尾片段」（保留最近 6 条消息与 tool_call 配对），窗口级压缩仍由回合开始时的 `messageWindow` 负责。
 
 ## Agent 团队（team）
 

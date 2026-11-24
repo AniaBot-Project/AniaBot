@@ -28,7 +28,7 @@ AniaBot 是一个用 Go 写的插件驱动型多平台机器人框架，**你自
   | `dc:` 前缀 | Discord |
   | `wx:` 前缀 | 微信 |
 - **插件**：内置「系统 / 日志 / 请求拦截 / 复读机 / 每日新闻 / AI 对话」六个；第三方插件从面板「插件市场」安装（自动下载源码 → 编译 → 重启）。
-- **AI 对话能力**：三种 LLM API 格式（`chat_completions` / `responses` / `anthropic`）、工具调用、MCP、技能（skill）、长期记忆、知识库、定时任务、主动互动、子代理、Agent 团队、工具审批、计划模式、上下文压缩与配额限制。
+- **AI 对话能力**：三种 LLM API 格式（`chat_completions` / `responses` / `anthropic`）、工具调用、MCP、技能（skill）、长期记忆、知识库、定时任务、主动互动、子代理（异步委派 + 后台交接）、Agent 团队、工具审批、计划模式、上下文压缩、任务编排与配额限制。
 - **数据落点**：SQLite `./data/aniabot.db`（可用环境变量换 MySQL）；微信登录凭据在 `./data/weixin/`；市场插件在 `./data/plugins/`；技能目录默认 `./skills`（配置项 `plugin.ai_chat_bot.skills_dir`）。
 
 ## 三、要查/改配置，按这个顺序走
@@ -60,7 +60,7 @@ AniaBot 是一个用 Go 写的插件驱动型多平台机器人框架，**你自
 | 每日新闻推送 | 每日新闻插件（`plugin.dailynews.*`：cron、群列表），或 `/news` |
 | 接 QQ / 飞书 / Telegram / Discord / 微信 | 配置管理 → 平台适配器（先勾 `bot.platform.<名字>.enable`）→ 对应适配器分组填连接信息；**重启生效** |
 | 面板端口 / 局域网访问 / 关掉面板 | Web 面板 → `bot.admin_panel.listen`（`0.0.0.0:7700` 可局域网访问） |
-| 单条消息处理超时、复杂任务被打断 | Bot 基础 → `bot.msg_event_timeout_sec`（默认 300 秒） |
+| AI 回复跑太久、复杂任务被打断 | AI 回合已不再受 `bot.msg_event_timeout_sec` 限制：软截止提醒 / 硬截止 / 无进展看门狗在 `plugin.ai_chat_bot.turn.*`（硬截止默认 4 小时），单次请求超时在 `plugin.ai_chat_bot.llm.*`；后台任务见 `/tasks` |
 | 定时任务推送失败、发送超时 | 对应适配器的请求/上传超时（如 NapCat `bot.adapter.request_timeout_sec`） |
 | 装第三方插件 | 面板「插件市场」（安装/升级/卸载都会自动编译重启） |
 | 升级 AniaBot 本体 | 面板「自动更新」（需先在配置里填 `bot.update.source_dir` 源码目录） |
@@ -79,14 +79,16 @@ AniaBot 是一个用 Go 写的插件驱动型多平台机器人框架，**你自
 | `/proactive on` / `/proactive off` | 立即生效，并写回 `plugin.ai_chat_bot.proactive.scopes`；面板手改该键后可用 `/proactive reload` 免重启重读 |
 | `plugin.ai_chat_bot.skills`（白名单） | **重启后**（面板上传/删除技能会自动热重载，但白名单本身在启动时读） |
 | `bot.balance.*`（面板概览的 API 余额） | 修改后即时生效 |
-| `/plan on`、`/plan off`、`#新对话`、`/stop`、`/status` | 会话内立即生效 |
+| `/plan on`、`/plan off`、`#新对话`、`/stop`、`/tasks`、`/resume`、`/status` | 会话内立即生效 |
 
 ## 五、用户能用的指令（群聊里一条都要先 @ 机器人）
 
 | 指令 | 说明 | 权限 |
 | --- | --- | --- |
 | `/help` | 列出已加载插件与各自的用法 | 所有人 |
-| `/stop` | 立刻停止当前会话正在进行的 AI 回复（含排队的消息） | 所有人 |
+| `/stop` | 立刻停止当前会话正在进行的 AI 回复，并清空该会话排队消息；`/stop 任务ID` 只取消指定的后台子代理 | 所有人 |
+| `/tasks` | 查看当前会话运行中的子代理与最近的后台任务（状态、耗时、类型、停止原因、token） | 所有人 |
+| `/resume 任务ID` | 恢复进程重启前被中断（interrupted）的子代理/交接任务：把任务目标重新交给主 AI 带会话历史继续；仅限本会话 | 所有人 |
 | `/status` | 查看当前会话的 AI 状态：响应中 / 等待子代理 / 排队中 / 空闲，含已持续时长、最近阶段与排队消息数 | 所有人 |
 | `/plan on` 或 `/plan off`、`/plan` | 计划模式开关：只分析规划，禁止改文件、跑命令、改配置等副作用操作 | 所有人 |
 | `/clock` | 定时任务：`list` / `add [--once] <cron> \| <标题> \| <内容>` / `del <id>` / `on` 或 `off <id>` / `info <id>` / `timeout <id> <秒>` / `log [n]` / `help`；`list all`、`run <id>` 仅管理员 | 所有人（部分仅管理员） |
@@ -110,7 +112,7 @@ AniaBot 是一个用 Go 写的插件驱动型多平台机器人框架，**你自
 | 启动后平台一直没连上 | 是否卡在首次设置向导（`meta.setup_pending` 未完成时**不连接任何平台**）；平台 `enable` 与连接参数（ws 地址 / token）是否正确 |
 | 改了配置没反应 | 99% 是没重启；只有第四节列的热生效项例外 |
 | 成员/群被拦了、AI 不回某人 | 查请求拦截插件名单（`plugin.interceptor.*`，含按平台的「可用平台」勾选） |
-| 回复很慢或被打断 | `bot.msg_event_timeout_sec`（默认 300 秒）与 `plugin.ai_chat_bot.max_iterations`；面板「Query 日志」看卡在哪一步 |
+| 回复很慢或中途停下 | 长任务已改为后台执行且默认不限轮数：面板「Query 日志」看卡在哪一步；`turn.*` 看软/硬截止与看门狗，`llm.*` 看单次请求/流空闲超时；用 `/tasks` 看后台任务与 `/resume` 恢复被中断任务 |
 | 429 / 上下文超限 / 余额不足 | 面板「Query 日志」「Token 统计」看消耗；上下文压缩模型（`compressor.*`）是否可用；`max_context_tokens` 是否偏小 |
 | 图片看不懂 | `plugin.ai_chat_bot.multimodal`（主模型是否支持图片）+ 备用识图 `ocr.*` |
 | MCP 工具没出现 | `files.mcp_json` 格式/命令是否正确（MCP 改动要重启）；懒加载模式下先 `mcp_discover_*` 再 `mcp_load_*` |

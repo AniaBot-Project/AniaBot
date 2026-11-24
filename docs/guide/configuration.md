@@ -47,7 +47,7 @@ AniaBot 的全部配置存储在**数据库**中（持久化存储的 `ania_kv` 
 | 配置键 | 默认值 | 说明 |
 | --- | --- | --- |
 | `bot.admin_ids` | 空 | 管理员 ID 列表（每行一个，**可配置多个**）。QQ 为 `qq:QQ号`（如 `qq:123456789`），其他平台为带前缀的 ID（如飞书 `fs:ou_xxx`）。任一管理员均拥有最高权限：远程 `/exit` 退出、强制执行定时推送、查看全部定时任务、接收 panic 告警、审批 AI 配置修改等。旧版单值键 `bot.admin_id` 会在启动时自动迁移为列表 |
-| `bot.msg_event_timeout_sec` | `300` | 单条消息事件（如一次 AI 回复）的最大执行时长（秒），超时强制中止。AI 执行复杂任务（多轮工具调用/子代理）被超时中断时调大 |
+| `bot.msg_event_timeout_sec` | `300` | 单条**框架消息事件**（插件链处理）的最大执行时长（秒），超时强制中止，0/负数回退默认值。AI 对话的 IM 回合已改为后台运行器执行，**不再受该值限制**（回合自身的保护见 `plugin.ai_chat_bot.turn.*` / `llm.*`）；目前仍使用它的 AI 内层路径只有面板「试聊室」的单次生成 |
 
 ### admin_panel —— Web 控制面板
 
@@ -266,7 +266,7 @@ bot.luckylilia.http.target_url    = http://localhost:6690 # LLBot HTTP 服务端
 | `plugin.ai_chat_bot.api_key` | 空（必填） | API 密钥 |
 | `plugin.ai_chat_bot.model` | `deepseek-chat` | 主模型名称 |
 | `plugin.ai_chat_bot.multimodal` | `false` | 主模型是否支持图片输入 |
-| `plugin.ai_chat_bot.rate_limit` | `2` | 同时处理的 AI 请求并发上限，超出后直接拒绝 |
+| `plugin.ai_chat_bot.rate_limit` | `4` | 同时执行的 AI **对话回合**上限，超出后直接拒绝并清空该会话排队消息；后台任务（子代理/交接）使用独立并发池，不占该名额 |
 | `plugin.ai_chat_bot.headers` | `[]` | 自定义请求头，附加到全部 LLM 请求（主对话 / 子代理 / 定时任务 / 压缩器 / 备用识图 / 备用模型，以及启用向量检索时的 embedding 请求）；每行一个，格式 `Name: Value` 或 `Name=Value`，同名覆盖默认头（含 `User-Agent`），适合自建网关鉴权、路由标记等场景；值中支持 `${session}` / `${session_id}` / `${session_type}` 会话占位符；非法行跳过并记日志 |
 
 ::: tip 关于自定义请求头
@@ -321,7 +321,7 @@ X-AniaBot-Session: ${session_type}-${session_id}
 | 配置键 | 默认值 | 说明 |
 | --- | --- | --- |
 | `plugin.ai_chat_bot.max_context_tokens` | `128000` | 上下文 token 预算，超过 80% 自动压缩历史 |
-| `plugin.ai_chat_bot.max_iterations` | `20` | 主对话单次回复的最大工具调用轮数，超出后强制结束 |
+| `plugin.ai_chat_bot.max_iterations` | `0` | 单次回复中工具调用循环的轮数上限；`0` 表示**不限制**（由重复调用提醒与无进展看门狗兜底，用户可用 `/stop` 停止）。设为正数时保留旧行为：到达上限后强制一轮无工具收尾。旧版本升级上来的库若已有值 100，会继续按 100 生效，可手动改为 `0` |
 | `plugin.ai_chat_bot.thinking.enable` | `false` | 深度思考开关 |
 | `plugin.ai_chat_bot.thinking.mode` | `auto` | `none` / `low` / `medium` / `high` / `auto` |
 | `plugin.ai_chat_bot.prompt` | 内置场景化 system prompt，按工具场景选择并说明异常处理方式（完整默认值见 `bot/plugins/pluginaichat/config.go` 的 `defaultPrompt`） | 系统提示词（system prompt） |
@@ -438,7 +438,7 @@ python3 "<webctl.py 绝对路径>" fetch  "https://example.com/article" [--<平�
 | 配置键 | 默认值 | 说明 |
 | --- | --- | --- |
 | `plugin.ai_chat_bot.clock.enable` | `true` | 启用后 AI 可自主创建定时任务 |
-| `plugin.ai_chat_bot.clock.default_timeout_sec` | `120` | 单次触发默认超时（秒） |
+| `plugin.ai_chat_bot.clock.default_timeout_sec` | `120` | 单次触发默认超时（秒）；`0` 表示不限制（仅 `skip_output`、取消与进程关闭可停） |
 
 与框架的 `StartCron` 静态任务不同，clock 任务由 AI / 用户**动态创建**、持久化保存、重启不丢。执行日志全量保留（不滚动淘汰），可在面板「AI 定时任务」页查看、导出或清除。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
 
@@ -468,11 +468,48 @@ AI 也可以用 `proactive_create` / `proactive_list` / `proactive_cancel` 自�
 
 记忆按群聊 / 好友隔离、持久化保存、重启不丢。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
 
+### AI 回合与请求保护（turn / llm）
+
+AI 回复不再有"5 分钟一刀切"的总超时：框架的 `bot.msg_event_timeout_sec` 只管消息入口，IM 回合由后台会话运行器执行（消息入队后入口立即返回，同一会话串行、跨会话受 `rate_limit` 限制）。回合自身的保护分三级：软截止只提醒、硬截止才取消、看门狗负责死循环。
+
+| 配置键 | 默认值 | 说明 |
+| --- | --- | --- |
+| `plugin.ai_chat_bot.turn.soft_timeout_sec` | `600` | 软截止（秒）：到达后向模型注入一次「收尾或转后台（`task_handoff`）」提醒，**不取消**回合；`0` 关闭 |
+| `plugin.ai_chat_bot.turn.hard_timeout_sec` | `14400` | 硬截止（秒）：最终兜底，超时取消当前回合并向用户说明原因；`0` 表示不限制（仅 `/stop` 与进程关闭可停）。默认 4 小时 |
+| `plugin.ai_chat_bot.turn.progress_reminder_after` | `6` | 同一回合内工具轮数达到该值时提醒模型「可把独立部分交给 `subagent_run`」；`0` 关闭 |
+| `plugin.ai_chat_bot.turn.repeat_tool_warn` | `3,5,8` | 相同工具 + 相同参数连续重复达到这些次数时各提醒一次「换方案/收尾」；留空关闭 |
+| `plugin.ai_chat_bot.turn.no_progress_limit` | `12` | 相同工具 + 相同参数连续重复达到该次数时**终止回合**并回报原因（防死循环烧 token）；`0` 表示只提醒不终止 |
+| `plugin.ai_chat_bot.turn.ack_after_sec` | `20` | 回合运行超过该时长仍无可见输出时，先给用户发一条「正在处理」提示；`0` 关闭 |
+| `plugin.ai_chat_bot.llm.request_timeout_sec` | `600` | 单次 LLM HTTP 请求（含流式）的总超时（秒），每次重试/备用模型切换独立计时；超时按可重试错误处理；`0` 不限制（不推荐） |
+| `plugin.ai_chat_bot.llm.stream_idle_timeout_sec` | `120` | 流式响应超过该时长没有新内容时中断本次请求并重试，防止上游半挂；`0` 不限制 |
+
+工具结果还会在**单个请求内部**兜底：当某一步的 prompt token 超过上下文窗口的 85% 时，较旧的大工具结果会被裁剪为头尾摘要（保留最近 6 条消息与 tool_call 配对），避免长工具循环把窗口撑爆。这是窗口级压缩之外的回合内保护，无独立配置项。
+
 ### AI 子代理（subagent）
 
-子代理默认启用、无独立配置项：AI 通过 `subagent_run` 工具把复杂/耗时的子任务委派给一次性子代理执行，子代理以全新一次性上下文运行、拥有与主 AI 一致的工具能力，但**不能再委派子代理**。
+子代理默认启用：AI 通过 `subagent_run` 把复杂/耗时的子任务委派给一次性子代理执行。子代理以全新上下文运行（看不到当前对话，任务描述必须自包含）、拥有与主 AI 一致的工具能力，但**不能再委派子代理**（深度固定为 1，没有对应配置项）。委派是**异步**的：工具立即返回任务 ID，子代理在后台执行，完成后结果作为一条消息回到会话并触发主 AI 继续处理。
 
-执行参数全部跟随主模型：模型与 API 格式、生成参数（深度思考等）取「AI 对话 · 模型」配置；工具调用轮数取主模型的「最大工具调用轮数」；超时取框架级「消息处理超时」（`bot.msg_event_timeout_sec`，默认 5 分钟，单次调用可覆盖、上限 1800 秒，实际还会按主请求剩余预算自动收缩并预留收尾时间）。子代理结果完整回填给主 AI；超过统一工具结果内联上限时，完整内容落盘、主 AI 收到预览 + handle，可用 `read_tool_output` 读取。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
+| 配置键 | 默认值 | 说明 |
+| --- | --- | --- |
+| `plugin.ai_chat_bot.subagent.enable` | `true` | 是否启用子代理；关闭后不注册 `subagent_run/list/cancel` 与 `task_handoff` 工具，主 AI 无法委派 |
+| `plugin.ai_chat_bot.subagent.default_timeout_sec` | `1800` | 子代理单次执行默认超时（秒），默认 30 分钟；`0` 表示不限制。**不再跟随** `bot.msg_event_timeout_sec` |
+| `plugin.ai_chat_bot.subagent.max_timeout_sec` | `0` | 模型单次调用 `timeout_sec` 的业务上限（秒）；`0` 表示不限制 |
+| `plugin.ai_chat_bot.subagent.max_concurrent_per_session` | `4` | 同一会话同时运行的后台子代理上限，超出时直接拒绝并提示（不静默排队） |
+| `plugin.ai_chat_bot.subagent.max_concurrent_global` | `8` | 所有会话合计的后台子代理上限，与对话回合的 `rate_limit` **分开计算**，后台任务不挤占正常对话 |
+| `plugin.ai_chat_bot.subagent.result_inline_runes` | `8000` | 异步子代理结果的内联上限（字符）；超过时完整结果落盘为会话私有文件，主 AI 收到摘要 + handle，可用 `read_tool_output` 按需读取；`0` 不限制 |
+
+执行参数全部跟随主模型：模型与 API 格式、生成参数（深度思考等）取「AI 对话 · 模型」配置，工具轮数与 `max_iterations` 一致。若父回合确实带硬截止，子代理超时会收缩到父回合剩余预算（预留 30 秒收尾，最少 10 秒），保证以工具结果优雅返回。子代理目前只有任务 ID，不支持自定义名字/运行中追加指令/结构化状态返回（规划中的 P2 能力）。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
+
+### AI 任务记录与后台接管（task）
+
+每个回合、后台子代理与交接任务都会在 SQL 表 `ania_agent_task` 里落一条任务记录（状态、结果、停止原因、token、时间戳），用于 `/tasks` 查看与重启后恢复。进程启动时会把上次遗留的"运行中"任务标记为 `interrupted`；用户发送 `/resume <任务ID>` 可把本会话被中断的子代理/交接任务重新入队，由主 AI 带着会话历史继续。
+
+| 配置键 | 默认值 | 说明 |
+| --- | --- | --- |
+| `plugin.ai_chat_bot.task.retention_days` | `7` | 已结束任务记录的保留天数，后台每 6 小时清理一次；`0` 表示不清理 |
+
+任务表建不起来（SQL 探测/建表失败）时降级为不持久化，`/tasks` 仍可看内存中运行中的子代理，不影响对话。会话内命令：`/tasks` 查看本会话运行中/最近任务，`/stop` 取消当前回合并清空该会话排队消息，`/stop <任务ID>` 只取消指定后台子代理，`/resume <任务ID>` 恢复被中断任务（仅限本会话、仅 `interrupted` 状态）。<br>
+`task_handoff` 工具（`subagent.enable=true` 时注册）用于「优雅收口」：软截止提醒会引导模型把「已完成摘要 + 剩余工作 + 验收标准」交给后台子代理继续，当前回合立即结束，完成后结果回到会话。
 
 
 ### AI 知识库（knowledge）
@@ -495,7 +532,7 @@ AI 也可以用 `proactive_create` / `proactive_list` / `proactive_cancel` 自�
 
 多代理编排，默认启用、无独立配置项：主 AI 可组建团队，把子任务派发给多个带角色描述的成员代理**并行执行**，全部完成后汇总结果；团队定义可在会话内保存复用，也可在 Web 面板「Agent 团队」页管理。
 
-每个成员复用子代理执行路径（独立一次性上下文），模型与执行参数同样跟随主模型（详见上一节），**不能递归组建团队**；单次最多并行 5 个成员，成员结果完整汇总后回填（超过统一内联上限时落盘为预览 + handle）。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
+每个成员复用子代理执行路径（独立一次性上下文），模型与执行参数同样跟随主模型（见上一节「AI 子代理」），**不能递归组建团队**；单次最多并行 5 个成员，成员结果完整汇总后回填（超过统一内联上限时落盘为预览 + handle）。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
 
 ### 每日 Token 配额（quota）
 

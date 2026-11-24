@@ -108,8 +108,9 @@ type subagentRunOptions struct {
 
 // runSubagentWithOptions 泛化的子代理执行：主体即原 runSubagent，差异仅在于
 // 提示词（Agent 团队成员的并行执行复用它，传入角色提示词）。执行参数跟随主模型：
-// 模型与生成参数、工具轮数取主模型配置，超时取框架消息处理预算（见
-// subagentTimeout / resolveSubagentTimeout）。调用方不应预建带超时的 context，
+// 模型与生成参数、工具轮数取主模型配置；超时取独立配置 subagent.default_timeout_sec
+// （0=不限制），单次 timeout_sec 可覆盖、subagent.max_timeout_sec 可再限幅
+// （见 subagentTimeout / resolveSubagentTimeout）。调用方不应预建带超时的 context，
 // 否则会被二次压缩损失预算。
 func (p *AIChatPlugin) runSubagentWithOptions(ctx context.Context, b bot.Bot, id message.QID, isGroup bool, task string, o subagentRunOptions, parentCbs llmtool.CallBackFuncs) (string, aichat.TokenUsage, error) {
 	timeout, err := resolveSubagentTimeout(p.subagentTimeout(), o.timeoutSec, ctx)

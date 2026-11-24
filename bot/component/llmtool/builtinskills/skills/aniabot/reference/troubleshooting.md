@@ -38,11 +38,12 @@
 
 1. **配置缺失**：控制台日志里搜 `AI 对话未配置`。缺少 `plugin.ai_chat_bot.base_url` / `model` / `api_key` 任一项时 AI 插件会降载（消息直接跳过，不报错刷屏）。补齐后重启。
 2. **没触发**：群聊必须 **@机器人**；私聊直接说即可。还可能被请求拦截插件挡住：`plugin.interceptor.enable` / `mode` / `groups` / `friends` / `group_users` / `platforms`（未勾选的平台直接拦截）。
-3. **在忙或排队**：提示「当前请求太多啦，请稍后再试~」是 `rate_limit` 并发上限（默认 2）；「排队消息太多啦」是排队队列满。等前一条结束或调大 `rate_limit`。
-4. **超时被打断**：提示「本次处理已达时间上限，请重新发送消息」→ 调 `bot.msg_event_timeout_sec`（默认 300 秒），或减少 `max_iterations`、别让一次任务做太多事。
-5. **停在审批**：AI 调用了需审批的工具（`approval.tools` 里的工具、或 `config_set` / `config_file_set` 恒需管理员审批），会私聊通知管理员回「允许」/「拒绝」，超时（默认 120 秒，`approval.timeout_sec`）自动拒绝。管理员没收到 → 检查 `bot.admin_ids` 是否配了、ID 是否带正确平台前缀。
-6. **配额用尽**：开了 `quota.enable` 且当日超标时请求被拒，面板「配额管理」可看/重置。
-7. **上游报错**：Query 日志会有错误原文。401 = Key 失效，402/余额不足 = 充值，429 = 限流（可调 `retry.*`、配 `fallback.model` 备用模型），400 多半是 `api_format` 与 `base_url` 不匹配（如拿 Anthropic 地址配成 `chat_completions`）。
+3. **在忙或排队**：提示「当前请求太多啦，请稍后再试~」是 `rate_limit` 并发上限（默认 4）且该会话排队消息被清空；「排队消息太多啦」是排队队列满。等前一条结束或调大 `rate_limit`（后台子代理有独立并发池，不占这个名额）。
+4. **运行很久 / 被停止**：AI 回合不再受 `bot.msg_event_timeout_sec` 限制。软截止（`turn.soft_timeout_sec`，默认 600 秒）只会提醒模型收尾/转后台，不会中断；硬截止（`turn.hard_timeout_sec`，默认 4 小时）才会取消并提示「已超过最长运行时间」；「任务因重复执行相同工具调用被终止」是看门狗（`turn.repeat_tool_warn` / `turn.no_progress_limit`）。单次请求挂起看 `llm.request_timeout_sec` / `llm.stream_idle_timeout_sec`（超时按可重试错误处理，会重试/切备用模型）。
+5. **任务想继续 / 想停后台任务**：`/tasks` 看本会话运行中与最近任务；`/resume <任务ID>` 恢复进程重启前被中断（interrupted）的子代理/交接任务（仅本会话）；`/stop` 取消当前回合并清空排队，`/stop <任务ID>` 只取消指定后台子代理。
+6. **停在审批**：AI 调用了需审批的工具（`approval.tools` 里的工具、或 `config_set` / `config_file_set` 恒需管理员审批），会私聊通知管理员回「允许」/「拒绝」，超时（默认 120 秒，`approval.timeout_sec`）自动拒绝。管理员没收到 → 检查 `bot.admin_ids` 是否配了、ID 是否带正确平台前缀。
+7. **配额用尽**：开了 `quota.enable` 且当日超标时请求被拒，面板「配额管理」可看/重置。
+8. **上游报错**：Query 日志会有错误原文。401 = Key 失效，402/余额不足 = 充值，429 = 限流（可调 `retry.*`、配 `fallback.model` 备用模型），400 多半是 `api_format` 与 `base_url` 不匹配（如拿 Anthropic 地址配成 `chat_completions`）。
 
 ## 四、回复质量与上下文
 
@@ -64,6 +65,8 @@
 | MCP 工具调不出来 | `files.mcp_json` 格式错（保存时只校验 JSON 语法，语义错要重启看日志）；`mcp.lazy_load=true` 时先 `mcp_discover_<服务器>` 再 `mcp_load_<服务器>`；服务器命令本身要能在宿主机跑通 |
 | 技能不生效 | 白名单 `plugin.ai_chat_bot.skills` 漏了它 / 被禁用（`skills_disabled`）/ 外置技能改文件后没 `skill_reload` |
 | AI 想改配置但被拒 | `config_tool.enable` 没开，或管理员审批超时/拒绝 |
+| 后台任务 / 子代理相关的任务查不到 | 任务记录需要 SQL 持久化：确认存储后端为 sqlite/mysql 且启动日志没有「创建后台任务表失败」；`/tasks` 仍可看到内存中运行中的子代理 |
+| 进程重启后长任务没了 | 启动时遗留任务会被标记 `interrupted`（不自动续跑）；用户在该会话发 `/resume <任务ID>` 让主 AI 带历史继续（仅子代理/交接任务） |
 
 ## 六、配置改了没反应
 
