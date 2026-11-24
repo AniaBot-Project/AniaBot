@@ -94,6 +94,12 @@ func (p *AIChatPlugin) runSessionOnce(parent context.Context, b bot.Bot, id mess
 	start := time.Now()
 	batch := p.drainPending(id, isGroup)
 	turnTask := p.beginTurnTask(id, isGroup, turnTaskTitle(batch))
+	taskID := ""
+	if turnTask != nil {
+		taskID = turnTask.ID
+	}
+	// 把任务 ID 传给 processChatBatch → Query 日志（stop_reason/task_id）
+	runCtx = withTurnInfo(runCtx, taskID)
 	for len(batch) > 0 {
 		p.setActiveContext(id, isGroup, newActiveRequest(cancelRun, batchRequester(batch), start))
 		next, ok := p.drainChatBatches(runCtx, b, id, isGroup, chat, batch)
@@ -109,6 +115,8 @@ func (p *AIChatPlugin) runSessionOnce(parent context.Context, b bot.Bot, id mess
 		batch = next
 	}
 	p.finishTurnTask(turnTask, taskStatusCompleted, taskStopCompleted, "")
+	// 长任务目标续跑：会话空闲且目标已武装时，自动开启下一轮
+	p.maybeDriveGoal(b, id, isGroup)
 	return true
 }
 
@@ -206,7 +214,48 @@ func (p *AIChatPlugin) stopSessionWork(id message.QID, isGroup bool, by message.
 	if stopped || subagents > 0 {
 		p.drainPending(id, isGroup)
 	}
+	// 停止会话时暂停目标自动续跑：用户显式停止不应被自动续跑立刻顶回来
+	if stopped || subagents > 0 {
+		p.pauseGoalOnStop(id, isGroup)
+	}
 	return stopped, subagents, ""
+}
+
+// turnInfoKey / turnInfo 回合元信息：写入 Query 日志的任务 ID 等。通过
+// context 传递，测试直接调用 processChatBatch 时无该值（字段留空）。
+type turnInfoKey struct{}
+
+type turnInfo struct {
+	taskID string
+}
+
+// withTurnInfo 给回合上下文挂上任务 ID。
+func withTurnInfo(ctx context.Context, taskID string) context.Context {
+	return context.WithValue(ctx, turnInfoKey{}, &turnInfo{taskID: taskID})
+}
+
+// turnInfoFrom 读取回合元信息（不存在返回 nil）。
+func turnInfoFrom(ctx context.Context) *turnInfo {
+	info, _ := ctx.Value(turnInfoKey{}).(*turnInfo)
+	return info
+}
+
+// stopReasonFromError 把一次请求的结束错误映射为任务/Query 日志的停止原因。
+func stopReasonFromError(err error) string {
+	if err == nil {
+		return taskStopCompleted
+	}
+	var wd *aichat.WatchdogAbortError
+	switch {
+	case errors.As(err, &wd):
+		return taskStopWatchdog
+	case errors.Is(err, context.DeadlineExceeded):
+		return taskStopTimeout
+	case errors.Is(err, context.Canceled):
+		return taskStopUserStop
+	default:
+		return taskStopError
+	}
 }
 
 // secondsDuration 把配置里的秒数转换为 time.Duration（含溢出与负数防护，

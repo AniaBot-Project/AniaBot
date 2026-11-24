@@ -104,6 +104,12 @@ type ChatOptions struct {
 	// 仅 ToolOrchestrator 使用；同一 ChatBot 的 Chat 串行调用，状态按次隔离。
 	Watchdog WatchdogOptions
 
+	// Steer 运行中追加输入（可选）：工具循环每次发起 LLM 请求前调用，返回的
+	// 文本会以 user 消息追加到对话尾部、下一步立即生效（用于子代理 steering：
+	// 父代理在子代理运行期间补充指令/纠正，不打断当前工具批）。并发安全由
+	// 实现方保证；nil 表示不启用。
+	Steer func() []string
+
 	// OnStreamDelta 流式文本增量回调（nil = 一次性生成）。
 	// 注意：在流读取的同一 goroutine 串行调用，回调内勿做重 IO；
 	// 回调收到的 delta 尚未去除 <think> 块（由调用方在缓冲上统一处理）。

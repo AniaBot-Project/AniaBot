@@ -18,6 +18,7 @@ const routes = [
   { path: '/tokenstats', name: 'tokenstats', component: () => import('./views/TokenStats.vue'), meta: { title: 'Token 统计' } },
   { path: '/quota', name: 'quota', component: () => import('./views/Quota.vue'), meta: { title: '配额管理' } },
   { path: '/tasklogs', name: 'tasklogs', component: () => import('./views/TaskLog.vue'), meta: { title: '定时任务' } },
+  { path: '/agent-tasks', name: 'agent-tasks', component: () => import('./views/AgentTasks.vue'), meta: { title: '后台任务' } },
   { path: '/skills', name: 'skills', component: () => import('./views/Skills.vue'), meta: { title: '技能管理' } },
   { path: '/memory', name: 'memory', component: () => import('./views/Memory.vue'), meta: { title: '记忆管理' } },
   { path: '/knowledge', name: 'knowledge', component: () => import('./views/Knowledge.vue'), meta: { title: '知识库' } },

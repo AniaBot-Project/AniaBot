@@ -74,6 +74,24 @@ function rebase(value, key) {
 const now0 = Date.now()
 const bootAt = now0 - (2 * 3600 + 42 * 60) * 1000 // 演示：Bot 已运行 2 小时 42 分
 
+// 后台任务注册表演示数据（时间戳为 unix 秒，与 /api/agent-tasks 返回一致）
+function buildAgentTasks(nowSec) {
+  const t = (delta) => nowSec - delta
+  return [
+    { id: 't-m5x1a2-3f9c', session_key: 'g:qq:123456', kind: 'turn', status: 'running', title: '帮我统计本周群里的活跃用户', result: '', error: '', stop_reason: '', meta: '{"step":2}', tokens: 0, created_at: t(35), started_at: t(35), updated_at: t(4), finished_at: 0 },
+    { id: 't-m5x19k-8a1d', session_key: 'g:qq:123456', kind: 'subagent', status: 'running', title: '检索并整理 Vue 3 组合式 API 的迁移要点', result: '', error: '', stop_reason: '', meta: '{"tools":3}', tokens: 1820, created_at: t(120), started_at: t(118), updated_at: t(8), finished_at: 0 },
+    { id: 't-m5x18c-2b7e', session_key: 'f:qq:10000', kind: 'handoff', status: 'waiting', title: '后台运行测试套件并等待结果', result: '', error: '', stop_reason: '', meta: '{"waiting":"bash_job"}', tokens: 640, created_at: t(300), started_at: t(298), updated_at: t(20), finished_at: 0 },
+    { id: 't-m5x0ta-9c4b', session_key: 'g:qq:123456', kind: 'subagent', status: 'completed', title: '总结群聊近 100 条消息的讨论主题', result: '近 100 条消息主要围绕：1. 周末活动安排（约 40%）；2. 新版面板的截图与主题色讨论（约 35%）；3. 代码问题排查（约 25%）。\n活动安排集中在周六下午，有 6 人报名。', error: '', stop_reason: 'completed', meta: '{"tools":4,"iterations":6}', tokens: 5321, created_at: t(900), started_at: t(898), updated_at: t(700), finished_at: t(702) },
+    { id: 't-m5x0aa-1e6f', session_key: 'f:qq:10000', kind: 'bash_job', status: 'failed', title: '在宿主机执行 npm run build', result: '', error: 'exit status 1: vite build failed（详见 tool-output 日志）', stop_reason: 'error', meta: '{"exit_code":1}', tokens: 0, created_at: t(1800), started_at: t(1799), updated_at: t(1730), finished_at: t(1731) },
+    { id: 't-m5wzta-4d2a', session_key: 'g:qq:123456', kind: 'goal_round', status: 'completed', title: '迁移到 Vite 5 并修复构建警告', result: '已完成 vite 5 升级，构建通过；剩余 2 个无害的 chunk size 警告。', error: '', stop_reason: 'completed', meta: '{"round":2}', tokens: 4210, created_at: t(5400), started_at: t(5398), updated_at: t(3600), finished_at: t(3601) },
+    { id: 't-m5wz8s-7b3c', session_key: 'g:qq:123456', kind: 'clock', status: 'timeout', title: '每日 9 点群聊摘要播报', result: '', error: '子任务等待超时', stop_reason: 'timeout', meta: '{}', tokens: 980, created_at: t(7400), started_at: t(7395), updated_at: t(6100), finished_at: t(6101) },
+    { id: 't-m5wy2m-6c0d', session_key: 'f:qq:10000', kind: 'proactive', status: 'interrupted', title: '主动提醒：距离上次对话已过 3 天', result: '', error: '', stop_reason: 'aborted', meta: '{}', tokens: 0, created_at: t(9000), started_at: 0, updated_at: t(8200), finished_at: 0 },
+  ]
+}
+const agentGoals = [
+  { session_key: 'g:qq:123456', objective: '把项目的构建流程迁移到 Vite 5，修复全部构建警告并跑通 CI', phase: 'active', rounds_started: 2, max_rounds: 64, blocked_code: '', blocked_message: '', updated_at: Math.floor(now0 / 1000) - 600 },
+]
+
 const state = {
   config: { ...rebase(seedConfig) },
   presets: [{
@@ -108,6 +126,8 @@ const state = {
   msgLogs: buildMsgLogs(now0),
   queryLogs: buildQueryLogs(now0),
   taskLogs: buildTaskLogs(now0),
+  agentTasks: buildAgentTasks(Math.floor(now0 / 1000)),
+  agentGoals,
   // 演示：预置 3 个已安装的市场插件（rss 为旧版本 → 显示可更新）
   installed: {},
   marketJob: null,
@@ -569,6 +589,15 @@ const routes = [
       return { ok: true, need_restart: name === 'mcp' }
     },
   },
+
+  {
+    m: 'GET', re: /^\/api\/agent-tasks$/, h: (c) => {
+      const raw = parseInt(c.query.get('limit') || '100', 10)
+      const limit = Math.max(1, Math.min(500, Number.isFinite(raw) ? raw : 100))
+      return state.agentTasks.slice(0, limit)
+    },
+  },
+  { m: 'GET', re: /^\/api\/agent-goals$/, h: () => state.agentGoals },
 
   // 状态 / 系统
   { m: 'GET', re: /^\/api\/status$/, h: statusSnapshot },

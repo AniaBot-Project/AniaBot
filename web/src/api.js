@@ -229,6 +229,10 @@ export const api = {
   // 操作日志分页查询：{ category, start, end, keyword, limit, before }（均可选），返回 { items, has_more }
   getOpLogs: (params = {}) => request(`/api/oplogs${qs(params)}`),
   getClocks: () => request('/api/clocks'),
+  // 后台任务注册表（AI 回合 / 子代理 / 交接 / 后台命令等）：limit 为最近条数（默认 100，最大 500）
+  getAgentTasks: (limit = 100) => request(`/api/agent-tasks?limit=${limit}`),
+  // 当前处于 active 阶段的长任务目标（跨回合自动续跑的会话目标）
+  getAgentGoals: () => request('/api/agent-goals'),
   // token 消耗监控指标：{ summary, today, daily[] }，含缓存命中率
   getTokenStats: () => request('/api/tokenstats'),
   // AI API 余额：{ enabled, value, error, updated_at, cached, ttl }；refresh=true 强制刷新服务端缓存

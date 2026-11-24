@@ -98,6 +98,13 @@ type Entry struct {
 	Reply            string           `json:"reply,omitempty"`         // 最终回复
 	Note             string           `json:"note,omitempty"`          // 附加说明（如主动互动保持安静的原因）
 	Error            string           `json:"error,omitempty"`
+	// StopReason 停止原因，供面板/统计区分一次 Query 为何结束。约定取值：
+	// completed / aborted / max_tokens / error / watchdog / timeout / user_stop，
+	// 但按普通字符串存储（不强制枚举）；空表示未记录（历史记录或非普通对话）。
+	StopReason string `json:"stop_reason"`
+	// TaskID 本次 Query 关联的后台任务 ID（任务表 ania_agent_task 的 t-...），
+	// 空表示没有关联任务（如主动互动、面板试聊）。
+	TaskID string `json:"task_id"`
 }
 
 // KindValue 返回日志类型；空值归一为普通对话（兼容升级前的历史记录）。
@@ -176,7 +183,15 @@ func New(store storage.PersistentStorage, logger *slog.Logger) *Logger {
 	hasKind := ensureKindColumn(context.Background(), db, dialect, l.logger)
 	// Token 统计依赖冗余统计列，旧库同样按需补列并回填一次
 	hasStats, statsAdded := ensureStatsColumns(context.Background(), db, dialect, l.logger)
-	be := newSQLBackend(db, l.logger, hasKind, hasStats, dialect)
+	// stop_reason / task_id 冗余列：旧库按需幂等补列（payload 总是保留完整字段，
+	// 补列失败只是失去 SQL 冗余列，读写仍正常）
+	hasStopReason, hasTaskID := ensureExtraColumns(context.Background(), db, dialect, l.logger)
+	be := newSQLBackend(db, l.logger, sqlColumns{
+		kind:       hasKind,
+		stats:      hasStats,
+		stopReason: hasStopReason,
+		taskID:     hasTaskID,
+	}, dialect)
 	if statsAdded {
 		be.backfillStats()
 	}

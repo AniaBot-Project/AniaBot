@@ -54,7 +54,8 @@ func (p *AIChatPlugin) QueryLogClear(f querylog.Filter) int {
 type queryRecorder struct {
 	entry          querylog.Entry
 	toolCalls      []querylog.ToolCallRecord
-	toolCallsTotal int // 工具调用总数
+	toolCallsTotal int    // 工具调用总数
+	taskID         string // 关联的后台任务 ID（可能为空）
 	start          time.Time
 	key            string // 会话 key（takeExtraUsage 用）
 }
@@ -139,7 +140,7 @@ func (p *AIChatPlugin) finishQuery(r *queryRecorder, chat *aichat.ChatBot, usage
 	// 并入主请求循环之外派生的消耗（异步子代理 / team_run 成员 / 备用图片识别，
 	// 见 usageacc.go），使统计反映会话的完整成本（配额在各派生调用点单独累加）
 	extra := p.takeExtraUsage(r.key)
-	p.writeQueryResult(r, usage, extra, status, reply, "", errText)
+	p.writeQueryResult(r, usage, extra, status, reply, "", errText, stopReasonFromError(err))
 }
 
 // beginProactiveQuery 开始记录一次主动互动执行。与普通 Query 的区别：Kind 标记
@@ -191,7 +192,7 @@ func (p *AIChatPlugin) finishProactiveQuery(r *queryRecorder, usage aichat.Token
 	} else if status == "" {
 		status = querylog.StatusSuccess
 	}
-	p.writeQueryResult(r, usage, aichat.TokenUsage{}, status, reply, note, errText)
+	p.writeQueryResult(r, usage, aichat.TokenUsage{}, status, reply, note, errText, "")
 }
 
 // beginConsoleQuery 开始记录一次面板试聊 Query。试聊复用真实对话管线，因此同样
@@ -242,12 +243,13 @@ func (p *AIChatPlugin) finishConsoleQuery(r *queryRecorder, usage aichat.TokenUs
 			status = querylog.StatusError
 		}
 	}
-	p.writeQueryResult(r, usage, aichat.TokenUsage{}, status, reply, note, errText)
+	p.writeQueryResult(r, usage, aichat.TokenUsage{}, status, reply, note, errText, "")
 }
 
 // writeQueryResult 把一次 Query 的终态写回记录：状态、耗时、token 用量、
 // 工具调用明细与结果说明。普通 Query 与主动互动共用，保证两边字段回填一致。
-func (p *AIChatPlugin) writeQueryResult(r *queryRecorder, usage, extra aichat.TokenUsage, status querylog.Status, reply, note, errText string) {
+// stopReason/taskID 仅普通对话回填，其余来源传空。
+func (p *AIChatPlugin) writeQueryResult(r *queryRecorder, usage, extra aichat.TokenUsage, status querylog.Status, reply, note, errText, stopReason string) {
 	toolCalls := r.toolCalls
 	p.queryLogger.Update(r.entry.ID, func(e *querylog.Entry) {
 		e.Status = status
@@ -262,5 +264,7 @@ func (p *AIChatPlugin) writeQueryResult(r *queryRecorder, usage, extra aichat.To
 		e.Reply = reply
 		e.Note = note
 		e.Error = errText
+		e.StopReason = stopReason
+		e.TaskID = r.taskID
 	})
 }

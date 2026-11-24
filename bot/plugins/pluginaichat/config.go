@@ -336,6 +336,12 @@ type taskConfig struct {
 	RetentionDays int `cfg:"retention_days" label:"任务记录保留(天)" group:"AI 对话 · 回合与任务" help:"已完成任务的记录保留天数，过期清理；0 表示不清理" default:"7"`
 }
 
+// goalConfig 长任务目标（跨回合自动续跑）配置。
+type goalConfig struct {
+	Enable    bool `cfg:"enable" label:"启用目标续跑" group:"AI 对话 · 回合与任务" help:"允许 AI 建立跨回合持续推进的目标，由运行时在会话空闲时自动续跑（每轮结束时由系统注入继续指令）；默认开启" default:"true"`
+	MaxRounds int  `cfg:"max_rounds" label:"目标最大轮数" group:"AI 对话 · 回合与任务" help:"单个目标最多自动续跑的轮数，达到后自动标记 blocked 并等待人工处理；范围 1~500" default:"64"`
+}
+
 type aiChatConfig struct {
 	BaseURL          string `cfg:"plugin.ai_chat_bot.base_url" label:"Base URL" group:"AI 对话 · 模型" help:"API 地址；anthropic 格式填 https://api.anthropic.com，其余填 OpenAI 兼容地址" default:"https://api.deepseek.com"`
 	APIKey           string `cfg:"plugin.ai_chat_bot.api_key" label:"API Key" type:"password" sensitive:"true" group:"AI 对话 · 模型"`
@@ -397,6 +403,8 @@ type aiChatConfig struct {
 	Subagent subagentConfig `cfg:"plugin.ai_chat_bot.subagent"`
 	// Task 后台任务记录保留策略
 	Task taskConfig `cfg:"plugin.ai_chat_bot.task"`
+	// Goal 长任务跨回合续跑
+	Goal goalConfig `cfg:"plugin.ai_chat_bot.goal"`
 }
 
 // ConfigSchema 实现 plugin.ConfigSchemaProvider：返回配置结构体指针，

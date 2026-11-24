@@ -46,11 +46,16 @@ func newSubagentTools(p *AIChatPlugin, b bot.Bot, id message.QID, isGroup bool) 
 			subagentToolBase: base,
 		},
 		&subagentListTool{
-			BaseTool:         llmtool.MakeBaseTool("subagent_list", "列出当前会话中正在运行的异步子代理及其详情（ID、任务摘要、运行时间等）", subagentListParams{}),
+			BaseTool:         llmtool.MakeBaseTool("subagent_list", "列出当前会话中正在运行的异步子代理（ID、名字、任务摘要、运行时间）", subagentListParams{}),
+			subagentToolBase: base,
+		},
+		&subagentSendTool{
+			BaseTool: llmtool.MakeBaseTool("subagent_send", "向一个正在运行的后台子代理追加指令或补充信息（子代理会在下一步看到，不会打断它当前的工具调用）。"+
+				"适用于：发现任务方向需要纠正、补充遗漏的背景信息、要求它调整输出格式。子代理已完成或 ID 错误时返回未找到。", subagentSendParams{}),
 			subagentToolBase: base,
 		},
 		&subagentCancelTool{
-			BaseTool:         llmtool.MakeBaseTool("subagent_cancel", "按 ID 取消当前会话中一个正在运行的异步子代理", subagentCancelParams{}),
+			BaseTool:         llmtool.MakeBaseTool("subagent_cancel", "按 ID 或名字取消当前会话中一个正在运行的异步子代理", subagentCancelParams{}),
 			subagentToolBase: base,
 		},
 	}
@@ -60,6 +65,7 @@ func newSubagentTools(p *AIChatPlugin, b bot.Bot, id message.QID, isGroup bool) 
 
 type subagentRunParams struct {
 	Task       string `json:"task" desc:"完整自洽的任务指令：子代理看不到当前对话，必须把背景、目标、期望的输出格式都写清楚"`
+	Name       string `json:"name,omitempty" desc:"可选展示名（1-32 位小写字母/数字/连字符，字母开头），便于后续 subagent_send/subagent_cancel 引用；同一会话运行中不可重名"`
 	TimeoutSec int    `json:"timeout_sec,omitempty" desc:"本次执行的超时秒数，不填用默认值（subagent.default_timeout_sec，0 表示不限制）；受 subagent.max_timeout_sec 约束"`
 }
 
@@ -74,7 +80,12 @@ func (t *subagentRunTool) Execute(ctx context.Context, params any, callbacks llm
 	if task == "" {
 		return "", fmt.Errorf("task 不能为空")
 	}
-	return t.plugin.launchAsyncSubagent(ctx, t.bot, t.id, t.isGroup, task, p.TimeoutSec, callbacks), nil
+	return t.plugin.launchAsyncSubagent(ctx, t.bot, t.id, t.isGroup, task, launchSubagentOptions{
+		Name:       strings.TrimSpace(p.Name),
+		Kind:       taskKindSubagent,
+		TimeoutSec: p.TimeoutSec,
+		Callbacks:  callbacks,
+	}), nil
 }
 
 // ---- subagent_list ----
@@ -98,19 +109,52 @@ func (t *subagentListTool) Execute(ctx context.Context, params any, callbacks ll
 		elapsed := time.Since(e.startTime).Truncate(time.Second)
 		// 按 rune 截断：任务描述多为中文，按字节切会产出非法 UTF-8
 		taskPreview := tasklog.Truncate(e.task, 60)
-		fmt.Fprintf(&sb, "%d. ID: %s\n   任务: %s\n   运行时间: %s\n",
-			i+1, e.id, taskPreview, elapsed)
+		nameLine := ""
+		if e.name != "" {
+			nameLine = "   名字: " + e.name + "\n"
+		}
+		fmt.Fprintf(&sb, "%d. ID: %s\n%s   任务: %s\n   运行时间: %s\n",
+			i+1, e.id, nameLine, taskPreview, elapsed)
 		if i < len(entries)-1 {
 			sb.WriteString("\n")
 		}
 	}
+	sb.WriteString("\n提示：可用 subagent_send 追加指令、subagent_cancel 取消；它们完成后会自动通知你，不需要轮询。")
 	return sb.String(), nil
+}
+
+// ---- subagent_send ----
+
+type subagentSendParams struct {
+	ID      string `json:"id" desc:"运行中的子代理 ID 或名字（通过 subagent_list 获取）"`
+	Message string `json:"message" desc:"要追加给子代理的指令/补充信息；它会在子代理下一次模型请求时注入"`
+}
+
+type subagentSendTool struct {
+	llmtool.BaseTool[subagentSendParams]
+	subagentToolBase
+}
+
+func (t *subagentSendTool) Execute(ctx context.Context, params any, callbacks llmtool.CallBackFuncs) (string, error) {
+	p := params.(*subagentSendParams)
+	idOrName := strings.TrimSpace(p.ID)
+	if idOrName == "" {
+		return "", fmt.Errorf("id 不能为空")
+	}
+	msg := strings.TrimSpace(p.Message)
+	if msg == "" {
+		return "", fmt.Errorf("message 不能为空")
+	}
+	if !t.plugin.sendSubagentMessage(t.id, t.isGroup, idOrName, msg) {
+		return fmt.Sprintf("未找到运行中的子代理 %s（可能已完成），或它的指令队列已满", idOrName), nil
+	}
+	return fmt.Sprintf("已向子代理 %s 追加指令，它会在下一步看到", idOrName), nil
 }
 
 // ---- subagent_cancel ----
 
 type subagentCancelParams struct {
-	ID string `json:"id" desc:"要取消的子代理 ID（通过 subagent_list 获取）"`
+	ID string `json:"id" desc:"要取消的子代理 ID 或名字（通过 subagent_list 获取）"`
 }
 
 type subagentCancelTool struct {
@@ -125,7 +169,7 @@ func (t *subagentCancelTool) Execute(ctx context.Context, params any, callbacks 
 		return "", fmt.Errorf("id 不能为空")
 	}
 	if ok := t.plugin.cancelSubagentByID(t.id, t.isGroup, id); !ok {
-		return fmt.Sprintf("未找到 ID 为 %s 的子代理（可能已完成或 ID 不正确）", id), nil
+		return fmt.Sprintf("未找到 %s 对应的运行中子代理（可能已完成或 ID 不正确）", id), nil
 	}
 	return fmt.Sprintf("已取消子代理 %s", id), nil
 }

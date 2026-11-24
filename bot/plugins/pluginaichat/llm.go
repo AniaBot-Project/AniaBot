@@ -168,7 +168,9 @@ const orchestrationGuide = `
 3. 多个互相独立的子任务，必须放在同一条回复里并行启动（一次调用多个 subagent_run），不要串行地一个一个等。
 4. 主对话负责：理解需求、澄清歧义、拆解任务、委派、汇总结果、对外汇报；执行细节（搜索、读文件、写代码、长命令）尽量交给子代理/后台任务。
 5. 时间预算：系统不会因为"跑得久"强行终止你；运行较久时会收到"收尾或转后台"的提醒。优先把剩余工作交给后台（调用 task_handoff 写明已完成、剩余工作与验收标准）并给出进度摘要，而不是草草结束。
-6. 用户随时可能插话：新消息会作为下一步输入或新一轮处理；不要假设用户必须等你。`
+6. 用户随时可能插话：新消息会作为下一步输入或新一轮处理；不要假设用户必须等你。
+7. 跨多轮的长期目标（一轮做不完、但可分阶段自动推进）用 goal_create 建立目标，系统会在会话空闲时自动开启下一轮；每轮结束前判断目标是否真正达成——达成则 goal_update action=complete（附证据），未达成保持 active，无法继续则 action=blocked 说明原因。单轮可完成的任务不要建目标。
+8. 多个子代理之间有先后依赖、需要分批并行时，用 workflow_run 一次编排 DAG（步骤自动并行/串行、结果自动回灌），不要自己逐个轮询；需要多人分工协作的长清单用 team_task_create/list/claim/complete 维护持久任务板，把任务 ID 写进 team_run 的指令里。`
 
 // registerScopedTools 注册绑定当前会话的工具（定时任务 + 长期记忆）。
 // 主会话与子代理的一次性会话共用（子代理拥有与主 AI 一致的会话级能力），
@@ -384,6 +386,24 @@ func (p *AIChatPlugin) getChat(b bot.Bot, id message.QID, isGroup bool, prompt s
 		// 不注册团队工具，防止递归组建团队）
 		for _, tool := range newTeamTools(p, b, id, isGroup) {
 			sessionExecutor.RegisterSession(tool)
+		}
+		// 注册长任务目标工具（仅主会话；跨回合续跑由运行器驱动）
+		if p.goalStore != nil && p.cfg.Goal.Enable {
+			for _, tool := range newGoalTools(p, id, isGroup) {
+				sessionExecutor.RegisterSession(tool)
+			}
+		}
+		// 注册后台工作流工具（DAG 多子代理编排；执行同样走子代理引擎）
+		if p.cfg.Subagent.Enable {
+			for _, tool := range newWorkflowTools(p, b, id, isGroup) {
+				sessionExecutor.RegisterSession(tool)
+			}
+		}
+		// 注册团队任务板工具（持久化任务板，复用任务表；团队/子代理按任务协作）
+		if p.taskStore != nil {
+			for _, tool := range newTeamBoardTools(p, id, isGroup) {
+				sessionExecutor.RegisterSession(tool)
+			}
 		}
 		// 场景描述（群聊/私聊、群信息、消息 id 前缀含义）经 WithScenePrompt 注入，
 		// 组装时排在 available_skills 之后，保住「覆盖词 + skills」的跨会话共享前缀；

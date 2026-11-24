@@ -172,6 +172,15 @@ func (o *ToolOrchestrator) ExecuteWithTools(
 	// maxIterations <= 0 表示不设上限：循环只能由模型给出最终回复、无进展
 	// 看门狗终止或上层 ctx 取消结束；有上限时才保留「末轮强制无工具收尾」。
 	for i := 0; ; i++ {
+		// 运行中追加指令（子代理 steering）：在每次 LLM 请求前把已到达的追加
+		// 输入作为 user 消息追加到尾部，下一步立即生效，不打断当前工具批。
+		if opts.Steer != nil {
+			for _, steer := range opts.Steer() {
+				if steer = strings.TrimSpace(steer); steer != "" {
+					messages = append(messages, TextMessage(RoleUser, "[追加指令] "+steer))
+				}
+			}
+		}
 		tools := o.executor.Tools()
 
 		opts.Tools = tools

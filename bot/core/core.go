@@ -535,6 +535,10 @@ func (ania *AniaBot) startAdminPanel() {
 	var queryLogFn func(f querylog.Filter) []querylog.Entry
 	var queryLogStatsFn func(f querylog.Filter) []querylog.StatRow
 	var queryLogClearFn func(f querylog.Filter) int
+	// 面板「后台任务」页数据源：插件实现 adminpanel.TaskSource / GoalSource 时收集
+	// （当前由 AI 对话插件提供，读取任务注册表与 active 会话目标）。
+	var agentTasksFn func(limit int) []adminpanel.AgentTaskView
+	var agentGoalsFn func() []adminpanel.AgentGoalView
 	for _, p := range ania.plugins {
 		if src, ok := p.(adminpanel.TaskLogSource); ok {
 			taskLogFn = src.TaskLogQuery
@@ -582,6 +586,12 @@ func (ania *AniaBot) startAdminPanel() {
 			queryLogFn = src.QueryLogRecent
 			queryLogStatsFn = src.QueryLogStats
 			queryLogClearFn = src.QueryLogClear
+		}
+		if src, ok := p.(adminpanel.TaskSource); ok {
+			agentTasksFn = src.AgentTasks
+		}
+		if src, ok := p.(adminpanel.GoalSource); ok {
+			agentGoalsFn = src.AgentGoals
 		}
 		if taskLogFn != nil && clockSrc != nil && msgLogFn != nil && skillSrc != nil && memorySrc != nil && kbSrc != nil && teamSrc != nil && quotaSrc != nil && queryLogFn != nil {
 			break
@@ -666,6 +676,8 @@ func (ania *AniaBot) startAdminPanel() {
 		QueryLogs:           queryLogFn,
 		QueryLogsStats:      queryLogStatsFn,
 		QueryLogsClear:      queryLogClearFn,
+		AgentTasks:          agentTasksFn,
+		AgentGoals:          agentGoalsFn,
 		ConsoleLogs:         consollog.Page,
 		QRLogins:            qrLogins,
 		Marketplace:         marketplace.New(ania.configStore, Logger().WithGroup("Marketplace"), marketplace.WithUnloader(ania)),

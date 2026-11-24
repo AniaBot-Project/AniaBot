@@ -26,6 +26,8 @@ var queryLogTables = []storage.TableDDL{
 				`target_id TEXT NOT NULL, ` +
 				`senders TEXT NOT NULL, ` +
 				`status TEXT NOT NULL, ` +
+				`stop_reason TEXT NOT NULL DEFAULT '', ` +
+				`task_id TEXT NOT NULL DEFAULT '', ` +
 				`query_text TEXT NOT NULL, ` +
 				`created_at INTEGER NOT NULL, ` +
 				`iterations INTEGER NOT NULL DEFAULT 0, ` +
@@ -44,6 +46,8 @@ var queryLogTables = []storage.TableDDL{
 				`target_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, ` +
 				`senders MEDIUMTEXT NOT NULL, ` +
 				`status VARCHAR(16) COLLATE utf8mb4_bin NOT NULL, ` +
+				`stop_reason VARCHAR(64) COLLATE utf8mb4_bin NOT NULL DEFAULT '', ` +
+				`task_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL DEFAULT '', ` +
 				`query_text MEDIUMTEXT NOT NULL, ` +
 				`created_at BIGINT NOT NULL, ` +
 				`iterations INT NOT NULL DEFAULT 0, ` +
@@ -59,33 +63,50 @@ var queryLogTables = []storage.TableDDL{
 	},
 }
 
+// sqlColumns 冗余下推列的可用状态。旧库补列失败的列不参与 SQL 拼装与写入，
+// 但读取始终以 payload 为准（Entry 完整 JSON 始终包含全部字段，包括冗余列），
+// 因此补列失败只影响 SQL 下推，不影响数据完整性。
+type sqlColumns struct {
+	kind       bool // kind 列是否可用
+	stats      bool // 统计列是否可用
+	stopReason bool // stop_reason 列是否可用
+	taskID     bool // task_id 列是否可用
+}
+
 // sqlBackend SQL 版日志存储：过滤条件下推 WHERE、清除按条件删除，
 // 避免每次读取全量列键 + 逐键加载的开销。SQLite 单连接下读取
 // 遵循"收集→关闭 rows→解析"纪律。
 type sqlBackend struct {
 	db        *sql.DB
 	logger    *slog.Logger
-	hasKind   bool // kind 列是否可用（旧库补列失败时降级，不影响读写其它字段）
-	hasStats  bool // 统计列是否可用（旧库补列失败时降级为整条 payload 解析）
+	cols      sqlColumns
 	dialect   storage.SQLDialect
 	insertSQL string
 	updateSQL string
 }
 
-func newSQLBackend(db *sql.DB, logger *slog.Logger, hasKind, hasStats bool, dialect storage.SQLDialect) *sqlBackend {
-	b := &sqlBackend{db: db, logger: logger, hasKind: hasKind, hasStats: hasStats, dialect: dialect}
+func newSQLBackend(db *sql.DB, logger *slog.Logger, cols sqlColumns, dialect storage.SQLDialect) *sqlBackend {
+	b := &sqlBackend{db: db, logger: logger, cols: cols, dialect: dialect}
 	b.buildStatements()
 	return b
 }
 
-// buildStatements 按可用列拼出 INSERT/UPDATE 语句，避免四种列组合各写一份 SQL。
+// buildStatements 按可用列拼出 INSERT/UPDATE 语句；recordValues 按同一列顺序
+// 导出参数，避免四种（乃至更多）列组合各写一份 SQL。
 func (b *sqlBackend) buildStatements() {
 	cols := []string{"seq"}
-	if b.hasKind {
+	if b.cols.kind {
 		cols = append(cols, "kind")
 	}
-	cols = append(cols, "chat_type", "target_id", "senders", "status", "query_text", "created_at")
-	if b.hasStats {
+	cols = append(cols, "chat_type", "target_id", "senders", "status")
+	if b.cols.stopReason {
+		cols = append(cols, "stop_reason")
+	}
+	if b.cols.taskID {
+		cols = append(cols, "task_id")
+	}
+	cols = append(cols, "query_text", "created_at")
+	if b.cols.stats {
 		cols = append(cols, statsColumns...)
 	}
 	cols = append(cols, "payload")
@@ -97,11 +118,18 @@ func (b *sqlBackend) buildStatements() {
 		`) VALUES (` + strings.Join(placeholders, ", ") + `)`
 
 	sets := make([]string, 0, len(cols))
-	if b.hasKind {
+	if b.cols.kind {
 		sets = append(sets, "kind = ?")
 	}
-	sets = append(sets, "chat_type = ?", "target_id = ?", "senders = ?", "status = ?", "query_text = ?", "created_at = ?")
-	if b.hasStats {
+	sets = append(sets, "chat_type = ?", "target_id = ?", "senders = ?", "status = ?")
+	if b.cols.stopReason {
+		sets = append(sets, "stop_reason = ?")
+	}
+	if b.cols.taskID {
+		sets = append(sets, "task_id = ?")
+	}
+	sets = append(sets, "query_text = ?", "created_at = ?")
+	if b.cols.stats {
 		for _, c := range statsColumns {
 			sets = append(sets, c+" = ?")
 		}
@@ -189,6 +217,100 @@ func ensureKindColumn(ctx context.Context, db *sql.DB, dialect storage.SQLDialec
 	return true
 }
 
+// extraColumn 升级旧库时需要按需补齐的附加列（stop_reason / task_id），
+// 两种方言各自的列定义。
+type extraColumn struct {
+	name   string
+	sqlite string
+	mysql  string
+}
+
+var extraColumns = []extraColumn{
+	{
+		name:   "stop_reason",
+		sqlite: `TEXT NOT NULL DEFAULT ''`,
+		mysql:  `VARCHAR(64) COLLATE utf8mb4_bin NOT NULL DEFAULT ''`,
+	},
+	{
+		name:   "task_id",
+		sqlite: `TEXT NOT NULL DEFAULT ''`,
+		mysql:  `VARCHAR(255) COLLATE utf8mb4_bin NOT NULL DEFAULT ''`,
+	},
+}
+
+// ensureExtraColumns 为升级前的旧库幂等补齐 stop_reason / task_id 列：CREATE
+// TABLE IF NOT EXISTS 不会修改已存在的表结构，因此先读表结构元数据判断列是否
+// 存在，缺列时再 ALTER ADD COLUMN。用元数据探测而非比较错误文本判断“列是否
+// 已存在”，SQLite 与 MySQL 的重复列报错无需分别匹配；万一 ALTER 撞上重复列
+// （如表结构已被补过），重探测确认存在即视为成功。返回两列是否可用：补列失败
+// 时该列不参与 SQL 拼装与写入，payload 里仍保留完整字段，读取照常还原。
+func ensureExtraColumns(ctx context.Context, db *sql.DB, dialect storage.SQLDialect, logger *slog.Logger) (hasStopReason, hasTaskID bool) {
+	cols, err := tableColumns(ctx, db, dialect)
+	if err != nil {
+		logger.Error("querylog 读取表结构失败，stop_reason/task_id 列不可用", "error", err)
+		return false, false
+	}
+	available := make(map[string]bool, len(extraColumns))
+	for _, col := range extraColumns {
+		if !cols[col.name] {
+			typ := col.sqlite
+			if dialect == storage.SQLDialectMySQL {
+				typ = col.mysql
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE ania_query_log ADD COLUMN `+col.name+` `+typ); err != nil {
+				latest, probeErr := tableColumns(ctx, db, dialect)
+				if probeErr != nil || !latest[col.name] {
+					logger.Error("querylog 补充列失败，该列不参与下推与写入", "column", col.name, "error", err)
+					continue
+				}
+			}
+		}
+		available[col.name] = true
+	}
+	return available["stop_reason"], available["task_id"]
+}
+
+// tableColumns 读取 ania_query_log 的现有列名：SQLite 用 PRAGMA table_info，
+// MySQL 用 information_schema.COLUMNS（限当前库）。
+func tableColumns(ctx context.Context, db *sql.DB, dialect storage.SQLDialect) (map[string]bool, error) {
+	cols := map[string]bool{}
+	if dialect == storage.SQLDialectMySQL {
+		rows, err := db.QueryContext(ctx,
+			`SELECT COLUMN_NAME FROM information_schema.COLUMNS `+
+				`WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ania_query_log'`)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				return nil, err
+			}
+			cols[name] = true
+		}
+		return cols, rows.Err()
+	}
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(ania_query_log)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		// PRAGMA table_info 依次返回 cid / name / type / notnull / dflt_value / pk
+		var (
+			cid, notNull, pk int
+			name, typ        string
+			dflt             sql.NullString
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			return nil, err
+		}
+		cols[name] = true
+	}
+	return cols, rows.Err()
+}
+
 func (b *sqlBackend) maxSeq() uint64 {
 	var n uint64
 	if err := b.db.QueryRowContext(context.Background(),
@@ -199,36 +321,48 @@ func (b *sqlBackend) maxSeq() uint64 {
 	return n
 }
 
-// logColumns 从 Entry 导出冗余下推列与完整 payload。senders 存包裹式 CSV
-// （",a,b,"），精确匹配某发言者用 LIKE '%,id,%'，不会误中子串。
-func logColumns(e Entry) (kind, chatType, targetID, senders, status, queryText string, createdAt int64, payload string, err error) {
-	data, err := json.Marshal(e)
-	if err != nil {
-		return "", "", "", "", "", "", 0, "", err
+// recordValues 按 buildStatements 拼装的列顺序导出除 seq 外的所有参数，
+// 保证 INSERT 与 UPDATE 的值顺序始终与语句列顺序一致（新增冗余列只需改一处）。
+func (b *sqlBackend) recordValues(e Entry, payload string) []any {
+	args := make([]any, 0, 16)
+	if b.cols.kind {
+		args = append(args, e.Kind)
 	}
-	senders = ","
-	for _, s := range e.Senders {
-		senders += s + ","
+	args = append(args, e.ChatType, e.TargetID, sendersCSV(e.Senders), string(e.Status))
+	if b.cols.stopReason {
+		args = append(args, e.StopReason)
 	}
-	return e.Kind, e.ChatType, e.TargetID, senders, string(e.Status), e.Query, e.Time.Unix(), string(data), nil
+	if b.cols.taskID {
+		args = append(args, e.TaskID)
+	}
+	args = append(args, e.Query, e.Time.Unix())
+	if b.cols.stats {
+		args = append(args, e.Iterations, e.PromptTokens, e.CompletionTokens, e.TotalTokens, e.CachedTokens)
+	}
+	args = append(args, payload)
+	return args
+}
+
+// sendersCSV 把发言者列表序列化为包裹式 CSV（",a,b,"）：SQL 精确匹配某发言者
+// 用 LIKE '%,id,%'，不会误中子串。空列表为单独的 ","。
+func sendersCSV(senders []string) string {
+	var sb strings.Builder
+	sb.Grow(1 + len(senders)*8)
+	sb.WriteString(",")
+	for _, s := range senders {
+		sb.WriteString(s)
+		sb.WriteString(",")
+	}
+	return sb.String()
 }
 
 func (b *sqlBackend) insert(seq uint64, e Entry) {
-	kind, chatType, targetID, senders, status, queryText, createdAt, payload, err := logColumns(e)
+	data, err := json.Marshal(e)
 	if err != nil {
 		b.logger.Error("querylog 序列化失败", "id", e.ID, "error", err)
 		return
 	}
-	args := make([]any, 0, 14)
-	args = append(args, seq)
-	if b.hasKind {
-		args = append(args, kind)
-	}
-	args = append(args, chatType, targetID, senders, status, queryText, createdAt)
-	if b.hasStats {
-		args = append(args, e.Iterations, e.PromptTokens, e.CompletionTokens, e.TotalTokens, e.CachedTokens)
-	}
-	args = append(args, payload)
+	args := append([]any{seq}, b.recordValues(e, string(data))...)
 	if _, err := b.db.ExecContext(context.Background(), b.insertSQL, args...); err != nil {
 		b.logger.Error("querylog 落盘失败", "id", e.ID, "error", err)
 	}
@@ -250,20 +384,12 @@ func (b *sqlBackend) load(seq uint64) (Entry, bool) {
 }
 
 func (b *sqlBackend) overwrite(seq uint64, e Entry) {
-	kind, chatType, targetID, senders, status, queryText, createdAt, payload, err := logColumns(e)
+	data, err := json.Marshal(e)
 	if err != nil {
 		b.logger.Error("querylog 序列化失败", "id", e.ID, "error", err)
 		return
 	}
-	args := make([]any, 0, 14)
-	if b.hasKind {
-		args = append(args, kind)
-	}
-	args = append(args, chatType, targetID, senders, status, queryText, createdAt)
-	if b.hasStats {
-		args = append(args, e.Iterations, e.PromptTokens, e.CompletionTokens, e.TotalTokens, e.CachedTokens)
-	}
-	args = append(args, payload, seq)
+	args := append(b.recordValues(e, string(data)), seq)
 	if _, err := b.db.ExecContext(context.Background(), b.updateSQL, args...); err != nil {
 		b.logger.Error("querylog 落盘失败", "id", e.ID, "error", err)
 	}
@@ -376,7 +502,7 @@ func (b *sqlBackend) recent(limit int) []Entry {
 func (b *sqlBackend) buildWhere(f Filter, beforeSeq uint64) ([]string, []any) {
 	var where []string
 	var args []any
-	if f.Kind != "" && b.hasKind {
+	if f.Kind != "" && b.cols.kind {
 		// 普通记录不写 kind（留空），历史记录同样是空串；主动互动等写具体值
 		if f.Kind == KindChat {
 			// 普通记录不写 kind（留空），历史记录同样是空串；NULL 也归为普通对话
@@ -434,7 +560,7 @@ func (b *sqlBackend) query(f Filter, beforeSeq uint64, limit int) []Entry {
 // stats 返回轻量统计行（不解析 payload、不返回工具明细）。统计列可用时直接
 // 读取冗余列；旧库补列失败时降级为读取完整记录在 Go 侧转换。
 func (b *sqlBackend) stats(f Filter) []StatRow {
-	if !b.hasStats {
+	if !b.cols.stats {
 		entries := b.query(f, 0, 0)
 		rows := make([]StatRow, 0, len(entries))
 		for _, e := range entries {
@@ -448,7 +574,7 @@ func (b *sqlBackend) stats(f Filter) []StatRow {
 	}
 	where, args := b.buildWhere(f, 0)
 	kindExpr := `''`
-	if b.hasKind {
+	if b.cols.kind {
 		kindExpr = `COALESCE(kind, '')`
 	}
 	q := `SELECT created_at, ` + kindExpr + `, chat_type, target_id, status, ` +

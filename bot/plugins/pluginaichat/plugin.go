@@ -187,6 +187,16 @@ type AIChatPlugin struct {
 	// 任务只保留内存态（/tasks 仍可看当前运行中的子代理）
 	taskStore *taskStore
 
+	// goalStore 长任务目标存储（SQL 持久化）；nil 表示功能未启用或持久层不可用
+	goalStore *goalStore
+	// goalArmed 进程内「目标续跑已武装」状态（key=sessionKey）；不持久化，
+	// 进程重启后清空，需用户 /goal resume 重新开启（避免升级重启后自动烧 token）
+	goalArmed sync.Map
+
+	// teamBoardMu 团队任务板的进程内互斥（claim/complete 的原子性；多实例部署
+	// 时以 DB 为准，本进程内串行足够避免同一任务被并发认领）
+	teamBoardMu sync.Mutex
+
 	// chatConsole 面板「试聊室」会话管理器（Web 面板内直接对话测试）；
 	// Start 末尾构造，未就绪时为 nil（面板接口退化为明确错误）
 	chatConsole *chatConsoleManager
@@ -209,7 +219,7 @@ func NewAIChatPlugin() *AIChatPlugin {
 	return &AIChatPlugin{
 		Meta: plugin.Meta{
 			Name:      "AI对话插件",
-			HelpWords: "@我聊天哦，带上 #新对话 标签可以创建新对话，发送 /stop 可以停止 AI 响应（/stop 任务ID 取消指定后台任务），/tasks 查看后台任务，/status 查看当前响应状态",
+			HelpWords: "@我聊天哦，带上 #新对话 标签可以创建新对话，发送 /stop 可以停止 AI 响应（/stop 任务ID 取消指定后台任务），/tasks 查看后台任务，/goal 查看长任务目标，/status 查看当前响应状态",
 			Order:     plugin.LevelPostHandle,
 			ShowFor:   plugininfo.ShowForGroup | plugininfo.ShowForFriend,
 			Author:    "jeanhua",
@@ -274,6 +284,10 @@ func (p *AIChatPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 			taskID = strings.TrimSpace(cmd.Args[0])
 		}
 		return p.handleResumeCommand(bot, msg, taskID)
+	}
+
+	if cmd.Name == "goal" {
+		return p.handleGoalCommand(bot, cmd, msg)
 	}
 
 	if cmd.Name == "stop" {
@@ -430,6 +444,10 @@ func (p *AIChatPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command
 			taskID = strings.TrimSpace(cmd.Args[0])
 		}
 		return p.handleResumeCommand(bot, msg, taskID)
+	}
+
+	if cmd.Name == "goal" {
+		return p.handleGoalCommand(bot, cmd, msg)
 	}
 
 	if cmd.Name == "stop" {
@@ -608,6 +626,12 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	}
 
 	recorder := p.beginQuery(chat, id, isGroup, batch, extraText)
+	// 回合任务 ID 写入 Query 日志（stop_reason 在收尾时按错误原因回填）
+	if recorder != nil {
+		if info := turnInfoFrom(ctx); info != nil {
+			recorder.taskID = info.taskID
+		}
+	}
 
 	// 记忆/知识库检索须基于原始用户消息：下面的注入会改写 extraText
 	userText := extraText
@@ -1262,6 +1286,21 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 			} else if n > 0 {
 				p.Logger.Info("已标记上次进程遗留的未完成任务为 interrupted", "count", n)
 			}
+		}
+	}
+
+	// 长任务目标（跨回合续跑）：需要 SQL 持久层；建表失败降级为功能不可用。
+	// 注意：启动时不自动武装任何目标（goalArmed 为空）——进程重启后目标保持
+	// active 但不会自动续跑，需用户 /goal resume。
+	if p.historyDB != nil && p.cfg.Goal.Enable {
+		goalTableCtx, goalTableCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		store := newGoalStore(p.historyDB, p.Logger.WithGroup("goal"))
+		err := store.EnsureTables(goalTableCtx)
+		goalTableCancel()
+		if err != nil {
+			p.Logger.Error("创建长任务目标表失败，目标续跑不可用", "error", err.Error())
+		} else {
+			p.goalStore = store
 		}
 	}
 

@@ -229,6 +229,9 @@ func TestPlanBlockedToolsAreRealToolNames(t *testing.T) {
 	collect(newMCPTools(newMCPToolPlugin(t)))
 	collect(newSubagentTools(p, nil, message.FromUint64(1), true))
 	collect(newTeamTools(p, nil, message.FromUint64(1), true))
+	collect(newGoalTools(p, message.FromUint64(1), true))
+	collect(newWorkflowTools(p, nil, message.FromUint64(1), true))
+	collect(newTeamBoardTools(p, message.FromUint64(1), true))
 
 	for name := range planBlockedTools {
 		if !names[name] {

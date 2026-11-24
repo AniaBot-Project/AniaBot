@@ -2,10 +2,12 @@ package pluginaichat
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jeanhua/AniaBot/bot/component/aichat"
 	"github.com/jeanhua/AniaBot/bot/component/llmtool"
 	"github.com/jeanhua/AniaBot/common/model/message"
 	"github.com/jeanhua/AniaBot/common/plugin"
@@ -258,6 +260,124 @@ func TestWatchdogOptionsFromConfig(t *testing.T) {
 	sub := p.watchdogOptions(false)
 	if !sub.SoftDeadline.IsZero() {
 		t.Fatal("子代理不应注入软截止提醒")
+	}
+}
+
+// noGoBot 忽略后台任务（只记录发送），用于验证"入队"而不触发消费者。
+// （syncGoBot 定义在 goal_test.go，两处测试共用。）
+type noGoBot struct{ *recordBot }
+
+func (noGoBot) Go(string, func()) {}
+
+// ---- 停止原因映射（Query 日志 stop_reason） ----
+
+func TestStopReasonFromError(t *testing.T) {
+	var watchdogErr error = &aichat.WatchdogAbortError{Reason: "重复调用"}
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"成功", nil, taskStopCompleted},
+		{"看门狗终止", watchdogErr, taskStopWatchdog},
+		{"硬截止", context.DeadlineExceeded, taskStopTimeout},
+		{"用户停止", context.Canceled, taskStopUserStop},
+		{"普通错误", errors.New("boom"), taskStopError},
+	}
+	for _, c := range cases {
+		if got := stopReasonFromError(c.err); got != c.want {
+			t.Fatalf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// ---- 子代理命名 / steering / 结构化结果 ----
+
+func TestValidSubagentName(t *testing.T) {
+	cases := map[string]bool{
+		"a":                     true,
+		"research-1":            true,
+		"abc123":                true,
+		"":                      false,
+		"1abc":                  false,
+		"AB":                    false,
+		"a_b":                   false,
+		"a b":                   false,
+		strings.Repeat("a", 33): false,
+	}
+	for name, want := range cases {
+		if got := validSubagentName(name); got != want {
+			t.Fatalf("validSubagentName(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+// TestLaunchRejectsInvalidOrDuplicateName 非法名字与重名在启动前直接拒绝（不会拉起子代理）。
+func TestLaunchRejectsInvalidOrDuplicateName(t *testing.T) {
+	p := newRunnerTestPlugin()
+	p.cfg.Subagent.Enable = true
+	id := message.FromUint64(1001)
+	rb := &recordBot{}
+
+	out := p.launchAsyncSubagent(context.Background(), rb, id, true, "任务", launchSubagentOptions{Name: "Bad_Name"})
+	if !strings.Contains(out, "不合法") {
+		t.Fatalf("非法名字应被拒绝, got %q", out)
+	}
+	// 名字已被运行中的子代理占用
+	p.getAsyncGroup(id, true).addEntry(asyncSubagentEntry{id: "t-1", name: "research", task: "任务", steer: make(chan string, 1)})
+	out = p.launchAsyncSubagent(context.Background(), rb, id, true, "任务", launchSubagentOptions{Name: "research"})
+	if !strings.Contains(out, "已被当前会话运行中的子代理占用") {
+		t.Fatalf("重名应被拒绝, got %q", out)
+	}
+}
+
+// TestSubagentSendSteersRunningAgent 运行中子代理可按名字/ID 追加指令，指令进入 steer 通道。
+func TestSubagentSendSteersRunningAgent(t *testing.T) {
+	p := newRunnerTestPlugin()
+	id := message.FromUint64(1001)
+	steer := make(chan string, 2)
+	p.getAsyncGroup(id, true).addEntry(asyncSubagentEntry{id: "t-steer", name: "writer", task: "写文档", steer: steer})
+
+	if !p.sendSubagentMessage(id, true, "writer", "请补充结论") {
+		t.Fatal("按名字追加指令失败")
+	}
+	if !p.sendSubagentMessage(id, true, "t-steer", "并按 markdown 输出") {
+		t.Fatal("按 ID 追加指令失败")
+	}
+	if got := <-steer; got != "请补充结论" {
+		t.Fatalf("第一条指令 = %q", got)
+	}
+	if got := <-steer; got != "并按 markdown 输出" {
+		t.Fatalf("第二条指令 = %q", got)
+	}
+	if p.sendSubagentMessage(id, true, "missing", "x") {
+		t.Fatal("不存在的目标应返回 false")
+	}
+}
+
+// TestOnSubagentCompleteStructured 完成通知首行包含机器可读状态/任务 ID/名字。
+func TestOnSubagentCompleteStructured(t *testing.T) {
+	p := newRunnerTestPlugin()
+	id := message.FromUint64(1001)
+	rb := noGoBot{&recordBot{}}
+	p.onSubagentComplete(rb, id, true, "t-done", "writer", "写一份调研报告", "报告正文", nil)
+	pending := p.drainPending(id, true)
+	if len(pending) != 1 {
+		t.Fatalf("应入队 1 条合成消息, got %d", len(pending))
+	}
+	text := pending[0].Message[0].Data["text"].(string)
+	for _, want := range []string{"【子代理执行完成】", "状态=completed", "任务ID: t-done", "名称: writer"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("完成通知缺少 %q: %s", want, text)
+		}
+	}
+
+	// 失败通知
+	rb2 := noGoBot{&recordBot{}}
+	p.onSubagentComplete(rb2, id, true, "t-fail", "", "任务", "", errors.New("模型报错"))
+	pending = p.drainPending(id, true)
+	if len(pending) != 1 || !strings.Contains(pending[0].Message[0].Data["text"].(string), "状态=failed") {
+		t.Fatalf("失败通知结构不符: %+v", pending)
 	}
 }
 

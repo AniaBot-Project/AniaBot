@@ -102,8 +102,31 @@ func (p *AIChatPlugin) runSubagent(ctx context.Context, b bot.Bot, id message.QI
 // subagentRunOptions 子代理（含团队成员）单次执行的定制项：除提示词与单次
 // 超时覆盖外，其余执行参数（模型、生成参数、轮数）一律跟随主模型。
 type subagentRunOptions struct {
-	prompt     string // 系统提示词，空用 defaultSubagentPrompt（团队成员传角色提示词）
-	timeoutSec int    // 本次调用覆盖的秒数（先限幅再乘 time.Second），<=0 用默认超时
+	prompt     string        // 系统提示词，空用 defaultSubagentPrompt（团队成员传角色提示词）
+	timeoutSec int           // 本次调用覆盖的秒数（先限幅再乘 time.Second），<=0 用默认超时
+	steer      <-chan string // 运行中追加指令（异步子代理专用；nil 表示不支持 steering）
+}
+
+// steerDrain 返回 ChatOptions.Steer 回调：非阻塞排空追加指令通道。
+// 通道关闭或空时返回 nil；每条指令由编排层以 [追加指令] 用户消息注入。
+func steerDrain(ch <-chan string) func() []string {
+	if ch == nil {
+		return nil
+	}
+	return func() []string {
+		var out []string
+		for {
+			select {
+			case msg, ok := <-ch:
+				if !ok {
+					return out
+				}
+				out = append(out, msg)
+			default:
+				return out
+			}
+		}
+	}
 }
 
 // runSubagentWithOptions 泛化的子代理执行：主体即原 runSubagent，差异仅在于
@@ -185,6 +208,7 @@ func (p *AIChatPlugin) runSubagentWithOptions(ctx context.Context, b bot.Bot, id
 	logger.Info("子代理开始执行", "id", id, "is_group", isGroup, "timeout", timeout, "task", task)
 	start := time.Now()
 	chatOpts := p.buildSubagentChatOptions()
+	chatOpts.Steer = steerDrain(o.steer)
 	chatOpts.PreToolGate = p.buildPreToolGate(sKey, agenthook.AgentKindSubagent, message.FromUint64(0),
 		func(text string) { p.sendPlainText(b, id, isGroup, text) },
 		p.buildAdminPromptSender(b))

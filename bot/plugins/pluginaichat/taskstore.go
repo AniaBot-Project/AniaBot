@@ -35,6 +35,8 @@ const (
 	taskKindClock     = "clock"      // 定时任务触发
 	taskKindProactive = "proactive"  // 主动互动
 	taskKindGoalRound = "goal_round" // 目标续跑轮次
+	taskKindWorkflow  = "workflow"   // 后台工作流（DAG 多子代理编排）
+	taskKindTeamTask  = "team_task"  // 团队任务板条目
 )
 
 const (
