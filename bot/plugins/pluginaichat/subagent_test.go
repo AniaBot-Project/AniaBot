@@ -23,25 +23,26 @@ func testLogger() *slog.Logger {
 
 // ---- 执行参数跟随主模型 ----
 
-// TestSubagentTimeoutFollowsMain 子代理默认超时跟随框架消息处理预算
-// （bot.msg_event_timeout_sec，Start 时读入 p.msgEventTimeout）；未配置时
-// 与 core.MsgEventTimeout 兜底一致（5 分钟）。
-func TestSubagentTimeoutFollowsMain(t *testing.T) {
+// TestSubagentTimeoutFromConfig 子代理默认超时来自独立配置
+// （plugin.ai_chat_bot.subagent.default_timeout_sec，默认 1800 秒），
+// 不再从框架消息处理预算派生；未配置（0）表示不限制。
+func TestSubagentTimeoutFromConfig(t *testing.T) {
 	p := &AIChatPlugin{}
-	if got := p.subagentTimeout(); got != 5*time.Minute {
-		t.Fatalf("未配置时兜底超时 = %v, want 5m", got)
+	if got := p.subagentTimeout(); got != 0 {
+		t.Fatalf("未配置时应为不限制(0), got %v", got)
 	}
-	p.msgEventTimeout = 10 * time.Minute
+	p.cfg.Subagent.DefaultTimeoutSec = 600
 	if got := p.subagentTimeout(); got != 10*time.Minute {
-		t.Fatalf("超时应跟随框架消息处理预算, got %v", got)
+		t.Fatalf("超时应来自 subagent.default_timeout_sec, got %v", got)
 	}
 }
 
-// TestSubagentMaxIterationsFollowsMain 子代理工具轮数跟随主模型的最大工具调用轮数。
+// TestSubagentMaxIterationsFollowsMain 子代理工具轮数跟随主模型的最大工具调用轮数
+// （0 = 不限制，由重复调用/无进展看门狗兜底）。
 func TestSubagentMaxIterationsFollowsMain(t *testing.T) {
 	p := &AIChatPlugin{}
-	if got := p.mainMaxIterations(); got != 20 {
-		t.Fatalf("未配置时兜底轮数 = %d, want 20", got)
+	if got := p.mainMaxIterations(); got != 0 {
+		t.Fatalf("未配置时应为不限制(0), got %d", got)
 	}
 	p.cfg.MaxIterations = 55
 	if got := p.mainMaxIterations(); got != 55 {
@@ -88,12 +89,24 @@ func TestResolveSubagentTimeout(t *testing.T) {
 		}
 	})
 
-	t.Run("父deadline预算耗尽时直接报错", func(t *testing.T) {
-		// 父请求只剩 10s（不足 30s 预留），不应启动子代理
+	t.Run("父deadline预算不足时缩短而非拒绝", func(t *testing.T) {
+		// 父请求只剩 10s（不足 30s 收尾预留）：缩短到剩余量的一半，仍允许启动
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		got, err := resolveSubagentTimeout(def, 0, ctx)
+		if err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if got <= 0 || got > 10*time.Second {
+			t.Fatalf("超时应被缩短到 (0, 10s], got %v", got)
+		}
+	})
+
+	t.Run("父deadline已过期时返回错误", func(t *testing.T) {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		defer cancel()
 		if _, err := resolveSubagentTimeout(def, 0, ctx); err == nil {
-			t.Fatal("预算耗尽时应返回错误")
+			t.Fatal("父 deadline 已过期时应返回错误")
 		}
 	})
 }
@@ -223,6 +236,7 @@ func TestSubagentCallbacksLocalImageDisabled(t *testing.T) {
 
 func TestNewSubagentTools(t *testing.T) {
 	p := &AIChatPlugin{}
+	p.cfg.Subagent.DefaultTimeoutSec = 300
 
 	groupTools := newSubagentTools(p, nil, message.FromUint64(12345), true)
 	if len(groupTools) != 3 {
@@ -238,10 +252,10 @@ func TestNewSubagentTools(t *testing.T) {
 	if !strings.Contains(tool.Description(), "300 秒") {
 		t.Fatalf("描述应包含默认超时, got %q", tool.Description())
 	}
-	// 超时跟随框架消息处理预算：配置后描述同步变化
-	p.msgEventTimeout = 10 * time.Minute
+	// 超时来自 subagent.default_timeout_sec：配置后描述同步变化
+	p.cfg.Subagent.DefaultTimeoutSec = 600
 	if desc := newSubagentTools(p, nil, message.FromUint64(12345), true)[0].Description(); !strings.Contains(desc, "600 秒") {
-		t.Fatalf("超时应跟随框架消息处理预算（600 秒）, got %q", desc)
+		t.Fatalf("超时应来自 subagent.default_timeout_sec（600 秒）, got %q", desc)
 	}
 
 	friendTools := newSubagentTools(p, nil, message.FromUint64(67890), false)

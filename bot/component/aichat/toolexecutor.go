@@ -21,7 +21,11 @@ type ToolOrchestrator struct {
 	executor      ToolExecutor
 	msgBuilder    *MessageBuilder
 	maxIterations int
-	toolObserver  func(ToolCallInfo)
+	// maxContextTokens 单请求内上下文保护阈值（0=关闭）：工具循环内每次 LLM
+	// 返回后若 prompt 用量超过其 85%，裁剪较旧的大工具结果消息（见
+	// pruneContextMessages）。由 ChatBot 创建时用会话窗口配置注入。
+	maxContextTokens int
+	toolObserver     func(ToolCallInfo)
 	// hookRunner/hookBase 钩子执行器与会话身份（SessionKey/AgentKind），
 	// 由 ChatBot.SetHookRunner 注入；nil 时 PostToolUse 埋点跳过
 	hookRunner HookRunner
@@ -40,7 +44,7 @@ type ToolCallInfo struct {
 
 func NewToolOrchestrator(executor ToolExecutor, msgBuilder *MessageBuilder) *ToolOrchestrator {
 	// 默认上限仅作兜底：主对话/定时任务由插件配置 plugin.ai_chat_bot.max_iterations
-	// 在 ChatBot 创建后通过 SetMaxIterations 覆盖
+	// 在 ChatBot 创建后通过 SetMaxIterations 覆盖（配置为 0 表示不设上限）
 	return &ToolOrchestrator{
 		executor:      executor,
 		msgBuilder:    msgBuilder,
@@ -48,8 +52,17 @@ func NewToolOrchestrator(executor ToolExecutor, msgBuilder *MessageBuilder) *Too
 	}
 }
 
+// SetMaxIterations 设置工具调用循环的最大轮数。
+// max<=0 表示不设上限：循环只会因模型给出最终回复、无进展看门狗终止或上层
+// ctx 取消而结束，也不再执行「末轮强制无工具收尾」逻辑。
 func (o *ToolOrchestrator) SetMaxIterations(max int) {
 	o.maxIterations = max
+}
+
+// SetMaxContextTokens 设置单请求内上下文保护阈值（0=关闭）。
+// 见 pruneContextMessages：工具循环内 prompt 逼近窗口时裁剪旧的巨型工具结果。
+func (o *ToolOrchestrator) SetMaxContextTokens(max int) {
+	o.maxContextTokens = max
 }
 
 // SetToolObserver 设置工具调用观察者：每次工具执行完成后回调一次（传 nil 取消）。
@@ -154,7 +167,11 @@ func (o *ToolOrchestrator) ExecuteWithTools(
 		return content, messages, totalUsage, nil
 	}
 
-	for i := 0; i < o.maxIterations; i++ {
+	// 循环保护状态按次隔离；Watchdog 零值 = 全部关闭，行为与旧版一致。
+	watchdog := newWatchdogState(opts.Watchdog)
+	// maxIterations <= 0 表示不设上限：循环只能由模型给出最终回复、无进展
+	// 看门狗终止或上层 ctx 取消结束；有上限时才保留「末轮强制无工具收尾」。
+	for i := 0; ; i++ {
 		tools := o.executor.Tools()
 
 		opts.Tools = tools
@@ -170,6 +187,11 @@ func (o *ToolOrchestrator) ExecuteWithTools(
 		totalUsage.LastPromptTokens = usage.PromptTokens
 		totalUsage.Iterations++
 
+		// 单请求内上下文保护：长工具循环里 prompt 逐步逼近窗口时，先把较旧的
+		// 大工具结果裁成头尾摘要（保持 tool_call 配对），避免下一轮请求直接
+		// 超窗口失败。窗口级压缩由 ChatBot 在回合开始时负责，这里是回合内兜底。
+		messages = o.pruneContextMessages(messages, usage.PromptTokens)
+
 		if len(resp.ToolCalls) == 0 {
 			content := resp.Content
 			if resp.Truncated {
@@ -177,6 +199,13 @@ func (o *ToolOrchestrator) ExecuteWithTools(
 			}
 			messages, content = appendAIMessage(messages, o.msgBuilder, resp, content)
 			return content, messages, totalUsage, nil
+		}
+
+		// 循环保护：相同工具+参数连续重复先按阈值提醒；达到 NoProgressLimit
+		// 时直接终止（在无意义的重复执行之前，避免再浪费一次工具执行与 token）。
+		watchdog.observeRound(resp.ToolCalls)
+		if watchdog.shouldAbort() {
+			return "", messages, totalUsage, watchdog.abortError(resp.ToolCalls)
 		}
 
 		// 工具边界：流式模式下通知调用方结束当前流式消息（下一轮首个增量创建新消息）
@@ -190,15 +219,15 @@ func (o *ToolOrchestrator) ExecuteWithTools(
 		// 清单、参数替换为合法空对象，截断调用以明确提示回填
 		var skipTruncated map[int]bool
 		if resp.Truncated {
-			for i, tc := range resp.ToolCalls {
+			for j, tc := range resp.ToolCalls {
 				if json.Valid([]byte(tc.Arguments)) {
 					continue
 				}
 				if skipTruncated == nil {
 					skipTruncated = make(map[int]bool, 1)
 				}
-				skipTruncated[i] = true
-				resp.ToolCalls[i].Arguments = "{}"
+				skipTruncated[j] = true
+				resp.ToolCalls[j].Arguments = "{}"
 			}
 		}
 
@@ -219,7 +248,27 @@ func (o *ToolOrchestrator) ExecuteWithTools(
 			}
 		}
 
-		if i == o.maxIterations-1 {
+		// —— 循环保护提醒（工具执行完成后、下一轮请求前注入）——
+		// 一律以 user 角色追加：随本轮返回值进入插件层持久化历史，后续回合
+		// 模型仍能看到「刚才被提醒过」——这是有意为之，避免换回合继续打转。
+		watchdog.toolRounds++
+		for _, reminder := range watchdog.repeatWarnings() {
+			messages = append(messages, TextMessage(RoleUser, reminder))
+		}
+		if wd := opts.Watchdog; wd.ProgressReminderAfter > 0 &&
+			watchdog.toolRounds >= wd.ProgressReminderAfter && !watchdog.progressReminded {
+			watchdog.progressReminded = true
+			messages = append(messages, TextMessage(RoleUser, progressReminder))
+		}
+		if !opts.Watchdog.SoftDeadline.IsZero() && !watchdog.softDeadlineReminded &&
+			time.Now().After(opts.Watchdog.SoftDeadline) {
+			watchdog.softDeadlineReminded = true
+			messages = append(messages, TextMessage(RoleUser, softDeadlineReminder))
+		}
+
+		// 有轮数上限的旧语义：最后一轮强制模型直接给出文本回答（仅在
+		// maxIterations>0 时保留；无限模式不做，否则等于变相设了硬上限）。
+		if o.maxIterations > 0 && i == o.maxIterations-1 {
 			messages = append(messages, o.msgBuilder.BuildToolLimitMessage())
 			// 最后一轮要求模型直接给出文本回答，故不再附带工具定义；
 			// 否则模型可能继续发起工具调用而被静默丢弃（仅取 Content），导致空响应
@@ -243,8 +292,6 @@ func (o *ToolOrchestrator) ExecuteWithTools(
 			return finalContent, messages, totalUsage, nil
 		}
 	}
-
-	return "", messages, totalUsage, fmt.Errorf("exceeded maximum iterations")
 }
 
 func (o *ToolOrchestrator) executeToolCalls(

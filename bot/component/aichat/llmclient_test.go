@@ -41,7 +41,8 @@ func newTestClient(baseURL string, opts ...LLMClientOption) *LLMClient {
 			model: m,
 		}
 	}
-	c := &LLMClient{backend: sdkBackend(baseURL, "test-key", "main-model"), model: "main-model"}
+	c := &LLMClient{backend: sdkBackend(baseURL, "test-key", "main-model"), model: "main-model",
+		requestTimeout: cfg.requestTimeout, streamIdleTimeout: cfg.streamIdleTimeout}
 	if cfg.maxAttempts > 1 {
 		c.retry = &retryConfig{maxAttempts: cfg.maxAttempts, baseDelay: cfg.baseDelay}
 	}
@@ -53,7 +54,8 @@ func newTestClient(baseURL string, opts ...LLMClientOption) *LLMClient {
 		if fbKey == "" {
 			fbKey = "test-key"
 		}
-		c.fallback = &LLMClient{backend: sdkBackend(fbBase, fbKey, cfg.fallbackModel), model: cfg.fallbackModel}
+		c.fallback = &LLMClient{backend: sdkBackend(fbBase, fbKey, cfg.fallbackModel), model: cfg.fallbackModel,
+			requestTimeout: cfg.requestTimeout, streamIdleTimeout: cfg.streamIdleTimeout}
 	}
 	return c
 }

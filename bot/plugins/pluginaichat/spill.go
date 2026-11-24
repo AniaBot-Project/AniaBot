@@ -150,10 +150,30 @@ func (l *toolResultLimiter) StoreDir() string {
 //	content:    工具返回文本
 //	isError:    是否错误结果（错误只截断、不落盘：模型必须当轮看到失败原因）
 func (l *toolResultLimiter) Limit(sessionKey, toolName, content string, isError bool) string {
+	if l == nil {
+		return content
+	}
+	return l.limitWithMax(sessionKey, toolName, content, l.cfg.MaxInlineRunes, isError)
+}
+
+// LimitAt 按调用方给定的内联上限治理一段非工具文本（如异步子代理结果），
+// 超限时同样落盘并返回预览 + handle，主 AI 可用 read_tool_output 读取。
+// maxInline<=0 时退回配置的内联上限。
+func (l *toolResultLimiter) LimitAt(sessionKey, toolName, content string, maxInline int, isError bool) string {
+	if l == nil {
+		return content
+	}
+	if maxInline <= 0 {
+		maxInline = l.cfg.MaxInlineRunes
+	}
+	return l.limitWithMax(sessionKey, toolName, content, maxInline, isError)
+}
+
+// limitWithMax Limit 的实现体：maxInline 为本次生效的内联上限。
+func (l *toolResultLimiter) limitWithMax(sessionKey, toolName, content string, maxInline int, isError bool) string {
 	if l == nil || content == "" {
 		return content
 	}
-	maxInline := l.cfg.MaxInlineRunes
 	// 字节数必然 ≥ rune 数：先按字节快速放行，避免对每个正常结果都全量数 rune
 	if len(content) <= maxInline {
 		return content

@@ -298,15 +298,63 @@ type sessionConfig struct {
 	NoMentionClear int `cfg:"no_mention_clear" label:"未@自动清空阈值（条）" group:"AI 对话 · 会话驻留" default:"30" help:"群聊连续未@消息达到该条数后自动清空该群对话历史并卸载动态加载的 MCP 工具，下次 @ 即开新对话；计数跨重启保留（每 10 条落盘一次，重启后继续累计），会话被闲置回收时计数不清零、在下次 @ 时补清；0 表示关闭自动清空"`
 }
 
+// turnConfig 回合（单次 AI 回复）的时间预算与循环保护配置。
+//
+// 与 bot.msg_event_timeout_sec 的关系：框架事件超时只约束消息入口（其他插件），
+// AI 回合不再使用它。回合自身的兜底是「软截止 + 硬截止 + 看门狗」：
+//   - 软截止到时只注入一次收尾/交接提醒，不取消；0 关闭；
+//   - 硬截止是最后兜底，到时取消当前回合并提示；0 表示不限制（仅 /stop 与进程关闭可停）；
+//   - 无进展看门狗在模型反复执行相同工具调用时先提醒、后终止，避免死循环烧 token。
+type turnConfig struct {
+	SoftTimeoutSec        int    `cfg:"soft_timeout_sec" label:"软截止(秒)" group:"AI 对话 · 回合与任务" help:"回合运行超过该时长后，向模型注入一次「收尾或转后台」提醒，不取消回合；0 表示关闭" default:"600"`
+	HardTimeoutSec        int    `cfg:"hard_timeout_sec" label:"硬截止(秒)" group:"AI 对话 · 回合与任务" help:"回合运行的最终兜底，超时取消当前回合并提示原因；0 表示不限制（仅 /stop 与进程关闭可停）" default:"14400"`
+	ProgressReminderAfter int    `cfg:"progress_reminder_after" label:"委派提醒阈值(轮)" group:"AI 对话 · 回合与任务" help:"同一回合内连续工具调用达到该轮数时提醒模型考虑委派子代理；0 表示关闭" default:"6"`
+	RepeatToolWarn        string `cfg:"repeat_tool_warn" label:"重复调用提醒阈值" group:"AI 对话 · 回合与任务" help:"相同工具+参数重复调用达到这些次数时提醒模型换方案，逗号分隔；留空关闭提醒" default:"3,5,8"`
+	NoProgressLimit       int    `cfg:"no_progress_limit" label:"无进展终止阈值(步)" group:"AI 对话 · 回合与任务" help:"相同工具+参数重复调用达到该次数时终止回合并回报原因，防止死循环烧 token；0 表示只提醒不终止" default:"12"`
+	AckAfterSec           int    `cfg:"ack_after_sec" label:"长任务受理提示(秒)" group:"AI 对话 · 回合与任务" help:"回合运行超过该时长仍无可见输出时，先给用户发一条「正在处理」提示；0 表示关闭" default:"20"`
+}
+
+// llmGuardConfig 单次 LLM 请求的保护：请求总超时 + 流式空闲超时。
+// 这两项替代原先「回合 5 分钟一刀切」作为上游挂死的兜底，必须保留。
+type llmGuardConfig struct {
+	RequestTimeoutSec    int `cfg:"request_timeout_sec" label:"单次请求超时(秒)" group:"AI 对话 · 回合与任务" help:"单次 LLM HTTP 请求（含流式）的总超时，超时按可重试错误处理；0 表示不限制（不推荐）" default:"600"`
+	StreamIdleTimeoutSec int `cfg:"stream_idle_timeout_sec" label:"流式空闲超时(秒)" group:"AI 对话 · 回合与任务" help:"流式响应超过该时长没有新内容时中断本次请求并重试，防止上游半挂；0 表示不限制" default:"120"`
+}
+
+// subagentConfig 子代理配置：委派任务的独立生命周期与资源边界。
+type subagentConfig struct {
+	Enable                  bool `cfg:"enable" label:"启用子代理" group:"AI 对话 · 子代理" default:"true"`
+	DefaultTimeoutSec       int  `cfg:"default_timeout_sec" label:"默认超时(秒)" group:"AI 对话 · 子代理" help:"子代理单次执行默认超时，0 表示不限制（由 token 配额与 /stop 兜底）" default:"1800"`
+	MaxTimeoutSec           int  `cfg:"max_timeout_sec" label:"最大超时(秒)" group:"AI 对话 · 子代理" help:"模型单次调用 timeout_sec 的硬上限；0 表示不限制" default:"0"`
+	MaxConcurrentPerSession int  `cfg:"max_concurrent_per_session" label:"每会话并发子代理" group:"AI 对话 · 子代理" help:"同一会话同时运行的后台子代理上限，超出时拒绝并提示" default:"4"`
+	MaxConcurrentGlobal     int  `cfg:"max_concurrent_global" label:"全局并发子代理" group:"AI 对话 · 子代理" help:"所有会话合计的后台子代理上限，与对话回合并发分开计算" default:"8"`
+	MaxDepth                int  `cfg:"max_depth" label:"委派深度" group:"AI 对话 · 子代理" help:"子代理再委派子代理的最大层数；1 表示子代理不可再委派" default:"1"`
+	ResultInlineRunes       int  `cfg:"result_inline_runes" label:"结果内联上限(字符)" group:"AI 对话 · 子代理" help:"异步子代理结果超过该长度时落盘，主 AI 收到摘要 + handle；0 表示不限制" default:"8000"`
+}
+
+// taskConfig 后台任务（handoff / 后台 bash / 后台子代理）的资源与恢复配置。
+type taskConfig struct {
+	MaxBackground int  `cfg:"max_background" label:"后台任务并发" group:"AI 对话 · 回合与任务" help:"后台任务（handoff/后台子代理/后台命令）的全局并发上限，与对话回合并发分开计算" default:"8"`
+	WallClockSec  int  `cfg:"wall_clock_sec" label:"任务总时长兜底(秒)" group:"AI 对话 · 回合与任务" help:"单个后台任务的总时长兜底，超时标记 timeout；0 表示不限制" default:"0"`
+	RetentionDays int  `cfg:"retention_days" label:"任务记录保留(天)" group:"AI 对话 · 回合与任务" help:"已完成任务的记录保留天数，过期清理；0 表示不清理" default:"7"`
+	AutoResume    bool `cfg:"auto_resume" label:"重启后自动续跑" group:"AI 对话 · 回合与任务" help:"进程重启后自动续跑中断的 handoff/子代理任务；默认关闭，避免升级重启后自动消耗 token" default:"false"`
+}
+
+// goalConfig 长任务目标（跨回合自动续跑）配置。
+type goalConfig struct {
+	Enable    bool `cfg:"enable" label:"启用目标续跑" group:"AI 对话 · 回合与任务" help:"允许 AI 建立跨回合持续推进的目标，由运行时在会话空闲时自动续跑；默认开启" default:"true"`
+	MaxRounds int  `cfg:"max_rounds" label:"目标最大轮数" group:"AI 对话 · 回合与任务" help:"单个目标最多自动续跑的轮数，达到后自动标记 blocked 并等待人工处理" default:"64"`
+}
+
 type aiChatConfig struct {
 	BaseURL          string `cfg:"plugin.ai_chat_bot.base_url" label:"Base URL" group:"AI 对话 · 模型" help:"API 地址；anthropic 格式填 https://api.anthropic.com，其余填 OpenAI 兼容地址" default:"https://api.deepseek.com"`
 	APIKey           string `cfg:"plugin.ai_chat_bot.api_key" label:"API Key" type:"password" sensitive:"true" group:"AI 对话 · 模型"`
 	Model            string `cfg:"plugin.ai_chat_bot.model" label:"模型" group:"AI 对话 · 模型" default:"deepseek-chat"`
 	APIFormat        string `cfg:"plugin.ai_chat_bot.api_format" label:"API 格式" type:"select" options:"chat_completions,responses,anthropic" group:"AI 对话 · 模型" help:"chat_completions：OpenAI 兼容（DeepSeek 等，默认）；responses：OpenAI Responses API；anthropic：Anthropic Messages API（Claude）" default:"chat_completions"`
 	Multimodal       bool   `cfg:"plugin.ai_chat_bot.multimodal" label:"多模态" group:"AI 对话 · 模型" help:"主模型是否支持图片输入" default:"false"`
-	RateLimit        int    `cfg:"plugin.ai_chat_bot.rate_limit" label:"并发限制" group:"AI 对话 · 模型" help:"同时处理的 AI 请求数上限，超出后直接拒绝" default:"2"`
+	RateLimit        int    `cfg:"plugin.ai_chat_bot.rate_limit" label:"并发限制" group:"AI 对话 · 模型" help:"同时处理的 AI 对话回合数上限，超出后直接拒绝；后台任务使用独立并发池，不占用该名额" default:"4"`
 	MaxContextTokens int    `cfg:"plugin.ai_chat_bot.max_context_tokens" label:"上下文 Token 上限" group:"AI 对话 · 模型" default:"128000"`
-	MaxIterations    int    `cfg:"plugin.ai_chat_bot.max_iterations" label:"最大工具调用轮数" group:"AI 对话 · 模型" help:"单次回复中 AI 最多连续调用工具的轮数，超出后强制结束" default:"100"`
+	MaxIterations    int    `cfg:"plugin.ai_chat_bot.max_iterations" label:"最大工具调用轮数" group:"AI 对话 · 模型" help:"单次回复中 AI 最多连续调用工具的轮数；0 表示不限制（由重复调用/无进展看门狗兜底）" default:"0"`
 	// 自定义请求头：附加到全部 LLM 请求（主对话/子代理/定时任务/上下文压缩/
 	// 备用识图/备用模型），用于网关鉴权、路由标记等场景；每行一个，
 	// 支持 "Name: Value" 或 "Name=Value"，同名覆盖默认头（含 User-Agent）。
@@ -350,6 +398,17 @@ type aiChatConfig struct {
 	Approval approvalConfig `cfg:"plugin.ai_chat_bot.approval"`
 	// ToolResult 工具结果长度治理（超长结果落盘 + read_tool_output 读回）
 	ToolResult toolResultConfig `cfg:"plugin.ai_chat_bot.tool_result"`
+
+	// Turn 回合时间预算与循环保护（替代 bot.msg_event_timeout_sec 对 AI 的约束）
+	Turn turnConfig `cfg:"plugin.ai_chat_bot.turn"`
+	// LLM 单次请求保护（请求超时 + 流式空闲超时）
+	LLMGuard llmGuardConfig `cfg:"plugin.ai_chat_bot.llm"`
+	// Subagent 子代理生命周期与资源边界
+	Subagent subagentConfig `cfg:"plugin.ai_chat_bot.subagent"`
+	// Task 后台任务资源与恢复策略
+	Task taskConfig `cfg:"plugin.ai_chat_bot.task"`
+	// Goal 长任务目标续跑
+	Goal goalConfig `cfg:"plugin.ai_chat_bot.goal"`
 }
 
 // ConfigSchema 实现 plugin.ConfigSchemaProvider：返回配置结构体指针，

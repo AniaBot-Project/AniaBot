@@ -75,6 +75,8 @@ func (b *responsesBackend) generateStream(ctx context.Context, messages []Messag
 	started := false
 	for stream.Next() {
 		event := stream.Current()
+		// 向流空闲看门狗报告一次活动（无看门狗时为空操作），见 llmguard.go
+		notifyStreamActivity(ctx)
 		acc.Add(event)
 		started = true // 任何流事件都算已开始输出
 	}

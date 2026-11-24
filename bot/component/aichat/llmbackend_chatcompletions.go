@@ -92,6 +92,9 @@ func (b *chatCompletionsBackend) generateStream(ctx context.Context, messages []
 	started := false
 	for stream.Next() {
 		chunk := stream.Current()
+		// 向流空闲看门狗报告一次活动（无看门狗时为空操作）：按「有没有新块」
+		// 计时，持续出字时即使请求总时长超过空闲阈值也不会被中断
+		notifyStreamActivity(ctx)
 		acc.Add(chunk)
 		// 真实数据块（有 choices 或 usage）才算已开始输出；
 		// SDK 对流内 error 事件不产出 chunk（Next 直接返回 false 并置 Err）

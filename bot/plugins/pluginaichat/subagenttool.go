@@ -27,13 +27,19 @@ func newSubagentTools(p *AIChatPlugin, b bot.Bot, id message.QID, isGroup bool) 
 	if isGroup {
 		sessionDesc = "群聊（会话 ID " + id.String() + "）"
 	}
-	runDesc := "将一个复杂/耗时的子任务委派给一次性子代理异步执行。子代理以全新上下文运行（看不到当前对话历史），" +
-		"拥有与你一致的工具能力（以其实际可用的工具列表为准），执行完毕后结果会自动发送到当前会话。" +
-		"适用场景：需要多步工具调用的独立子任务（如深度调研、多轮搜索后总结），可避免中间过程占用当前对话上下文。" +
-		"当前会话为" + sessionDesc + "，子代理在同一会话场景下工作。" +
-		fmt.Sprintf("子代理在后台异步执行（默认超时 %d 秒），任务启动后立即返回，不会阻塞你的响应。"+
-			"你可以通过 subagent_list 查看运行中的子代理，通过 subagent_cancel 取消。", int(p.subagentTimeout().Seconds())) +
-		"子代理无法再委派子代理"
+	// 子代理默认超时的展示文案（0=不限制）
+	timeoutDesc := "不限制"
+	if d := p.subagentTimeout(); d > 0 {
+		timeoutDesc = fmt.Sprintf("%d 秒", int(d.Seconds()))
+	}
+	runDesc := "将一个复杂/耗时的子任务委派给一次性子代理后台执行。子代理以全新上下文运行（看不到当前对话历史），" +
+		"拥有与你一致的工具能力（以其实际可用的工具列表为准），执行完毕后结果会自动回到当前会话并触发你继续处理。" +
+		"\n\n何时使用：预计需要 3 步以上工具调用、超过 1 分钟、或需要多轮搜索/调研/读写多文件的独立子任务，应该直接委派，" +
+		"不要在主对话里逐步做完。多个互不依赖的子任务可以在同一条回复里并行启动多个 subagent_run（不要串行等待）。" +
+		"简单问题、闲聊、需要与用户反复澄清的任务不要委派。" +
+		"\n\n行为：启动后立即返回，不阻塞本轮；委派后不要等待或轮询，继续处理其他问题或结束本轮。" +
+		"子代理完成后请基于结果给用户最终答复。子代理无法再委派子代理。" +
+		fmt.Sprintf("\n\n默认超时 %s；可用 timeout_sec 覆盖。当前会话为 %s。", timeoutDesc, sessionDesc)
 	return []llmtool.Tool{
 		&subagentRunTool{
 			BaseTool:         llmtool.MakeBaseTool("subagent_run", runDesc, subagentRunParams{}),

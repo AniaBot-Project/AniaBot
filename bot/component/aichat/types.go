@@ -3,6 +3,7 @@ package aichat
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/jeanhua/AniaBot/bot/component/llmtool"
 )
@@ -69,6 +70,26 @@ func (t *ContentPartType) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// WatchdogOptions 工具循环保护配置（零值 = 全部关闭）。
+//
+// 由插件层（pluginaichat）按回合预算与配置填充后放进 ChatOptions.Watchdog；
+// 组件层只负责在工具循环里执行：提醒以 user 角色追加进消息（随本轮返回，
+// 插件层会持久化，故后续回合模型仍能看到），终止则返回 *WatchdogAbortError。
+type WatchdogOptions struct {
+	// SoftDeadline 软截止时刻：到达后向模型注入一次「收尾或转后台」提醒，
+	// 不中断本轮；零值表示不启用。
+	SoftDeadline time.Time
+	// ProgressReminderAfter 连续工具轮数达到该值后注入一次「考虑委派子代理」
+	// 提醒；0 表示关闭。
+	ProgressReminderAfter int
+	// RepeatWarnThresholds 相同工具+参数重复次数达到各阈值时各提醒一次，
+	// 如 [3,5,8]；空/nil 表示关闭。
+	RepeatWarnThresholds []int
+	// NoProgressLimit 相同工具+参数重复达到该次数时终止工具循环；0 表示
+	// 只提醒不终止。
+	NoProgressLimit int
+}
+
 // ChatOptions LLM 调用参数
 type ChatOptions struct {
 	MaxToken           *int
@@ -78,6 +99,10 @@ type ChatOptions struct {
 	TopK               *int // 非标准参数，部分兼容 API 使用
 	Tools              []llmtool.ToolDef
 	ReasoningEffort    *string // "low", "medium", "high"
+
+	// Watchdog 工具循环保护配置（零值 = 全部关闭），由插件层按回合预算填充。
+	// 仅 ToolOrchestrator 使用；同一 ChatBot 的 Chat 串行调用，状态按次隔离。
+	Watchdog WatchdogOptions
 
 	// OnStreamDelta 流式文本增量回调（nil = 一次性生成）。
 	// 注意：在流读取的同一 goroutine 串行调用，回调内勿做重 IO；
