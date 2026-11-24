@@ -63,15 +63,19 @@ func (p *AIChatPlugin) finishTurnTask(t *agentTask, status, stopReason, errText 
 }
 
 // beginSubagentTask 为一次异步子代理创建任务记录（taskStore 未启用时返回 nil）。
-func (p *AIChatPlugin) beginSubagentTask(taskID string, id message.QID, isGroup bool, task string) *agentTask {
+// kind 为 taskKindSubagent / taskKindHandoff。
+func (p *AIChatPlugin) beginSubagentTask(taskID string, id message.QID, isGroup bool, task, kind string) *agentTask {
 	if p.taskStore == nil {
 		return nil
+	}
+	if kind == "" {
+		kind = taskKindSubagent
 	}
 	now := time.Now().Unix()
 	t := &agentTask{
 		ID:         taskID,
 		SessionKey: sessionKey(id, isGroup),
-		Kind:       taskKindSubagent,
+		Kind:       kind,
 		Status:     taskStatusRunning,
 		Title:      truncateTaskTitle(task),
 		Prompt:     truncateTaskPrompt(task),

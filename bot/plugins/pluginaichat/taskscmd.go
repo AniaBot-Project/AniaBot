@@ -187,6 +187,6 @@ func (t *handoffTool) Execute(ctx context.Context, params any, callbacks llmtool
 	b.WriteString("- 最终给出完整、自包含的结果：结论 + 关键证据 + 未完成项/风险。\n")
 	b.WriteString("- 若确实需要用户决策，在结果开头标注【需要决策】并给出选项。\n")
 
-	return t.plugin.launchAsyncSubagent(ctx, t.bot, t.id, t.isGroup, b.String(), 0, callbacks) +
+	return t.plugin.launchAsyncSubagentKind(ctx, t.bot, t.id, t.isGroup, b.String(), 0, callbacks, taskKindHandoff) +
 		"\n\n提示：交接已生效，本轮请立即收尾，用一两句话告诉用户剩余工作已转入后台以及任务 ID；不要继续调用工具等待结果。", nil
 }

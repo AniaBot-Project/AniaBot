@@ -158,6 +158,21 @@ func (p *AIChatPlugin) launchAsyncSubagent(
 	timeoutSec int,
 	parentCbs llmtool.CallBackFuncs,
 ) string {
+	return p.launchAsyncSubagentKind(ctx, b, id, isGroup, task, timeoutSec, parentCbs, taskKindSubagent)
+}
+
+// launchAsyncSubagentKind 同上，但指定任务类型（subagent / handoff），供任务
+// 列表区分普通委派与"交接转后台"。
+func (p *AIChatPlugin) launchAsyncSubagentKind(
+	ctx context.Context,
+	b bot.Bot,
+	id message.QID,
+	isGroup bool,
+	task string,
+	timeoutSec int,
+	parentCbs llmtool.CallBackFuncs,
+	kind string,
+) string {
 	if !p.cfg.Subagent.Enable {
 		return "子代理功能未启用（plugin.ai_chat_bot.subagent.enable=false）"
 	}
@@ -179,7 +194,7 @@ func (p *AIChatPlugin) launchAsyncSubagent(
 	}
 
 	launchID := newTaskID()
-	subTask := p.beginSubagentTask(launchID, id, isGroup, task)
+	subTask := p.beginSubagentTask(launchID, id, isGroup, task, kind)
 
 	// 无 deadline 的 cancel context：runSubagent 内部自行通过 resolveSubagentTimeout
 	// 创建带 timeout 的子 context，外部 cancel（/stop）不影响超时计算，且
