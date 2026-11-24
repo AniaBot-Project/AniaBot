@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jeanhua/AniaBot/bot/component/aichat"
+	"github.com/jeanhua/AniaBot/common/bot"
 	"github.com/jeanhua/AniaBot/common/model/message"
 )
 
@@ -73,7 +74,7 @@ func (p *AIChatPlugin) beginSubagentTask(taskID string, id message.QID, isGroup 
 		Kind:       taskKindSubagent,
 		Status:     taskStatusRunning,
 		Title:      truncateTaskTitle(task),
-		Prompt:     truncateTaskTitle(task),
+		Prompt:     truncateTaskPrompt(task),
 		CreatedAt:  now,
 		StartedAt:  now,
 		UpdatedAt:  now,
@@ -152,6 +153,105 @@ func truncateTaskResult(s string) string {
 		return s
 	}
 	return string(r[:maxRunes]) + "\n…（结果已截断，完整内容见会话侧落盘文件）"
+}
+
+// truncateTaskPrompt 任务指令入库前的长度限制：/resume 依赖它恢复中断任务，
+// 保留足够重建上下文的长度（完整对话历史不在任务表内）。
+func truncateTaskPrompt(s string) string {
+	const maxRunes = 8000
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return string(r[:maxRunes]) + "\n…（任务指令已截断）"
+}
+
+// startTaskJanitor 启动任务记录清理器：按 task.retention_days 删除过期已结束
+// 任务（每 6 小时一次，随插件生命周期退出）。
+func (p *AIChatPlugin) startTaskJanitor() {
+	if p.taskStore == nil || p.cfg.Task.RetentionDays <= 0 || p.runCtx == nil {
+		return
+	}
+	retention := time.Duration(p.cfg.Task.RetentionDays) * 24 * time.Hour
+	go func() {
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-p.runCtx.Done():
+				return
+			case <-ticker.C:
+				cutoff := time.Now().Add(-retention).Unix()
+				ctx, cancel := p.taskDB()
+				n, err := p.taskStore.DeleteFinishedBefore(ctx, cutoff)
+				cancel()
+				if err != nil {
+					p.Logger.Warn("清理过期任务记录失败", "error", err.Error())
+				} else if n > 0 {
+					p.Logger.Info("已清理过期任务记录", "count", n)
+				}
+			}
+		}
+	}()
+}
+
+// handleResumeCommand 处理 /resume <任务ID>：把进程中断的任务恢复为一个新的
+// AI 回合（任务目标作为续接提示入队）。仅允许恢复本会话、且状态为 interrupted
+// 的子代理/交接任务；恢复过程保留原任务记录，由新回合继续推进。
+func (p *AIChatPlugin) handleResumeCommand(b bot.Bot, msg message.Message, taskID string) (bool, error) {
+	id, isGroup := messageTarget(msg)
+	if taskID == "" {
+		p.sendPlainText(b, id, isGroup, "用法：/resume 任务ID（发送 /tasks 查看可恢复任务）")
+		return false, nil
+	}
+	if p.taskStore == nil {
+		p.sendPlainText(b, id, isGroup, "任务持久化未启用（缺少 SQL 存储），无法恢复中断任务")
+		return false, nil
+	}
+	ctx, cancel := p.taskDB()
+	t, ok, err := p.taskStore.Get(ctx, taskID)
+	cancel()
+	if err != nil || !ok {
+		p.sendPlainText(b, id, isGroup, "未找到任务 "+taskID+"（发送 /tasks 查看当前任务）")
+		return false, nil
+	}
+	if t.SessionKey != sessionKey(id, isGroup) {
+		p.sendPlainText(b, id, isGroup, "只能恢复本会话的任务")
+		return false, nil
+	}
+	if t.Status != taskStatusInterrupted {
+		p.sendPlainText(b, id, isGroup, "任务 "+taskID+" 当前状态为「"+taskStatusLabel(t.Status)+"」，只有被中断（interrupted）的任务可以恢复")
+		return false, nil
+	}
+	if t.Kind != taskKindSubagent && t.Kind != taskKindHandoff {
+		p.sendPlainText(b, id, isGroup, "任务 "+taskID+" 不支持恢复（仅子代理/交接任务可恢复）")
+		return false, nil
+	}
+	goal := strings.TrimSpace(t.Prompt)
+	if goal == "" {
+		goal = t.Title
+	}
+	// 标记为排队，避免重复 /resume
+	t.Status = taskStatusQueued
+	t.UpdatedAt = time.Now().Unix()
+	updateCtx, updateCancel := p.taskDB()
+	_ = p.taskStore.Update(updateCtx, t)
+	updateCancel()
+
+	// 作为一条系统来源的消息入队：主 AI 有完整会话历史，比冷启动子代理更能接上上下文
+	hint := "【恢复中断任务】任务 ID：" + t.ID + "（原任务因进程重启被中断）。请先核对已完成的工作与现状，再继续完成以下目标，完成后向用户汇报结果：\n" + goal
+	synthetic := message.Message{
+		Sender:  message.MessageSender{Nickname: "任务恢复", UserId: message.FromUint64(0)},
+		Message: []message.OB11Segment{{Type: message.SegmentText, Data: map[string]any{"text": hint}}},
+	}
+	p.sessionBots.Store(sessionKey(id, isGroup), b)
+	if _, ok := p.enqueuePending(id, isGroup, synthetic); !ok {
+		p.sendPlainText(b, id, isGroup, "排队消息已满，暂时无法恢复任务，请稍后再试")
+		return false, nil
+	}
+	b.Go("runner:"+sessionKey(id, isGroup), func() { p.runQueued(b, id, isGroup) })
+	p.sendPlainText(b, id, isGroup, "已恢复任务 "+taskID+"，继续处理中")
+	return false, nil
 }
 
 // turnTaskTitle 从一批消息生成任务标题：取最后一条消息的文本段（rune 安全）。

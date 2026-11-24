@@ -209,11 +209,11 @@ func NewAIChatPlugin() *AIChatPlugin {
 	return &AIChatPlugin{
 		Meta: plugin.Meta{
 			Name:      "AI对话插件",
-			HelpWords: "@我聊天哦，带上 #新对话 标签可以创建新对话，发送 /stop 可以停止 AI 响应，/status 查看当前响应状态",
+			HelpWords: "@我聊天哦，带上 #新对话 标签可以创建新对话，发送 /stop 可以停止 AI 响应（/stop 任务ID 取消指定后台任务），/tasks 查看后台任务，/status 查看当前响应状态",
 			Order:     plugin.LevelPostHandle,
 			ShowFor:   plugininfo.ShowForGroup | plugininfo.ShowForFriend,
 			Author:    "jeanhua",
-			Version:   "1.0.0",
+			Version:   "1.1.0",
 		},
 	}
 }
@@ -266,6 +266,14 @@ func (p *AIChatPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 
 	if cmd.Name == "tasks" {
 		return p.handleTasksCommand(bot, msg)
+	}
+
+	if cmd.Name == "resume" {
+		taskID := ""
+		if len(cmd.Args) > 0 {
+			taskID = strings.TrimSpace(cmd.Args[0])
+		}
+		return p.handleResumeCommand(bot, msg, taskID)
 	}
 
 	if cmd.Name == "stop" {
@@ -414,6 +422,14 @@ func (p *AIChatPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command
 
 	if cmd.Name == "tasks" {
 		return p.handleTasksCommand(bot, msg)
+	}
+
+	if cmd.Name == "resume" {
+		taskID := ""
+		if len(cmd.Args) > 0 {
+			taskID = strings.TrimSpace(cmd.Args[0])
+		}
+		return p.handleResumeCommand(bot, msg, taskID)
 	}
 
 	if cmd.Name == "stop" {
@@ -1266,6 +1282,9 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	// 排队消息兜底清扫器：唤醒集中在入队路径时，限流饱和或与锁释放交错
 	// 都可能让消息错过所有消费者，由周期扫描接管（队列为空时零开销）
 	p.startPendingSweeper()
+
+	// 任务记录清理器：按 task.retention_days 删除过期已结束任务
+	p.startTaskJanitor()
 
 	// 面板「试聊室」：把聊天搬到 Web 控制面板上做对话测试——复用完整对话管线
 	// （提示词/记忆/知识库/工具/上下文压缩），回复只回显面板、不向任何平台发送

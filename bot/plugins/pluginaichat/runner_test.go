@@ -261,6 +261,74 @@ func TestWatchdogOptionsFromConfig(t *testing.T) {
 	}
 }
 
+// ---- /resume 参数与状态校验 ----
+
+// newResumeTestPlugin 构造带任务表的测试插件。
+func newResumeTestPlugin(t *testing.T) *AIChatPlugin {
+	store, _ := newTaskTestStore(t)
+	p := newRunnerTestPlugin()
+	p.taskStore = store
+	return p
+}
+
+func TestHandleResumeRequiresTaskID(t *testing.T) {
+	p := newResumeTestPlugin(t)
+	rb := &recordBot{}
+	if _, err := p.handleResumeCommand(rb, testGroupMsg(1001, "/resume"), ""); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if !containsSent(rb, "用法") {
+		t.Fatalf("缺少任务 ID 应提示用法, got %v", rb.sent())
+	}
+}
+
+func TestHandleResumeUnknownTask(t *testing.T) {
+	p := newResumeTestPlugin(t)
+	rb := &recordBot{}
+	if _, err := p.handleResumeCommand(rb, testGroupMsg(1001, "/resume t-x"), "t-x"); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if !containsSent(rb, "未找到任务") {
+		t.Fatalf("未知任务应提示未找到, got %v", rb.sent())
+	}
+}
+
+func TestHandleResumeRejectsOtherSessionAndNonInterrupted(t *testing.T) {
+	p := newResumeTestPlugin(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	other := taskFixture(sessionKey(message.FromUint64(2002), true), time.Now().Unix())
+	other.ID = "t-other"
+	other.Status = taskStatusInterrupted
+	other.Kind = taskKindSubagent
+	if err := p.taskStore.Create(ctx, other); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	rb := &recordBot{}
+	if _, err := p.handleResumeCommand(rb, testGroupMsg(1001, "/resume t-other"), "t-other"); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if !containsSent(rb, "只能恢复本会话") {
+		t.Fatalf("跨会话恢复应被拒绝, got %v", rb.sent())
+	}
+
+	done := taskFixture(sessionKey(message.FromUint64(1001), true), time.Now().Unix())
+	done.ID = "t-done"
+	done.Status = taskStatusCompleted
+	done.Kind = taskKindSubagent
+	if err := p.taskStore.Create(ctx, done); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	rb2 := &recordBot{}
+	if _, err := p.handleResumeCommand(rb2, testGroupMsg(1001, "/resume t-done"), "t-done"); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if !containsSent(rb2, "只有被中断") {
+		t.Fatalf("非中断任务应被拒绝, got %v", rb2.sent())
+	}
+}
+
 // ---- task_handoff 参数校验 ----
 
 func TestHandoffToolRequiresRemaining(t *testing.T) {

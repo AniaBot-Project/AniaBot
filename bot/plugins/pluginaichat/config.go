@@ -328,22 +328,12 @@ type subagentConfig struct {
 	MaxTimeoutSec           int  `cfg:"max_timeout_sec" label:"最大超时(秒)" group:"AI 对话 · 子代理" help:"模型单次调用 timeout_sec 的硬上限；0 表示不限制" default:"0"`
 	MaxConcurrentPerSession int  `cfg:"max_concurrent_per_session" label:"每会话并发子代理" group:"AI 对话 · 子代理" help:"同一会话同时运行的后台子代理上限，超出时拒绝并提示" default:"4"`
 	MaxConcurrentGlobal     int  `cfg:"max_concurrent_global" label:"全局并发子代理" group:"AI 对话 · 子代理" help:"所有会话合计的后台子代理上限，与对话回合并发分开计算" default:"8"`
-	MaxDepth                int  `cfg:"max_depth" label:"委派深度" group:"AI 对话 · 子代理" help:"子代理再委派子代理的最大层数；1 表示子代理不可再委派" default:"1"`
 	ResultInlineRunes       int  `cfg:"result_inline_runes" label:"结果内联上限(字符)" group:"AI 对话 · 子代理" help:"异步子代理结果超过该长度时落盘，主 AI 收到摘要 + handle；0 表示不限制" default:"8000"`
 }
 
 // taskConfig 后台任务（handoff / 后台 bash / 后台子代理）的资源与恢复配置。
 type taskConfig struct {
-	MaxBackground int  `cfg:"max_background" label:"后台任务并发" group:"AI 对话 · 回合与任务" help:"后台任务（handoff/后台子代理/后台命令）的全局并发上限，与对话回合并发分开计算" default:"8"`
-	WallClockSec  int  `cfg:"wall_clock_sec" label:"任务总时长兜底(秒)" group:"AI 对话 · 回合与任务" help:"单个后台任务的总时长兜底，超时标记 timeout；0 表示不限制" default:"0"`
-	RetentionDays int  `cfg:"retention_days" label:"任务记录保留(天)" group:"AI 对话 · 回合与任务" help:"已完成任务的记录保留天数，过期清理；0 表示不清理" default:"7"`
-	AutoResume    bool `cfg:"auto_resume" label:"重启后自动续跑" group:"AI 对话 · 回合与任务" help:"进程重启后自动续跑中断的 handoff/子代理任务；默认关闭，避免升级重启后自动消耗 token" default:"false"`
-}
-
-// goalConfig 长任务目标（跨回合自动续跑）配置。
-type goalConfig struct {
-	Enable    bool `cfg:"enable" label:"启用目标续跑" group:"AI 对话 · 回合与任务" help:"允许 AI 建立跨回合持续推进的目标，由运行时在会话空闲时自动续跑；默认开启" default:"true"`
-	MaxRounds int  `cfg:"max_rounds" label:"目标最大轮数" group:"AI 对话 · 回合与任务" help:"单个目标最多自动续跑的轮数，达到后自动标记 blocked 并等待人工处理" default:"64"`
+	RetentionDays int `cfg:"retention_days" label:"任务记录保留(天)" group:"AI 对话 · 回合与任务" help:"已完成任务的记录保留天数，过期清理；0 表示不清理" default:"7"`
 }
 
 type aiChatConfig struct {
@@ -405,10 +395,8 @@ type aiChatConfig struct {
 	LLMGuard llmGuardConfig `cfg:"plugin.ai_chat_bot.llm"`
 	// Subagent 子代理生命周期与资源边界
 	Subagent subagentConfig `cfg:"plugin.ai_chat_bot.subagent"`
-	// Task 后台任务资源与恢复策略
+	// Task 后台任务记录保留策略
 	Task taskConfig `cfg:"plugin.ai_chat_bot.task"`
-	// Goal 长任务目标续跑
-	Goal goalConfig `cfg:"plugin.ai_chat_bot.goal"`
 }
 
 // ConfigSchema 实现 plugin.ConfigSchemaProvider：返回配置结构体指针，
