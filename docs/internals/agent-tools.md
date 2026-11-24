@@ -1,6 +1,6 @@
 # AI 引擎（三）工具、MCP 与高级编排
 
-本章介绍 Agent 的**能力扩展与高级编排**：工具如何定义与执行、MCP 如何两阶段懒加载、Skill 系统、AI 定时任务、会话运行器与任务注册表、子代理与后台交接、看门狗、Agent 团队、知识库与配额、钩子与工具门禁。
+本章介绍 Agent 的**能力扩展与高级编排**：工具如何定义与执行、MCP 如何两阶段懒加载、Skill 系统、AI 定时任务、会话运行器与任务注册表、子代理与后台交接、跨回合目标续跑、工作流 DAG、团队任务板、看门狗、Agent 团队、知识库与配额、钩子与工具门禁。
 
 ## 工具系统
 
@@ -63,7 +63,7 @@ type SessionToolExecutor struct { // 会话层：每个会话独立
 | `CreateToolsWithMCP()` | 追加 MCP 工具（`mcpLazyLoad` 决定发现/加载模式或全量注册） |
 | `CreateToolsWithSkill()` | 追加 `skill_read` / `skill_reload` 工具与 SkillManager（同时加载内置技能） |
 
-另由 aichat 插件在会话层注册：`config_get`/`config_set`（配置中心读写，敏感字段掩码、仅注册键可写、重启生效——重启由管理员发送 `/reboot` 命令执行，AI 只负责引导）、`config_file_get`/`config_file_set`（扩展配置读写：`files.mcp_json`/`files.prompt_json`/`files.hooks_json`/`files.commands_json`，只校验 JSON 语法，hooks/commands/prompt 保存后数秒热生效、mcp 重启生效）、`mcp_list`/`mcp_add`/`mcp_remove`/`mcp_reconnect`（MCP 服务器自管理，写 `files.mcp_json` 持久化 + 运行时热注册/注销）、会话绑定的 clock/memory/knowledge/team/subagent 工具，以及主会话的 `task_handoff`（后台交接）。其中配置修改类工具（`config_set`/`config_file_set`）执行前恒需管理员审批（与审批开关无关，请求者本人不能批准）。
+另由 aichat 插件在会话层注册：`config_get`/`config_set`（配置中心读写，敏感字段掩码、仅注册键可写、重启生效——重启由管理员发送 `/reboot` 命令执行，AI 只负责引导）、`config_file_get`/`config_file_set`（扩展配置读写：`files.mcp_json`/`files.prompt_json`/`files.hooks_json`/`files.commands_json`，只校验 JSON 语法，hooks/commands/prompt 保存后数秒热生效、mcp 重启生效）、`mcp_list`/`mcp_add`/`mcp_remove`/`mcp_reconnect`（MCP 服务器自管理，写 `files.mcp_json` 持久化 + 运行时热注册/注销）、会话绑定的 clock/memory/knowledge/team/subagent 工具，以及主会话的 `task_handoff`（后台交接）、`goal_create/update/status`（SQL + `goal.enable`）、`workflow_run`（`subagent.enable`）、`team_task_create/list/claim/complete`（任务存储可用）。其中配置修改类工具（`config_set`/`config_file_set`）执行前恒需管理员审批（与审批开关无关，请求者本人不能批准）。
 
 ### 回调桥（CallBackFuncs）
 
@@ -193,11 +193,12 @@ AI 消息入口不再在框架事件 goroutine 里跑完整个回合（`runner.g
 - **入口零阻塞**：`submitTurn` 入队后 `b.Go("runner:<session>")` 唤醒运行器；同一会话同一时刻只有一个回合（会话锁），跨会话并发受 `rate_limit`（默认 4）槽位限制。长回合不再占用框架事件 worker，也不受 `bot.msg_event_timeout_sec` 约束。
 - **回合上下文**：`context.WithoutCancel(parent)` 保留 Value（追踪、图片注册表）但丢弃框架 deadline；关联插件生命周期 `p.runCtx`（`OnUnload` 取消）；`turn.hard_timeout_sec`（默认 14400s，0=不限）叠加硬截止。
 - **长任务受理提示**：回合运行超过 `turn.ack_after_sec`（默认 20s）仍无可见输出（流式首字/最终发送）时，先发一条「正在处理」提示，每回合最多一条。
-- **排空循环**：每批处理完继续 drain 队列；出错/取消时该批用户消息之外的行为由错误处理决定（`/stop` 是显式停止，会清空该会话排队队列）。
-- **任务注册表**（`taskstore.go` + `tasktrack.go`）：回合与异步子代理各写一行 `ania_agent_task`（`id` 形如 `t-<36进制纳秒>-<4位hex>`，含 `session_key/parent_id/kind/status/title/prompt/result/error/stop_reason/tokens/meta/时间戳`），状态机 `queued → running → completed|failed|timeout|cancelled|interrupted`，停止原因 `completed|aborted|max_tokens|error|watchdog|timeout|user_stop`。任务表写入走 3 秒独立 ctx，DB 卡住不影响回合；建表失败降级为不持久化（不阻断启动）。
+- **排空循环**：每批处理完继续 drain 队列；出错/取消时该批用户消息之外的行为由错误处理决定（`/stop` 是显式停止，会清空该会话排队队列）。一个回合**正常结束**后运行器调用 `maybeDriveGoal` 尝试推进当前会话的长任务目标（无排队消息、无运行中子代理、目标 active 且已武装时才开下一轮）。
+- **任务注册表**（`taskstore.go` + `tasktrack.go`）：回合与异步子代理各写一行 `ania_agent_task`（`id` 形如 `t-<36进制纳秒>-<4位hex>`，含 `session_key/parent_id/kind/status/title/prompt/result/error/stop_reason/tokens/meta/时间戳`），kind 取值 `turn|subagent|handoff|bash_job|clock|proactive|goal_round|workflow|team_task`，状态机 `queued → running → completed|failed|timeout|cancelled|interrupted`，停止原因 `completed|aborted|max_tokens|error|watchdog|timeout|user_stop`。任务表写入走 3 秒独立 ctx，DB 卡住不影响回合；建表失败降级为不持久化（不阻断启动）。同一条启动路径还建 `ania_agent_goal`（长任务目标表，`session_key` 主键），建表失败时目标功能同样自动降级。
 - **重启恢复**：启动时 `MarkInterrupted` 把残留的 `queued/running/waiting` 标记为 `interrupted`；默认不自动续跑，用户发 `/resume <任务ID>` 把本会话的 `interrupted` 子代理/交接任务重新入队（任务目标作为系统来源消息），由主 AI 带着会话历史继续。
 - **清理**：按 `task.retention_days`（默认 7 天）每 6 小时删除已结束且过期的任务记录。
-- **用户命令**：`/tasks`（本会话运行中子代理 + 最近任务，含状态/耗时/类型/停止原因/token）、`/stop`（取消当前回合并清空本会话排队）、`/stop <任务ID>`（只取消指定后台子代理）、`/resume <任务ID>`。
+- **用户命令**：`/tasks`（本会话运行中子代理 + 最近任务，含状态/耗时/类型/停止原因/token）、`/stop`（取消当前回合并清空本会话排队、暂停自动续跑目标）、`/stop <任务ID 或名字>`（只取消指定后台子代理）、`/resume <任务ID>`、`/goal [status|pause|resume|clear]`。
+- **面板**：`taskpanel.go` 实现 `adminpanel.TaskSource` / `GoalSource`，只读展示最近任务（`GET /api/agent-tasks`，默认 100 条、上限 500）与 active 目标（`GET /api/agent-goals`），对应面板「后台任务」页。
 
 ## 子代理（subagent）
 
@@ -207,10 +208,10 @@ AI 消息入口不再在框架事件 goroutine 里跑完整个回合（`runner.g
 - 中间轮文本丢弃；发送图片/文件、读历史仍作用于当前会话
 - 图片状态隔离：子代理有自己的图片队列，`LoadImages` 是 stub（推迟给主 AI），避免两个工具循环互踩队列
 - 执行参数全部跟随主模型：模型与 API 格式直取主模型四元组（`subagentLLMConfig`），生成参数经 `buildSubagentChatOptions` 复用主模型配置，工具轮数取 `mainMaxIterations()`（主模型的最大工具调用轮数）
-- **异步语义**：工具启动受跟踪的 goroutine（`b.Go`）后立即返回任务 ID；完成时格式化结果（`【子代理执行完成】…`）作为合成消息入该会话 pending 队列并唤醒运行器，由主 AI 在后续回合处理。主回合不等待、不轮询
+- **异步语义**：工具启动受跟踪的 goroutine（`b.Go`）后立即返回任务 ID；完成时格式化结果、作为合成消息入该会话 pending 队列并唤醒运行器，由主 AI 在后续回合处理。主回合不等待、不轮询。回灌消息首行是机器可读状态：`【子代理执行完成】状态=completed`，失败/超时为 `【子代理执行结束】状态=failed` / `状态=timeout`，随后附 `任务ID` 与（有名字时的）`名称`；被 `/stop` 取消的任务不回灌
 - **结果治理**：同步路径（团队/定时任务复用 `runSubagentWithOptions`）的最终文本作为工具结果返回、仍经过统一工具结果治理；异步路径按 `subagent.result_inline_runes`（默认 8000）处理——超长结果由 `toolResultLimiter.LimitAt` 落盘为会话私有文件，合成消息只带摘要 + handle，主 AI 用 `read_tool_output` 读取
-- **并发边界**：每会话 `subagent.max_concurrent_per_session`（4）与全局 `subagent.max_concurrent_global`（8）两个信号量，全局池与对话回合的 `rate_limit` **分开计算**；超出直接返回可读错误，不静默排队。`/stop` 与 `subagent_cancel`/`/stop <ID>` 按 ID 取消；`OnUnload` 取消全部后台子代理
-- **命名与运行中通信（P2 未实现）**：当前子代理只有启动时生成的任务 ID（`t-…`），不支持自定义名字、`send_message` 追加指令、结构化 `status/summary/artifacts` 返回或跨重启续跑；这些属于方案文档 P2 的 Subagent 2.0 计划，`subagent_list` 目前返回 ID/任务摘要/运行时长
+- **并发边界**：每会话 `subagent.max_concurrent_per_session`（4）与全局 `subagent.max_concurrent_global`（8）两个信号量，全局池与对话回合的 `rate_limit` **分开计算**；超出直接返回可读错误，不静默排队。`/stop` 与 `subagent_cancel`/`/stop <ID>` 按 ID **或名字**取消；`OnUnload` 取消全部后台子代理
+- **命名与运行中通信**：`subagent_run` 可传 `name`（1~32 位、小写字母开头，只含小写字母/数字/连字符，会话内运行中唯一），`subagent_list` 按 ID + 名字展示；`subagent_send(id|name, message)` 把指令写入该子代理的 steering 通道（8 格缓冲），子代理在下一次 LLM 请求前以 `[追加指令]` 注入、不打断当前工具批；`subagent_cancel(id|name)` 取消单个。结构化返回目前是「状态 + 任务 ID + 名称 + 结果正文」，没有独立的 JSON `artifacts` 字段，也没有子代理会话历史落库/跨重启续跑（规划中的 P2 剩余项）。
 
 ### 超时预算
 
@@ -235,6 +236,34 @@ clock 任务里注册的是**异步**子代理变体（`clocksubagent.go`）：�
 - **重复/无进展看门狗**（`bot/component/aichat/toolwatchdog.go`）：同一轮工具调用的签名 = 排序后的 `name+args`；签名连续不变时按 `turn.repeat_tool_warn`（`3,5,8`）各注入一次换方案提醒，达到 `turn.no_progress_limit`（12）时返回 `aichat.WatchdogAbortError` 终止工具循环（`0` 只提醒）；提醒以 user 角色追加并随本轮返回进入历史，后续回合模型仍能看到。
 - **单请求内上下文保护**：每步 LLM 返回的 prompt token 超过窗口 85% 时，把较旧的大工具结果裁剪为「标记 + 原始长度 + 头尾片段」（保留最近 6 条消息与 tool_call 配对），窗口级压缩仍由回合开始时的 `messageWindow` 负责。
 
+## 长任务目标（goal）
+
+`goaltool.go` / `goalstore.go` 把「多轮继续」从用户/模型行为变成**运行时驱动**：AI 用 `goal_create(objective, max_rounds?)` 登记一个跨回合目标，之后由运行器在每个回合正常结束后按需开启下一轮。
+
+- **持久化**：每个会话同一时刻最多一个目标，存 SQL 表 `ania_agent_goal`（`session_key` 主键，`objective/phase/rounds_started/max_rounds/blocked_code/blocked_message`）；工具只在 `goal.enable=true` 且 SQL 可用时注册，建表失败则目标功能降级关闭。
+- **状态机**：`active` / `paused` / `blocked` / `complete`。`goal_update` 支持 `complete`（可附 `evidence`）、`blocked`（必须给 `reason`）、`pause`、`resume`、`clear`；`blocked` 语义相对 DSH 简化——不要求「同一阻塞条件连续 N 轮」，给原因即停。轮数用尽后 `resume` 会被拒绝。
+- **续跑驱动**：进程内 `goalArmed` 标记（`goal_create` 或 `/goal resume` 置位）；回合正常结束 → `maybeDriveGoal` 检查「已武装、无排队消息、无运行中子代理、phase=active」→ `rounds_started+1`、写库、把 `<goal_round>第 N/M 轮…</goal_round>` 合成消息入队并启动运行器。达到 `max_rounds` 时自动转 `blocked(round-limit)` 并通知会话。
+- **重启语义**：`goalArmed` **不持久化**，进程重启后目标仍 active 但不再自动续跑，需用户 `/goal resume`（与 DSH disarm 一致，避免升级重启后自动烧 token）。
+- **用户命令**：`/goal [status|pause|resume|clear]`；`/stop` 会 `pauseGoalOnStop` 把 active 目标暂停。计划模式阻断 `goal_create`/`goal_update`，`goal_status` 放行。
+
+## 工作流（workflow）
+
+`workflow.go` 把「多步、有先后依赖」的委派打包成一次调用：`workflow_run(goal?, steps=[{id, task, depends_on}], concurrency?)`。
+
+- **校验（纯函数）**：1~8 步；步骤 ID 1~32 位字母/数字/下划线/连字符且唯一；`task` 非空；依赖存在、不能自依赖、DAG 无环（拓扑排序）。`concurrency` 只做归一化（≤0→2，>4→4）。
+- **执行**：通过校验后登记任务表（`kind=workflow`）并注册进会话的异步子代理组（`/stop`、`OnUnload` 可取消），后台 goroutine 按拓扑序调度：每个就绪步骤取一个全局子代理信号量名额、复用一个后台子代理；失败步骤的传递后继标记 `skipped`，无依赖关系的分支继续。整体状态 `completed`（全部完成）或 `failed`（有失败/跳过），取消时按 `cancelled`/`timeout` 落库且不向会话注入失败消息。
+- **回灌**：全部步骤收敛后 `formatWorkflowSummary` 生成 `【工作流执行完成】状态=…` 的合成消息（含每步状态与结果摘要、汇总 token），入 pending 队列并唤醒主 AI；有失败/跳过时任务表记错误，但汇总消息照常回灌，由主 AI 决定重试或拆小。
+- **门控**：仅 `subagent.enable=true` 时在主会话注册；计划模式阻断。
+
+## 团队任务板（team_task）
+
+`teamboard.go` 复用任务表做一份**会话级持久任务板**（`kind=team_task`），把多步骤工作拆成可认领、可依赖的条目：
+
+- **工具**：`team_task_create(title, description?, blocked_by?, write_scopes?)` / `team_task_list(include_completed?)` / `team_task_claim(id, owner)` / `team_task_complete(id, result?, owner?)`。
+- **Meta JSON**：`owner` / `blocked_by` / `write_scopes` / `result` 存在任务行 `meta` 列；`write_scopes` 仅作为建议（advisory）记录与展示，不做强制文件锁。
+- **依赖语义**：`blocked_by` 必须是同会话已存在的团队任务；依赖未全部 `completed` 时 `claim` 返回可读原因；`complete` 返回因此解除阻塞、当前可认领的后续任务 ID。`owner` 校验防止他人代完成。
+- **边界**：每会话最多 20 个未完成任务，列表单次最多 50 行；任务板需要 SQL 持久化，未启用时各工具返回可读提示。计划模式阻断 create/claim/complete，`team_task_list` 放行。
+
 ## Agent 团队（team）
 
 在子代理之上的一层编排：AI 可保存/调用「团队」——一组带角色描述的子代理成员（默认启用，无配置开关）：
@@ -258,7 +287,7 @@ clock 任务里注册的是**异步**子代理变体（`clocksubagent.go`）：�
 
 - **quotaManager**：按「每会话每日」+「全局每日」两个维度限制 token 消耗，键 `daily:<日期>:<会话key>` 天然按天过期；Check-Add 为宽松语义（非硬实时），面板可查看用量
 - **usageAcc**：goroutine 安全的派生用量累加器，归集主循环之外的消耗（异步子代理、team 成员、备用识图），收尾并入统计与配额
-- **Query 日志**：一次「触发 → 最终响应」的完整记录（`ania_query_log` 行级），含用户输入、发送者、工具调用明细（工具结果记录统一长度治理后的文本，超长结果以预览 + handle 落盘）、token、状态（running/success/skipped/stopped/timeout/error），日志不淘汰，面板「Query 日志」页按条件筛选并支持导出/清除；主动互动的执行同样落在这里（`kind=proactive`，以触发说明替代用户输入，保持安静时状态为 skipped 并在 note 记录原因），Token 统计按来源单列
+- **Query 日志**：一次「触发 → 最终响应」的完整记录（`ania_query_log` 行级），含用户输入、发送者、工具调用明细（工具结果记录统一长度治理后的文本，超长结果以预览 + handle 落盘）、token、状态（running/success/skipped/stopped/timeout/error），日志不淘汰，面板「Query 日志」页按条件筛选并支持导出/清除；主动互动的执行同样落在这里（`kind=proactive`，以触发说明替代用户输入，保持安静时状态为 skipped 并在 note 记录原因），Token 统计按来源单列。普通对话回合还会回填 `stop_reason`（completed/aborted/max_tokens/error/watchdog/timeout/user_stop）与关联任务 ID `task_id`（`t-…`），主动互动/试聊为空；这两列在老库上通过幂等迁移（SQLite PRAGMA / MySQL information_schema 探测后 ALTER）补出
 
 ## 钩子系统（hooks）
 
@@ -284,7 +313,7 @@ clock 任务里注册的是**异步**子代理变体（`clocksubagent.go`）：�
 
 每个工具调用在 goroutine 内、真正执行前经过请求级门禁（`ChatOptions.PreToolGate`），顺序固定：
 
-1. **计划模式**（内存判断，最便宜）：`/plan on` 期间副作用工具（bash/file/config_set/config_file_set/鼠标键盘输入类 mouse_click/mousemove/mouse_scroll/keyboard_type/keyboard_press/记忆写/知识库写/clock 增删改/skill/mcp 管理/子代理/团队）直接阻断，`todo_write` 刻意放行（清单是规划工作流的一部分）；screenshot/active_window/list_windows 为只读观察，不阻断（计划模式下 AI 可以看屏幕做分析）
+1. **计划模式**（内存判断，最便宜）：`/plan on` 期间副作用工具（bash/file/config_set/config_file_set/鼠标键盘输入类 mouse_click/mousemove/mouse_scroll/keyboard_type/keyboard_press/记忆写/知识库写/clock 增删改/skill/mcp 管理/子代理/团队/goal_create 与 goal_update/workflow_run/team_task_create·claim·complete）直接阻断，`todo_write` 刻意放行（清单是规划工作流的一部分）；`goal_status`、`team_task_list` 与 screenshot/active_window/list_windows 一样属只读观察，不阻断（计划模式下 AI 可以看屏幕、看任务板做分析）
 2. **PreToolUse 钩子**（shell 有界 10s）
 3. **管理员审批**：配置修改类工具（`config_set`/`config_file_set`）恒需管理员回复「允许」才执行，请求者本人不能批准，与审批开关无关。审批提示优先私聊发给管理员（`requestAdminOnly`：待批请求同时登记在发起会话键与管理员私聊索引，两处回复均可批），管理员私聊发送失败时回退到发起会话；无权者的审批回复会被消费并提示
 4. **人工审批**（等真人，最贵放最后——已被否决的工具不再打扰用户）：`approval.tools` 列出的工具由请求者或管理员批准

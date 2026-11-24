@@ -216,14 +216,35 @@
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
-| `subagent.enable` | `true` | 启用子代理；关闭后不注册 `subagent_run/list/cancel` 与 `task_handoff` |
+| `subagent.enable` | `true` | 启用子代理；关闭后不注册 `subagent_run/list/send/cancel`、`task_handoff` 与 `workflow_run` |
 | `subagent.default_timeout_sec` | `1800` | 子代理单次执行默认超时（30 分钟）；0 表示不限制。不再跟随 `bot.msg_event_timeout_sec` |
 | `subagent.max_timeout_sec` | `0` | 模型单次 `timeout_sec` 的业务上限；0 不限 |
 | `subagent.max_concurrent_per_session` | `4` | 每会话同时运行的后台子代理上限，超出直接拒绝 |
 | `subagent.max_concurrent_global` | `8` | 全局后台子代理并发上限，与对话回合的 `rate_limit` 分开计算 |
 | `subagent.result_inline_runes` | `8000` | 异步子代理结果内联上限；超长结果落盘为预览 + handle，用 `read_tool_output` 读回；0 不限 |
 
-子代理是异步的：`subagent_run` 立即返回任务 ID，完成后结果自动回到会话。深度固定为 1（子代理不能再委派），没有对应配置项。
+子代理是异步的：`subagent_run` 立即返回任务 ID，完成后结果自动回到会话。可传 `name`（1~32 位、小写字母开头，只含小写字母/数字/连字符，会话内运行中唯一）；`subagent_send(id 或名字, message)` 给运行中的子代理追加指令（下一个模型请求前以 `[追加指令]` 注入），`subagent_cancel` 与 `/stop <ID 或名字>` 支持 ID 或名字。完成通知首行为 `【子代理执行完成】状态=completed`（失败/超时为 `状态=failed` / `状态=timeout`），附任务 ID 与名称。深度固定为 1（子代理不能再委派），没有对应配置项。
+
+### 长任务目标（goal）
+
+跨回合自动续跑：AI 用 `goal_create` 登记目标后，每个回合正常结束且会话空闲时自动开启下一轮推进，直到完成、阻塞或达到轮数上限。目标按会话唯一，存 SQL 表 `ania_agent_goal`（需要 SQL 持久化；建表失败目标功能自动关闭）。
+
+| 键 | 默认 | 说明 |
+| --- | --- | --- |
+| `goal.enable` | `true` | 启用目标续跑；关闭后不注册 `goal_create/update/status`，也不会自动续跑 |
+| `goal.max_rounds` | `64` | 单个目标默认最多自动续跑的轮数（AI 建目标可覆盖，硬上限 500）；达到后自动 `blocked`（`round-limit`）并通知 |
+
+- 工具：`goal_create(objective, max_rounds?)` / `goal_update(action=complete|blocked|pause|resume|clear, reason?, evidence?)` / `goal_status`。
+- 用户命令：`/goal`、`/goal pause`、`/goal resume`、`/goal clear`（群聊需 @）。`/stop` 会暂停目标。
+- **进程重启后目标仍 active 但不会自动续跑**（续跑武装状态不落库），需用户 `/goal resume`；`blocked` 只要 AI 说明原因即可，没有「连续多轮」门槛。
+- 计划模式阻断 `goal_create`/`goal_update`，`goal_status` 放行。
+- 每轮续跑以任务类型 `goal_round` 记入后台任务表；面板「后台任务」页可看进行中的目标。
+
+### 工作流（workflow）与团队任务板（team_task）
+
+- **工作流** `workflow_run(goal?, steps=[{id,task,depends_on}], concurrency?)`：1~8 个步骤、ID 唯一、依赖无环；并发 1~4（默认 2）；后台执行（每步一个子代理，按依赖调度，失败后继 `skipped`），全部结束后汇总结果回灌会话；任务类型 `workflow`，`/stop` 可取消；仅 `subagent.enable=true` 时注册；计划模式阻断。无独立配置项。
+- **团队任务板** `team_task_create/list/claim/complete`：会话级持久任务清单，`blocked_by` 依赖未完成不能认领，`write_scopes` 仅建议不做锁；每会话最多 20 个未完成任务；复用任务表（类型 `team_task`），需要 SQL 持久化；计划模式阻断 create/claim/complete、放行 list。无独立配置项。
+- 两者都可以在面板「后台任务」页（只读）或 `/tasks` 里观察。
 
 ### 任务记录（task）
 
@@ -349,6 +370,6 @@ ID 必须带平台前缀（`qq:` / `fs:` / `tg:` / `dc:` / `wx:` / `qo:` / `lil:
 | 外置技能 | `./skills`（可改 `skills_dir`） |
 | 内置技能（只读来源，物化副本） | `<skills_dir>/.builtin/`，每次加载由二进制重写，改这里无效 |
 
-数据表（SQL 后端）：`ania_kv`（配置与 KV）、`ania_chat_session` / `ania_chat_message`（对话历史）、`ania_memory`、`ania_kb_doc`、`ania_intention`（主动互动意图）、`ania_query_log`、`ania_task_log`、`ania_op_log`。
+数据表（SQL 后端）：`ania_kv`（配置与 KV）、`ania_chat_session` / `ania_chat_message`（对话历史）、`ania_memory`、`ania_kb_doc`、`ania_intention`（主动互动意图）、`ania_query_log`（含普通对话的 `stop_reason` / `task_id`）、`ania_task_log`、`ania_op_log`、`ania_agent_task`（后台任务注册表：回合/子代理/交接/工作流/团队任务/目标轮次）、`ania_agent_goal`（长任务目标）。
 
 备份：停掉 Bot 后复制整个 `data/` 目录最稳妥；只想备份配置可用面板「配置管理」页的导出功能，或用「配置预设」把当前配置存成快照后一键回切。恢复时注意 Bot 必须停止，否则 SQLite 可能拿到不一致的副本。

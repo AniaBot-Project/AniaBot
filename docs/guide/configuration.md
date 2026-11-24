@@ -491,14 +491,16 @@ AI 回复不再有"5 分钟一刀切"的总超时：框架的 `bot.msg_event_tim
 
 | 配置键 | 默认值 | 说明 |
 | --- | --- | --- |
-| `plugin.ai_chat_bot.subagent.enable` | `true` | 是否启用子代理；关闭后不注册 `subagent_run/list/cancel` 与 `task_handoff` 工具，主 AI 无法委派 |
+| `plugin.ai_chat_bot.subagent.enable` | `true` | 是否启用子代理；关闭后不注册 `subagent_run/list/send/cancel`、`task_handoff` 与 `workflow_run` 工具，主 AI 无法委派 |
 | `plugin.ai_chat_bot.subagent.default_timeout_sec` | `1800` | 子代理单次执行默认超时（秒），默认 30 分钟；`0` 表示不限制。**不再跟随** `bot.msg_event_timeout_sec` |
 | `plugin.ai_chat_bot.subagent.max_timeout_sec` | `0` | 模型单次调用 `timeout_sec` 的业务上限（秒）；`0` 表示不限制 |
 | `plugin.ai_chat_bot.subagent.max_concurrent_per_session` | `4` | 同一会话同时运行的后台子代理上限，超出时直接拒绝并提示（不静默排队） |
 | `plugin.ai_chat_bot.subagent.max_concurrent_global` | `8` | 所有会话合计的后台子代理上限，与对话回合的 `rate_limit` **分开计算**，后台任务不挤占正常对话 |
 | `plugin.ai_chat_bot.subagent.result_inline_runes` | `8000` | 异步子代理结果的内联上限（字符）；超过时完整结果落盘为会话私有文件，主 AI 收到摘要 + handle，可用 `read_tool_output` 按需读取；`0` 不限制 |
 
-执行参数全部跟随主模型：模型与 API 格式、生成参数（深度思考等）取「AI 对话 · 模型」配置，工具轮数与 `max_iterations` 一致。若父回合确实带硬截止，子代理超时会收缩到父回合剩余预算（预留 30 秒收尾，最少 10 秒），保证以工具结果优雅返回。子代理目前只有任务 ID，不支持自定义名字/运行中追加指令/结构化状态返回（规划中的 P2 能力）。详见 [AI 对话插件](/guide/builtin-plugins#ai-对话插件)。
+执行参数全部跟随主模型：模型与 API 格式、生成参数（深度思考等）取「AI 对话 · 模型」配置，工具轮数与 `max_iterations` 一致。若父回合确实带硬截止，子代理超时会收缩到父回合剩余预算（预留 30 秒收尾，最少 10 秒），保证以工具结果优雅返回。
+
+子代理 2.0：`subagent_run` 可传 `name`（1~32 位、小写字母开头，只含小写字母/数字/连字符，同一会话运行中不可重名）便于引用；`subagent_send(id 或名字, message)` 给运行中的子代理追加指令（它在下一个 LLM 请求前以 `[追加指令]` 注入，不打断当前工具批），`subagent_cancel` 与 `/stop <ID 或名字>` 支持 ID 或名字。完成通知首行是结构化的 `【子代理执行完成】状态=completed`（失败/超时为 `状态=failed` / `状态=timeout`），并附任务 ID 与名称；被 `/stop` 取消的不回灌。详见 [AI 对话插件](/guide/builtin-plugins#ai-子代理-subagent)。
 
 ### AI 任务记录与后台接管（task）
 
@@ -511,6 +513,40 @@ AI 回复不再有"5 分钟一刀切"的总超时：框架的 `bot.msg_event_tim
 任务表建不起来（SQL 探测/建表失败）时降级为不持久化，`/tasks` 仍可看内存中运行中的子代理，不影响对话。会话内命令：`/tasks` 查看本会话运行中/最近任务，`/stop` 取消当前回合并清空该会话排队消息，`/stop <任务ID>` 只取消指定后台子代理，`/resume <任务ID>` 恢复被中断任务（仅限本会话、仅 `interrupted` 状态）。<br>
 `task_handoff` 工具（`subagent.enable=true` 时注册）用于「优雅收口」：软截止提醒会引导模型把「已完成摘要 + 剩余工作 + 验收标准」交给后台子代理继续，当前回合立即结束，完成后结果回到会话。
 
+### 长任务目标（goal）
+
+跨回合自动续跑的长目标：AI 用 `goal_create` 登记一个需要多轮推进的目标（迁移、持续调研、多阶段改造等），之后每个回合正常结束、且会话没有排队消息与运行中的子代理时，运行器会自动开启下一轮继续推进，直到目标完成、被阻塞或达到轮数上限。单轮可完成的任务不要建目标。
+
+| 配置键 | 默认值 | 说明 |
+| --- | --- | --- |
+| `plugin.ai_chat_bot.goal.enable` | `true` | 是否启用目标续跑；关闭后不注册 `goal_create`/`goal_update`/`goal_status` 工具，也不会续跑 |
+| `plugin.ai_chat_bot.goal.max_rounds` | `64` | 单个目标默认最多自动续跑的轮数（AI 建目标时可传 `max_rounds` 覆盖，硬上限 500）；达到后目标自动标记为 `blocked`（原因 `round-limit`）并通知会话 |
+
+目标状态存在 SQL 表 `ania_agent_goal`（每个会话同一时刻最多一个目标），只在 SQL 持久化可用时启用；建表失败时目标功能自动降级关闭。工具与命令：
+
+- AI 侧：`goal_create(objective, max_rounds?)` / `goal_update(action=complete|blocked|pause|resume|clear, reason?, evidence?)` / `goal_status`。
+- 用户侧：`/goal`（查看状态）、`/goal pause`、`/goal resume`、`/goal clear`（群聊需 @ 机器人）。
+- `/stop` 会暂停当前目标，避免被自动续跑立刻顶回来；用户显式 `/goal resume` 后才继续。
+- **进程重启后目标保持 active 但不会自动续跑**（续跑武装状态只存在进程内，避免升级重启后自动烧 token），需要用户发 `/goal resume` 重新开启。
+- `blocked` 语义做了简化：AI 调用 `goal_update action=blocked` 并说明原因即可停止续跑，没有「同一阻塞条件连续多轮」之类的额外门槛。
+- 计划模式下 `goal_create` / `goal_update` 会被阻断，`goal_status` 放行。
+
+### AI 工作流（workflow）
+
+`workflow_run` 把一个复杂任务拆成 1~8 个有依赖关系的步骤（DAG），交给多个子代理按依赖顺序**并行**执行，全部结束后把「每步状态 + 结果摘要」回灌当前会话并唤醒主 AI。没有独立配置项，仅在 `plugin.ai_chat_bot.subagent.enable=true` 时注册（步骤执行的就是后台子代理）。
+
+- 参数：`steps`（每步 `id` / `task` / `depends_on`）；步骤 ID 1~32 位字母/数字/下划线/连字符且唯一；依赖必须存在且无环；`concurrency` 为同时执行的步骤数（1~4，默认 2），`goal` 为整体目标（可选，作为每步背景上下文）。
+- 后台执行、立即返回任务 ID；不要等待或轮询。单步失败时其后续依赖步骤标记为 `skipped`，无关分支继续执行。
+- 工作流以任务类型 `workflow` 记入后台任务表，`/stop` 可取消，计划模式阻断。
+
+### 团队任务板（team_task）
+
+AI 用 `team_task_create` / `team_task_list` / `team_task_claim` / `team_task_complete` 维护一份**会话级**的持久任务板，把多步骤工作拆成可认领的任务（含 `blocked_by` 依赖与建议性的 `write_scopes` 写作用域），适合多人/多代理分工协作。同样没有独立配置项，需要 SQL 持久化（复用任务表 `ania_agent_task`，任务类型 `team_task`）。
+
+- 任务在依赖未全部完成前不能认领；完成一个任务会返回因此解除阻塞的后续任务 ID。
+- `write_scopes` 只记录并在任务板展示，用于提醒各成员避免改动冲突，**不做强制文件锁**。
+- 每个会话最多同时存在 20 个未完成任务；列表默认只看未完成，`include_completed=true` 可连同已完成一起列出。
+- 计划模式阻断 create / claim / complete，`team_task_list` 放行。
 
 ### AI 知识库（knowledge）
 
@@ -550,7 +586,7 @@ AI 回复不再有"5 分钟一刀切"的总超时：框架的 `bot.msg_event_tim
 
 Query 日志默认开启且无独立配置项，在面板记录每次 AI 回复的完整执行过程。日志全量保留（不做容量淘汰；工具调用明细记录的是统一长度治理后的结果文本，超长结果以预览 + handle 落盘，完整内容可在对话中由 AI 用 `read_tool_output` 读取），由管理员在「Query 日志」页按当前筛选条件**导出**（JSON）或**清除**；前端展示工具结果超过 1000 字符时默认折叠，点击可展开。
 
-每条日志包含：触发会话、发送者、用户输入、LLM 轮数、工具调用明细（名称/参数/结果/耗时）、token 用量与最终回复，状态区分 `running` / `success` / `skipped`（主动互动中 AI 判断无需发言）/ `stopped` / `timeout` / `error`。面板「Query 日志」页可筛选查看；主动互动的执行（来源标记为「主动互动」）也会记录在这里，以触发说明替代用户输入。
+每条日志包含：触发会话、发送者、用户输入、LLM 轮数、工具调用明细（名称/参数/结果/耗时）、token 用量与最终回复，状态区分 `running` / `success` / `skipped`（主动互动中 AI 判断无需发言）/ `stopped` / `timeout` / `error`。普通对话回合还会记录**停止原因** `stop_reason`（`completed` 正常完成 / `aborted` 中止 / `max_tokens` 达到输出上限 / `error` 出错 / `watchdog` 循环保护终止 / `timeout` 超时 / `user_stop` 用户停止）与**任务 ID** `task_id`（关联后台任务表 `ania_agent_task` 的 `t-…`）；主动互动与面板试聊不填这两项。两者随 Query 日志 API 返回、导出 JSON 时也会带出（Query 日志列表页暂未单独展示这两列）。面板「Query 日志」页可筛选查看；主动互动的执行（来源标记为「主动互动」）也会记录在这里，以触发说明替代用户输入。
 
 ### 流式回复（stream）
 

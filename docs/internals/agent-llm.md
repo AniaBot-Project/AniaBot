@@ -140,6 +140,7 @@ flowchart TB
 
 - **并行执行**：同一轮的多个工具调用并发执行（goroutine + WaitGroup），结果按 `index` 预分配回填，保证 tool 结果消息与 assistant 消息中 `tool_calls` 的顺序一一对应（OpenAI API 要求）；单个工具 panic 转为错误文本回填，不传染进程
 - **工具门禁**：每个工具在 goroutine 内、真正执行前先过请求级门禁（`ChatOptions.PreToolGate`：计划模式 → PreToolUse 钩子 → 人工审批），被拦时门禁文本作为该工具的结果回填、循环继续；执行完成后触发 `PostToolUse` 钩子（仅通知）。详见 [AI 引擎（三）](/internals/agent-tools#工具门禁管线)；用户消息进入对话前还会触发 `UserPromptSubmit` 钩子（可阻断/注入上下文）
+- **运行中追加输入（steering）**：`ChatOptions.Steer` 是可选回调，工具循环在**每次发起 LLM 请求前**调用它排空已到达的追加指令，每条以 `[追加指令] …` 的 user 消息插入本轮上下文；正在执行的那一批工具不会被中断。异步子代理的 `subagent_send` 就基于它：通道有 8 格缓冲，满了丢弃新指令并给调用方返回提示（不阻塞工具执行）。
 - **回调串行化**：工具回调（发消息、图片加载队列等）内部可能修改共享状态，`lockedCallbacks` 用同一把互斥锁串行化；发送顺序可能不再等于调用顺序，但结果回填顺序不受影响
 - **流式边界**：流式模式下每轮增量直接发到平台，**全程只维持一条消息**；工具边界调用 `OnStreamRoundEnd` 清空本轮累积缓冲，下一轮文本从零累积并整体覆盖这条消息（Patch 是覆盖语义），最终留下的就是最后一轮的最终回复
 - **轮数上限与看门狗**：默认 `maxIterations=0` 表示不限制，循环只能由「模型给出最终回复 / 无进展看门狗终止 / 上层取消（`/stop`、硬截止、关停）」结束；配置为正数时保留旧语义——到达上限后追加「工具调用已达限制，请直接回答」并移除工具定义再调一次。看门狗（`WatchdogOptions`，由插件层按 `turn.*` 填充）在每轮工具调用前检查：相同工具+参数连续重复按 `repeat_tool_warn`（3/5/8）提醒，达到 `no_progress_limit`（12）时返回 `WatchdogAbortError` 终止本轮；工具轮数达到 `progress_reminder_after`（6）时注入一次委派提醒；`soft_timeout_sec` 到达时注入一次「收尾或转后台」提醒（不取消）。提醒均以 user 角色追加、随本轮返回值进入历史。

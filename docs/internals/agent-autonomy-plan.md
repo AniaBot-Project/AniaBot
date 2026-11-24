@@ -1,6 +1,6 @@
 # AI 引擎自主性升级方案（设计提案）
 
-> **状态**：**P0+P1 已实现**（分支 `feat/agent-autonomy`，提交 `232295f` / `e63df29`），**P2 未实现**。实现细节以代码与 `AGENTS.md` 为准；本文保留设计背景与取舍，第 10 节待决策问题已按最终决策就地标注。Goal 续跑（P2）的配置节本轮未实现，已从配置结构体移除，决策归档在本节。
+> **状态**：**P0+P1+P2 的已实现项已完成**（分支 `feat/agent-autonomy`，P2 落地见提交 `88b560a`）。P2 中仍未实现：**Session fork / 任务级 session 历史**（当前 `/resume` 用主会话续接，不是 fork）、**交付物 `present` / 文件附件主动推送**。已实现的 P2 能力有几处刻意简化，文档按实际口径记录：goal 的 `blocked` 语义简化（没有 DSH「同一阻塞条件连续 ≥3 轮」的门槛，AI 说明原因即可）；子代理 steering 是「下一次 LLM 请求前注入」，不是 DSH 的完整 inbox/消息队列；子代理没有独立会话历史落库。实现细节以代码与 `AGENTS.md` 为准；本文保留设计背景与取舍，第 10 节待决策问题已按最终决策就地标注。Goal 续跑配置节已在 P2 重新加入（`plugin.ai_chat_bot.goal.*`，默认开启、`max_rounds=64`）。
 > **范围**：`bot/component/aichat`、`bot/plugins/pluginaichat`、`bot/core` 的事件预算、子代理/任务编排、提示词与面板。
 > **参考实现**：DeepSeek Harness（`E:\repo\deepseek-harness`）与 super-agent 原型（`E:\repo\dsh-superagent-prototype`），下称 DSH / 原型。
 
@@ -363,7 +363,7 @@ Runner（每会话一个，按 session_key 串行）:
 - `/tasks`：本会话任务列表（id/kind/status/耗时/摘要）；`/tasks all` 管理员看全局。
 - `/stop`：取消当前 turn，保留 Inbox；`/stop <id>` 取消指定任务。
 - `/resume <id>`：恢复 `interrupted` 任务。
-- Query 日志：新增 `stop_reason`、`task_id`、`delegations` 字段；Token 统计按任务维度可选汇总。
+- Query 日志：新增 `stop_reason`、`task_id` 字段（实际落地为这两个；设计中的 `delegations` 委派率字段未实现）；Token 统计按任务维度可选汇总。
 - 面板：Query 日志页增加停止原因筛选；新增"任务"页（P1，可先复用 Query 页）。
 
 ### 4.11 其他 agent 能力提升（对齐 DSH，按性价比排序）
@@ -434,15 +434,15 @@ Runner（每会话一个，按 session_key 串行）:
 
 ### 5.3 P2：自主性（能力对齐 DSH）
 
-| # | 内容 | 参考 |
-| --- | --- | --- |
-| 1 | Goal 续跑（工具 + 表 + round driver） | DSH `packages/goal/*`、`goal-round-driver` |
-| 2 | 子代理树：`lead/agent-N` 命名、`list_agents`、`send_message`、fork（带父上下文种子） | DSH `tool-subagent-control`、`subagent-fork-in-process` |
-| 3 | Team 任务板：CAS revision、blockedBy DAG、advisory write scopes、claim/complete | DSH `packages/team/*` |
-| 4 | Workflow：Go 原生 DAG/Step API（`RunSteps` + 并发/失败语义），不做 JS 沙箱 | DSH `packages/workflow`（降级） |
-| 5 | Compaction 升级：阈值参数化、工具结果裁剪、溢出重试、摘要事件化 | DSH `compaction-basic` |
-| 6 | Session fork / resume / 任务级 session 历史 | DSH `docs/subsystems/session.md` |
-| 7 | 交付物：`present` 式的文件主动推送（IM 附件） | DSH `deliverables/tool-present` |
+| # | 内容 | 参考 | 完成情况（`feat/agent-autonomy`） |
+| --- | --- | --- | --- |
+| 1 | Goal 续跑（工具 + 表 + round driver） | DSH `packages/goal/*`、`goal-round-driver` | ✅ 已实现：`goal_create/update/status`、`ania_agent_goal`、回合结束续跑驱动、`/goal` 命令；blocked 语义简化（无 3 轮门槛）；重启后 disarm |
+| 2 | 子代理树：`lead/agent-N` 命名、`list_agents`、`send_message`、fork（带父上下文种子） | DSH `tool-subagent-control`、`subagent-fork-in-process` | ⚠️ 部分实现：`subagent_run(name=)` 命名、`subagent_send` 运行中注入、结构化状态通知、`/stop <名字>`；**未做**树形 `list_agents`、fork（带父上下文种子）与跨重启续跑 |
+| 3 | Team 任务板：CAS revision、blockedBy DAG、advisory write scopes、claim/complete | DSH `packages/team/*` | ⚠️ 部分实现：`team_task_create/list/claim/complete`、blockedBy 依赖、advisory write scopes、复用 `ania_agent_task(meta JSON)`；**未做** CAS revision/乐观并发 |
+| 4 | Workflow：Go 原生 DAG/Step API（`RunSteps` + 并发/失败语义），不做 JS 沙箱 | DSH `packages/workflow`（降级） | ✅ 已实现：`workflow_run` 1~8 步 DAG、并发 1~4、失败后继 skipped、结果回灌；不提供独立 Go API 包 |
+| 5 | Compaction 升级：阈值参数化、工具结果裁剪、溢出重试、摘要事件化 | DSH `compaction-basic` | ❌ 未实现（仍是 80% 阈值压缩 + 单请求内工具结果裁剪） |
+| 6 | Session fork / resume / 任务级 session 历史 | DSH `docs/subsystems/session.md` | ❌ 未实现（`/resume` 用主会话历史续接，不 fork 独立会话） |
+| 7 | 交付物：`present` 式的文件主动推送（IM 附件） | DSH `deliverables/tool-present` | ❌ 未实现（现有 `file` 工具只能由 AI 显式发送） |
 
 ---
 
@@ -524,7 +524,7 @@ CREATE INDEX idx_agent_task_session ON ania_agent_task(session_key, status);
 CREATE INDEX idx_agent_task_status  ON ania_agent_task(status, updated_at);
 ```
 
-（goal 先复用任务表 + `kind=goal_round`、`meta` 存 objective/rounds；P2 需要独立查询时再建 `ania_agent_goal`。）
+（P2 已按方案落地：目标状态建独立表 `ania_agent_goal`（会话唯一目标，`session_key` 主键），每轮续跑另记一行 `kind=goal_round` 任务；`ania_agent_goal` 与任务表共用启动建表/降级路径。）
 
 ### 6.3 新增/调整工具（模型可见）
 
@@ -576,7 +576,7 @@ CREATE INDEX idx_agent_task_status  ON ania_agent_task(status, updated_at);
 | --- | --- | --- | --- |
 | **P0** | 配置语义解耦（无限轮数/无限回合/子代理独立超时）、LLM 请求与流空闲看门狗、无进展看门狗、提示词与工具描述、`/status` 与 `/tasks` 只读、测试与文档 | 2~3 天 | A1/A2/A6 部分通过；`go test -race ./...` 全绿 |
 | **P1** | 任务注册表、Session Runner（入口零阻塞）、Inbox 持久化、后台交接、子代理任务化（命名/结构化/steering）、后台 bash job、面板与 Query 日志、灰度开关 | 5~8 天 | A1~A5 全部通过；重启恢复演示；回滚开关验证 |
-| **P2** | Goal 续跑、子代理树/fork/send_message、Team 任务板、Workflow DAG、Compaction 升级、session forge/resume | 2~3 周 | 长目标任务跨 10+ 轮完成；多子代理并行调研可交付 |
+| **P2** | Goal 续跑、子代理树/fork/send_message、Team 任务板、Workflow DAG、Compaction 升级、session forge/resume | 2~3 周 | 长目标任务跨 10+ 轮完成；多子代理并行调研可交付。**已落地**：Goal 续跑、子代理命名/steering/结构化通知（树与 fork 未做）、Team 任务板（无 CAS revision）、Workflow DAG；**未落地**：Compaction 升级、Session fork/任务级历史、交付物推送 |
 
 建议先只做 P0 并观察一周（Query 日志里的 stop reason、平均回合时长、委派率、token 消耗），再决定 P1 的范围。
 
@@ -633,7 +633,7 @@ CREATE INDEX idx_agent_task_status  ON ania_agent_task(status, updated_at);
 1. **P0 是否立即实施**，还是等 P1 设计一起评审？→ **已决策：P0+P1 一起实施**（同一分支，先补 LLM 请求超时/看门狗再放开限制）。
 2. **硬截止默认值**：建议默认 0（不限制），由看门狗与 `/stop` 兜底；保守可设 4 小时。→ **已决策：默认 4 小时**（`turn.hard_timeout_sec=14400`，可配 0 关闭）。
 3. **子代理默认超时**：建议 0（不限制）；保守可设 30 分钟。→ **已决策：默认 30 分钟**（`subagent.default_timeout_sec=1800`，`subagent.max_timeout_sec=0` 表示模型传入值不设业务上限）。
-4. **是否引入 Goal 自动续跑**（P2）：收益大但成本不可控，建议默认开启但 `max_rounds` 保守（如 64），并提供 pause。→ **已决策（P2 口径）：默认开启，`max_rounds=64`**；本轮**未实现**（`goal` 配置节已从结构体移除，不提供无效旋钮），待 P2 落地时再加回。
+4. **是否引入 Goal 自动续跑**（P2）：收益大但成本不可控，建议默认开启但 `max_rounds` 保守（如 64），并提供 pause。→ **已决策（P2 口径）：默认开启，`max_rounds=64`**；**已在 P2 落地**（`plugin.ai_chat_bot.goal.enable` / `goal.max_rounds`，硬上限 500；进程重启后需 `/goal resume` 重新武装）。
 5. **并发分池**：对话 `rate_limit` 是否从 2 调到 4？后台任务独立池默认 8。→ **已决策：`rate_limit=4`（仅对话回合），后台子代理独立池 `subagent.max_concurrent_global=8`。**
 6. **重启自动续跑**：建议默认关闭（需用户 `/resume`），避免升级重启后自动烧钱。→ **已决策：默认不自动续跑**；启动时把遗留任务标记 `interrupted`，用户 `/resume <任务ID>` 手动恢复（仅本会话、仅子代理/交接任务）。
 

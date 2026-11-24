@@ -28,7 +28,7 @@ AniaBot 是一个用 Go 写的插件驱动型多平台机器人框架，**你自
   | `dc:` 前缀 | Discord |
   | `wx:` 前缀 | 微信 |
 - **插件**：内置「系统 / 日志 / 请求拦截 / 复读机 / 每日新闻 / AI 对话」六个；第三方插件从面板「插件市场」安装（自动下载源码 → 编译 → 重启）。
-- **AI 对话能力**：三种 LLM API 格式（`chat_completions` / `responses` / `anthropic`）、工具调用、MCP、技能（skill）、长期记忆、知识库、定时任务、主动互动、子代理（异步委派 + 后台交接）、Agent 团队、工具审批、计划模式、上下文压缩、任务编排与配额限制。
+- **AI 对话能力**：三种 LLM API 格式（`chat_completions` / `responses` / `anthropic`）、工具调用、MCP、技能（skill）、长期记忆、知识库、定时任务、主动互动、子代理（异步委派 + 命名 + 运行中追加指令 + 后台交接）、Agent 团队、工作流（workflow DAG）、团队任务板、长任务目标续跑（goal）、工具审批、计划模式、上下文压缩、任务编排与配额限制。
 - **数据落点**：SQLite `./data/aniabot.db`（可用环境变量换 MySQL）；微信登录凭据在 `./data/weixin/`；市场插件在 `./data/plugins/`；技能目录默认 `./skills`（配置项 `plugin.ai_chat_bot.skills_dir`）。
 
 ## 三、要查/改配置，按这个顺序走
@@ -61,6 +61,9 @@ AniaBot 是一个用 Go 写的插件驱动型多平台机器人框架，**你自
 | 接 QQ / 飞书 / Telegram / Discord / 微信 | 配置管理 → 平台适配器（先勾 `bot.platform.<名字>.enable`）→ 对应适配器分组填连接信息；**重启生效** |
 | 面板端口 / 局域网访问 / 关掉面板 | Web 面板 → `bot.admin_panel.listen`（`0.0.0.0:7700` 可局域网访问） |
 | AI 回复跑太久、复杂任务被打断 | AI 回合已不再受 `bot.msg_event_timeout_sec` 限制：软截止提醒 / 硬截止 / 无进展看门狗在 `plugin.ai_chat_bot.turn.*`（硬截止默认 4 小时），单次请求超时在 `plugin.ai_chat_bot.llm.*`；后台任务见 `/tasks` |
+| 多步骤任务、有依赖的流程怎么交给 AI | 直接描述目标即可，AI 会用 `subagent_run`（单个）/ `workflow_run`（有依赖的 1~8 步 DAG）/ `team_run`（多人并行）编排；可用 `team_task_*` 维护会话内持久任务板 |
+| 让 AI 持续推进一个长期目标 | 直接描述目标，AI 用 `goal_create` 登记；续跑开关与轮数上限在 AI 对话 · 回合与任务（`plugin.ai_chat_bot.goal.enable` / `goal.max_rounds`，默认 64 轮）；用户可用 `/goal` 查看/暂停/恢复/清除 |
+| 看后台任务、子代理、目标进度 | 面板「后台任务」页（`/#/agent-tasks`，只读：最近任务的状态/类型/停止原因/结果与进行中的目标），或会话里 `/tasks` |
 | 定时任务推送失败、发送超时 | 对应适配器的请求/上传超时（如 NapCat `bot.adapter.request_timeout_sec`） |
 | 装第三方插件 | 面板「插件市场」（安装/升级/卸载都会自动编译重启） |
 | 升级 AniaBot 本体 | 面板「自动更新」（需先在配置里填 `bot.update.source_dir` 源码目录） |
@@ -79,16 +82,17 @@ AniaBot 是一个用 Go 写的插件驱动型多平台机器人框架，**你自
 | `/proactive on` / `/proactive off` | 立即生效，并写回 `plugin.ai_chat_bot.proactive.scopes`；面板手改该键后可用 `/proactive reload` 免重启重读 |
 | `plugin.ai_chat_bot.skills`（白名单） | **重启后**（面板上传/删除技能会自动热重载，但白名单本身在启动时读） |
 | `bot.balance.*`（面板概览的 API 余额） | 修改后即时生效 |
-| `/plan on`、`/plan off`、`#新对话`、`/stop`、`/tasks`、`/resume`、`/status` | 会话内立即生效 |
+| `/plan on`、`/plan off`、`#新对话`、`/stop`、`/tasks`、`/resume`、`/status`、`/goal` | 会话内立即生效 |
 
 ## 五、用户能用的指令（群聊里一条都要先 @ 机器人）
 
 | 指令 | 说明 | 权限 |
 | --- | --- | --- |
 | `/help` | 列出已加载插件与各自的用法 | 所有人 |
-| `/stop` | 立刻停止当前会话正在进行的 AI 回复，并清空该会话排队消息；`/stop 任务ID` 只取消指定的后台子代理 | 所有人 |
+| `/stop` | 立刻停止当前会话正在进行的 AI 回复（同时暂停该会话的自动续跑目标），并清空该会话排队消息；`/stop 任务ID或名字` 只取消指定的后台子代理 | 所有人 |
 | `/tasks` | 查看当前会话运行中的子代理与最近的后台任务（状态、耗时、类型、停止原因、token） | 所有人 |
 | `/resume 任务ID` | 恢复进程重启前被中断（interrupted）的子代理/交接任务：把任务目标重新交给主 AI 带会话历史继续；仅限本会话 | 所有人 |
+| `/goal [status\|pause\|resume\|clear]` | 查看/暂停/恢复/清除当前会话的长任务目标（跨回合自动续跑）；进程重启后需 `/goal resume` 才会继续 | 所有人 |
 | `/status` | 查看当前会话的 AI 状态：响应中 / 等待子代理 / 排队中 / 空闲，含已持续时长、最近阶段与排队消息数 | 所有人 |
 | `/plan on` 或 `/plan off`、`/plan` | 计划模式开关：只分析规划，禁止改文件、跑命令、改配置等副作用操作 | 所有人 |
 | `/clock` | 定时任务：`list` / `add [--once] <cron> \| <标题> \| <内容>` / `del <id>` / `on` 或 `off <id>` / `info <id>` / `timeout <id> <秒>` / `log [n]` / `help`；`list all`、`run <id>` 仅管理员 | 所有人（部分仅管理员） |
