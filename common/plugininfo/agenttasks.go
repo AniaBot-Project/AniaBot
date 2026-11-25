@@ -7,14 +7,16 @@ package plugininfo
 // 插件实现方法时无需 import bot/adminpanel（与 team/querylog 等面板数据源一致）。
 
 // AgentTaskView 后台任务注册表的一行（对应 SQL 表 ania_agent_task，面板展示用）。
-// 时间戳统一 unix 秒，0 表示未开始 / 未结束。Result / Error / Meta 可能较长，
-// 由面板前端负责折叠展示。
+// 时间戳统一 unix 秒，0 表示未开始 / 未结束。Prompt / Result / Meta 可能较长，
+// 由面板前端负责折叠与结构化展示。
 type AgentTaskView struct {
 	ID         string `json:"id"`
 	SessionKey string `json:"session_key"`
+	ParentID   string `json:"parent_id"`
 	Kind       string `json:"kind"`
 	Status     string `json:"status"`
 	Title      string `json:"title"`
+	Prompt     string `json:"prompt"`
 	Result     string `json:"result"`
 	Error      string `json:"error"`
 	StopReason string `json:"stop_reason"`

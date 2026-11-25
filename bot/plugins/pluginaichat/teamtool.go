@@ -116,7 +116,7 @@ func (t *teamRunTool) Execute(ctx context.Context, params any, callbacks llmtool
 		specs = append(specs, spec)
 	}
 
-	report, err := t.plugin.runTeam(ctx, t.bot, t.id, t.isGroup, p.TimeoutSec, specs, callbacks)
+	report, err := t.plugin.runTeam(ctx, t.bot, t.id, t.isGroup, task, p.TimeoutSec, specs, callbacks)
 	if err != nil {
 		return "", err
 	}

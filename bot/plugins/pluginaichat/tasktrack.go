@@ -92,36 +92,53 @@ func (p *AIChatPlugin) beginSubagentTask(taskID string, id message.QID, isGroup 
 	return t
 }
 
-// finishSubagentTask 更新子代理任务的终态、结果与 token 用量。
+// finishSubagentTask 更新子代理任务的终态、结果与 token 用量（不写执行细节 Meta）。
 func (p *AIChatPlugin) finishSubagentTask(t *agentTask, result string, usage aichat.TokenUsage, runErr error) {
+	p.finishSubagentTaskMeta(t, result, usage, runErr, "")
+}
+
+// finishSubagentTaskMeta 更新子代理任务的终态、结果、token 用量与执行细节 Meta
+// （轮数/耗时/工具调用步骤，由 subagentTraceMeta 构造；空串表示不写）。
+func (p *AIChatPlugin) finishSubagentTaskMeta(t *agentTask, result string, usage aichat.TokenUsage, runErr error, meta string) {
 	if p.taskStore == nil || t == nil {
 		return
 	}
 	now := time.Now().Unix()
 	t.Tokens = int64(usage.TotalTokens)
-	t.UpdatedAt = now
-	t.FinishedAt = now
+	t.Status, t.StopReason = taskRunStatus(runErr)
 	switch {
 	case runErr == nil:
-		t.Status = taskStatusCompleted
-		t.StopReason = taskStopCompleted
 		t.Result = truncateTaskResult(result)
-	case strings.Contains(runErr.Error(), "超时"):
-		t.Status = taskStatusTimeout
-		t.StopReason = taskStopTimeout
+	case t.Status == taskStatusTimeout:
 		t.Error = runErr.Error()
-	case isContextCanceled(runErr):
-		t.Status = taskStatusCancelled
-		t.StopReason = taskStopAborted
-	default:
-		t.Status = taskStatusFailed
-		t.StopReason = taskStopError
+	case t.Status == taskStatusFailed:
 		t.Error = truncateTaskTitle(runErr.Error())
 	}
+	if meta != "" {
+		t.Meta = meta
+	}
+	t.UpdatedAt = now
+	t.FinishedAt = now
 	ctx, cancel := p.taskDB()
 	defer cancel()
 	if err := p.taskStore.Update(ctx, t); err != nil {
 		p.Logger.Warn("更新子代理任务失败", "task", t.ID, "error", err.Error())
+	}
+}
+
+// taskRunStatus 把子代理/团队成员/团队运行的执行错误映射为任务状态与停止原因：
+// 超时（子代理封装成「执行超时」文案）、上下文取消、普通失败分别落到
+// timeout / cancelled / failed 三个终态。
+func taskRunStatus(runErr error) (status, stopReason string) {
+	switch {
+	case runErr == nil:
+		return taskStatusCompleted, taskStopCompleted
+	case strings.Contains(runErr.Error(), "超时"):
+		return taskStatusTimeout, taskStopTimeout
+	case isContextCanceled(runErr):
+		return taskStatusCancelled, taskStopAborted
+	default:
+		return taskStatusFailed, taskStopError
 	}
 }
 

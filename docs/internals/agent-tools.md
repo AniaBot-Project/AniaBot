@@ -194,11 +194,11 @@ AI 消息入口不再在框架事件 goroutine 里跑完整个回合（`runner.g
 - **回合上下文**：`context.WithoutCancel(parent)` 保留 Value（追踪、图片注册表）但丢弃框架 deadline；关联插件生命周期 `p.runCtx`（`OnUnload` 取消）；`turn.hard_timeout_sec`（默认 14400s，0=不限）叠加硬截止。
 - **长任务受理提示**：回合运行超过 `turn.ack_after_sec`（默认 20s）仍无可见输出（流式首字/最终发送）时，先发一条「正在处理」提示，每回合最多一条。
 - **排空循环**：每批处理完继续 drain 队列；出错/取消时该批用户消息之外的行为由错误处理决定（`/stop` 是显式停止，会清空该会话排队队列）。一个回合**正常结束**后运行器调用 `maybeDriveGoal` 尝试推进当前会话的长任务目标（无排队消息、无运行中子代理、目标 active 且已武装时才开下一轮）。
-- **任务注册表**（`taskstore.go` + `tasktrack.go`）：回合与异步子代理各写一行 `ania_agent_task`（`id` 形如 `t-<36进制纳秒>-<4位hex>`，含 `session_key/parent_id/kind/status/title/prompt/result/error/stop_reason/tokens/meta/时间戳`），kind 取值 `turn|subagent|handoff|bash_job|clock|proactive|goal_round|workflow|team_task`，状态机 `queued → running → completed|failed|timeout|cancelled|interrupted`，停止原因 `completed|aborted|max_tokens|error|watchdog|timeout|user_stop`。任务表写入走 3 秒独立 ctx，DB 卡住不影响回合；建表失败降级为不持久化（不阻断启动）。同一条启动路径还建 `ania_agent_goal`（长任务目标表，`session_key` 主键），建表失败时目标功能同样自动降级。
+- **任务注册表**（`taskstore.go` + `tasktrack.go` + `teamlog.go`）：回合与异步子代理各写一行 `ania_agent_task`（`id` 形如 `t-<36进制纳秒>-<4位hex>`，含 `session_key/parent_id/kind/status/title/prompt/result/error/stop_reason/tokens/meta/时间戳`），kind 取值 `turn|subagent|handoff|bash_job|clock|proactive|goal_round|workflow|team_task|team_run|team_member`，状态机 `queued → running → completed|failed|timeout|cancelled|interrupted`，停止原因 `completed|aborted|max_tokens|error|watchdog|timeout|user_stop`。任务表写入走 3 秒独立 ctx，DB 卡住不影响回合；建表失败降级为不持久化（不阻断启动）。同一条启动路径还建 `ania_agent_goal`（长任务目标表，`session_key` 主键），建表失败时目标功能同样自动降级。
 - **重启恢复**：启动时 `MarkInterrupted` 把残留的 `queued/running/waiting` 标记为 `interrupted`；默认不自动续跑，用户发 `/resume <任务ID>` 把本会话的 `interrupted` 子代理/交接任务重新入队（任务目标作为系统来源消息），由主 AI 带着会话历史继续。
 - **清理**：按 `task.retention_days`（默认 7 天）每 6 小时删除已结束且过期的任务记录。
 - **用户命令**：`/tasks`（本会话运行中子代理 + 最近任务，含状态/耗时/类型/停止原因/token）、`/stop`（取消当前回合并清空本会话排队、暂停自动续跑目标）、`/stop <任务ID 或名字>`（只取消指定后台子代理）、`/resume <任务ID>`、`/goal [status|pause|resume|clear]`。
-- **面板**：`taskpanel.go` 实现 `adminpanel.TaskSource` / `GoalSource`，只读展示最近任务（`GET /api/agent-tasks`，默认 100 条、上限 500）与 active 目标（`GET /api/agent-goals`），对应面板「后台任务」页。
+- **面板**：`taskpanel.go` 实现 `adminpanel.TaskSource` / `GoalSource`，只读展示最近任务（`GET /api/agent-tasks`，默认 100 条、上限 500；返回 `parent_id` 与 `prompt`）与 active 目标（`GET /api/agent-goals`），对应面板「后台任务」页。团队运行（`team_run` 父记录）、团队成员（`team_member` 子记录）与异步子代理的详情里可直接看到任务指令、成员产出摘要与工具调用步骤（`meta.tool_calls`，单条最多 50 步、参数/结果按 `tasklog` 上限截断）。
 
 ## 子代理（subagent）
 
@@ -271,6 +271,7 @@ clock 任务里注册的是**异步**子代理变体（`clocksubagent.go`）：�
 - 团队按 scope（`g:` / `f:` / 全局 `global`）隔离，`team:` 命名空间 KV 存取；团队名严格校验（中文/字母/数字/下划线/连字符）
 - `team_run` 让多个成员**并行**执行（上限 `teamMaxMembers`=5，防并发风暴），每个成员复用 `runSubagentWithOptions` 并只传角色提示词——模型与执行参数（超时/轮数）全部与普通子代理一致（即跟随主模型）
 - 成员结果汇总返回主 AI；团队定义可保存复用（`team_create/list/delete`），面板提供管理页
+- **运行记录**：每次 `team_run` 写一条 `kind=team_run` 父记录（总体任务、汇总报告、成员合计 token/耗时、成员摘要），每个成员写一条 `kind=team_member` 子记录（`parent_id` 指向父记录，含任务指令、成员产出、状态、耗时与工具调用步骤），面板「后台任务」页可展开查看；taskStore 不可用时整体降级为不记录
 - 团队成员的一次性会话不注册团队工具（防递归组建团队）
 
 ## 知识库（knowledge）

@@ -537,7 +537,9 @@ registry and goal continuation, and owns all session-scoped tool registration.
   create/claim/complete but allows list.
 - **Panel task view** (`taskpanel.go`): implements `adminpanel.TaskSource` / `GoalSource` for the
   panel 后台任务 page (read-only): `AgentTasks(limit)` reads the most recent
-  `ania_agent_task` rows (`GET /api/agent-tasks?limit=…`, default 100, 1–500);
+  `ania_agent_task` rows (`GET /api/agent-tasks?limit=…`, default 100, 1–500) including
+  `parent_id` and `prompt`, so team runs / members and subagents can be inspected with their task
+  instructions, member summaries and tool-call steps;
   `AgentGoals()` lists `active` rows from `ania_agent_goal` (`GET /api/agent-goals`). Missing SQL
   backend or query failure returns an empty slice.
 - **Session runner & task registry** (`runner.go`, `taskstore.go`, `tasktrack.go`, `taskscmd.go`):
@@ -551,7 +553,8 @@ registry and goal continuation, and owns all session-scoped tool registration.
   the global rate-limit slots are full, the queue is dropped with a "too many requests" reply.
   `OnUnload` cancels `runCtx` (all runners/subagents) and every async subagent group. Every turn
   and async subagent writes a row to `ania_agent_task` (kind
-  `turn|subagent|handoff|bash_job|clock|proactive|goal_round|workflow|team_task`, status
+  `turn|subagent|handoff|bash_job|clock|proactive|goal_round|workflow|team_task|team_run|team_member`,
+  status
   `queued|running|waiting|completed|failed|timeout|cancelled|interrupted`, stop reason
   `completed|aborted|max_tokens|error|watchdog|timeout|user_stop`, plus tokens/meta/timestamps);
   task DB writes use short standalone contexts (3s) so a stuck DB never blocks a turn. Startup
@@ -560,9 +563,12 @@ registry and goal continuation, and owns all session-scoped tool registration.
   a janitor deletes finished rows past `task.retention_days` (default 7, every 6h). If the SQL
   probe/DDL fails, task persistence degrades to in-memory/no-op without blocking startup; the
   goal table (`ania_agent_goal`) is created by the same startup path and degrades the same way.
-- **Agent teams** (`team.go`, `teamroles.go`, `teamtool.go`): persistent teams per scope
-  (`g:`/`f:` in KV, `global` managed from the panel only), each member = name + role prompt.
-  `team_run` runs members in parallel as ephemeral agents and synthesizes their outputs;
+- **Agent teams** (`team.go`, `teamroles.go`, `teamtool.go`, `teamlog.go`): persistent teams per
+  scope (`g:`/`f:` in KV, `global` managed from the panel only), each member = name + role
+  prompt. `team_run` runs members in parallel as ephemeral agents and synthesizes their outputs;
+  each run also writes a `team_run` parent row plus one `team_member` child row per member
+  (task instruction, output, status, tokens, duration and capped tool-call steps in `meta`), so
+  the panel 后台任务 page is the run log for both teams and subagents.
   `team_create`/`team_list`/`team_delete` manage teams; caps: 20 teams/scope, 10 stored
   members, 5 concurrent members, name ≤20 runes, role ≤500 runes.
 - **Todo list** (`todo.go`): `todo_write` (main sessions, `todo.enable`, default on) replaces the

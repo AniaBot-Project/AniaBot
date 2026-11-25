@@ -313,9 +313,12 @@ func (p *AIChatPlugin) launchAsyncSubagent(
 			defer func() { <-p.subagentSem }()
 		}
 		defer p.removeAsyncSubagent(id, isGroup, launchID)
+		// 执行步骤观测：子代理的工具调用随任务记录落库，面板「后台任务」页可展开查看
+		trace := newSubagentTrace()
+		started := time.Now()
 		result, usage, runErr := p.runSubagentWithOptions(asyncCtx, b, id, isGroup, task,
-			subagentRunOptions{timeoutSec: opts.TimeoutSec, steer: steer}, opts.Callbacks)
-		p.finishSubagentTask(subTask, result, usage, runErr)
+			subagentRunOptions{timeoutSec: opts.TimeoutSec, steer: steer, trace: trace}, opts.Callbacks)
+		p.finishSubagentTaskMeta(subTask, result, usage, runErr, subagentTraceMeta(usage, time.Since(started), trace))
 		// 消耗计入会话与全局配额（发起方已做前置检查，这里只累加不重复拒绝）
 		p.quotaManager.Add(sessionKey(id, isGroup), usage)
 		// 异步子代理完成时主请求通常已结束，其消耗暂存到会话级累计器，

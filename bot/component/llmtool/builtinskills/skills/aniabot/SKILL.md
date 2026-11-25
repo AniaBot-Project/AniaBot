@@ -63,7 +63,7 @@ AniaBot 是一个用 Go 写的插件驱动型多平台机器人框架，**你自
 | AI 回复跑太久、复杂任务被打断 | AI 回合已不再受 `bot.msg_event_timeout_sec` 限制：软截止提醒 / 硬截止 / 无进展看门狗在 `plugin.ai_chat_bot.turn.*`（硬截止默认 4 小时），单次请求超时在 `plugin.ai_chat_bot.llm.*`；后台任务见 `/tasks` |
 | 多步骤任务、有依赖的流程怎么交给 AI | 直接描述目标即可，AI 会用 `subagent_run`（单个）/ `workflow_run`（有依赖的 1~8 步 DAG）/ `team_run`（多人并行）编排；可用 `team_task_*` 维护会话内持久任务板 |
 | 让 AI 持续推进一个长期目标 | 直接描述目标，AI 用 `goal_create` 登记；续跑开关与轮数上限在 AI 对话 · 回合与任务（`plugin.ai_chat_bot.goal.enable` / `goal.max_rounds`，默认 64 轮）；用户可用 `/goal` 查看/暂停/恢复/清除 |
-| 看后台任务、子代理、目标进度 | 面板「后台任务」页（`/#/agent-tasks`，只读：最近任务的状态/类型/停止原因/结果与进行中的目标），或会话里 `/tasks` |
+| 看后台任务、子代理、团队运行、目标进度 | 面板「后台任务」页（`/#/agent-tasks`，只读：最近任务的状态/类型/停止原因/结果与进行中的目标；团队运行与团队成员、子代理展开可看任务指令、成员产出与工具调用步骤），或会话里 `/tasks` |
 | 定时任务推送失败、发送超时 | 对应适配器的请求/上传超时（如 NapCat `bot.adapter.request_timeout_sec`） |
 | 装第三方插件 | 面板「插件市场」（安装/升级/卸载都会自动编译重启） |
 | 升级 AniaBot 本体 | 面板「自动更新」（需先在配置里填 `bot.update.source_dir` 源码目录） |

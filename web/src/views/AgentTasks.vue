@@ -45,9 +45,12 @@
 
     <!-- 任务列表 -->
     <Card style="padding: 0" class="overflow-hidden">
-      <div class="px-6 py-4 border-b border-zinc-100 flex items-center justify-between">
-        <h2 class="text-[10px] tracking-[0.15em] uppercase text-zinc-800 font-medium">后台任务</h2>
-        <span class="text-[11px] text-zinc-400">
+      <div class="px-6 py-4 border-b border-zinc-100 flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <h2 class="text-[10px] tracking-[0.15em] uppercase text-zinc-800 font-medium">后台任务</h2>
+          <p class="text-[11px] text-zinc-400 mt-1">团队运行 / 团队成员 / 子代理的完整执行记录都在这里，点击行可看任务指令、产出与工具调用步骤</p>
+        </div>
+        <span class="text-[11px] text-zinc-400 shrink-0">
           最近 {{ tasks.length }} 条<template v-if="filtered.length !== tasks.length"> · 筛选后 {{ filtered.length }} 条</template>
         </span>
       </div>
@@ -60,7 +63,7 @@
         <Button class="ml-2" type="text" size="small" @click="load">重试</Button>
       </p>
       <p v-else-if="!filtered.length" class="px-6 py-8 text-xs text-zinc-400 text-center tracking-wide">
-        {{ tasks.length ? '没有符合筛选条件的任务' : '暂无后台任务（AI 处理中 / 子代理 / 定时触发等工作会登记在这里）' }}
+        {{ tasks.length ? '没有符合筛选条件的任务' : '暂无后台任务（AI 处理中 / 子代理 / 团队运行 / 定时触发等工作会登记在这里）' }}
       </p>
       <template v-else>
         <div class="task-table-wrap">
@@ -86,8 +89,10 @@
                   <td><Tag variant="outlined" size="small">{{ kindText(record.kind) }}</Tag></td>
                   <td><Tag variant="solid" size="small" :color="statusColor(record.status)">{{ statusText(record.status) }}</Tag></td>
                   <td class="task-title-cell">
-                    <!-- 标题最多两行（超出省略），悬停看全文；点击行在下方就地展开完整详情 -->
-                    <p class="task-title font-medium" :title="record.title || ''">{{ record.title || '(无标题)' }}</p>
+                    <!-- 标题最多两行（超出省略），悬停看全文；团队成员（有 parent_id）加 ↳ 前缀便于识别归属 -->
+                    <p class="task-title font-medium" :title="record.title || ''">
+                      <span v-if="record.parent_id" class="text-zinc-300 mr-1" title="团队成员：归属某个团队运行">↳</span>{{ record.title || '(无标题)' }}
+                    </p>
                   </td>
                   <td><span class="block truncate font-mono text-[11px] text-zinc-600" :title="record.session_key || ''">{{ record.session_key || '—' }}</span></td>
                   <td><span class="font-mono text-[11px] whitespace-nowrap">{{ record.tokens ? fmtInt(record.tokens) : '—' }}</span></td>
@@ -103,48 +108,106 @@
                     </span>
                   </td>
                 </tr>
-                <!-- 展开详情：就地渲染在对应任务行下方（完整标题 / 结果 / 错误 / Meta） -->
+                <!-- 展开详情：就地渲染在对应任务行下方（完整标题 / 任务指令 / 团队成员 / 工具步骤 / 结果） -->
                 <tr v-if="expanded.has(record.id)" class="task-table-detail-row">
                   <td :colspan="columns.length">
-                    <div class="px-6 py-4">
+                    <div class="px-6 py-4 space-y-3">
                       <dl class="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-xs">
-                        <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">任务 ID</dt>
+                        <dt class="task-dt">任务 ID</dt>
                         <dd class="font-mono text-zinc-700 break-all">{{ record.id }}</dd>
-                        <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">标题</dt>
+                        <dt class="task-dt">标题</dt>
                         <dd class="text-zinc-700 whitespace-pre-wrap break-all">{{ record.title || '—' }}</dd>
-                        <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">会话</dt>
-                        <dd class="font-mono text-zinc-700">{{ record.session_key || '—' }}</dd>
-                        <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">创建 / 开始 / 结束</dt>
+                        <dt class="task-dt">会话</dt>
+                        <dd class="font-mono text-zinc-700 break-all">{{ record.session_key || '—' }}</dd>
+                        <template v-if="record.parent_id">
+                          <dt class="task-dt">父任务</dt>
+                          <dd class="font-mono text-zinc-700 break-all">{{ record.parent_id }}</dd>
+                        </template>
+                        <dt class="task-dt">创建 / 开始 / 结束</dt>
                         <dd class="text-zinc-700">{{ fmtTimeFull(record.created_at) }} → {{ fmtTimeFull(record.started_at) }} → {{ fmtTimeFull(record.finished_at) }}</dd>
-                        <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">状态 / 停止原因</dt>
+                        <dt class="task-dt">状态 / 停止原因</dt>
                         <dd class="text-zinc-700">{{ statusText(record.status) }} / {{ stopText(record.stop_reason) }}</dd>
-                        <template v-if="record.error">
-                          <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">错误</dt>
-                          <dd>
-                            <pre class="task-pre" :class="{ 'task-pre-open': isFieldOpen(record, 'error') }">{{ record.error }}</pre>
-                            <Button v-if="record.error.length > 200" type="text" size="small" @click.stop="toggleField(record, 'error')">
-                              {{ isFieldOpen(record, 'error') ? '收起' : '展开全部' }}
-                            </Button>
-                          </dd>
-                        </template>
-                        <template v-if="record.result">
-                          <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">结果</dt>
-                          <dd>
-                            <pre class="task-pre" :class="{ 'task-pre-open': isFieldOpen(record, 'result') }">{{ record.result }}</pre>
-                            <Button v-if="record.result.length > 200" type="text" size="small" @click.stop="toggleField(record, 'result')">
-                              {{ isFieldOpen(record, 'result') ? '收起' : '展开全部' }}
-                            </Button>
-                          </dd>
-                        </template>
-                        <template v-if="record.meta">
-                          <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">Meta</dt>
-                          <dd><pre class="task-pre task-pre-open">{{ prettyMeta(record.meta) }}</pre></dd>
-                        </template>
-                        <template v-if="!record.error && !record.result && !record.meta">
-                          <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">详情</dt>
-                          <dd class="text-zinc-400">该任务尚无结果 / 错误 / Meta 记录（可能仍在执行中）</dd>
+                        <template v-if="record.prompt">
+                          <dt class="task-dt">任务指令</dt>
+                          <dd><pre class="task-pre task-pre-open">{{ record.prompt }}</pre></dd>
                         </template>
                       </dl>
+
+                      <!-- 子代理/成员执行概况（Meta 的 LLM 轮数与毫秒级耗时） -->
+                      <p v-if="metaOf(record).iterations || metaOf(record).duration_ms" class="text-[11px] text-zinc-500">
+                        LLM 轮数 {{ metaOf(record).iterations || 0 }}<template v-if="metaOf(record).duration_ms"> · 耗时 {{ fmtMs(metaOf(record).duration_ms) }}</template>
+                      </p>
+
+                      <!-- 团队成员摘要（team_run 的 Meta.members）：成员产出在该成员的子记录行里 -->
+                      <div v-if="metaOf(record).members?.length" class="space-y-2">
+                        <h3 class="task-subtitle">团队成员</h3>
+                        <div class="space-y-1.5">
+                          <div v-for="(m, i) in metaOf(record).members" :key="i" class="task-member-row">
+                            <div class="flex items-center gap-2 flex-wrap">
+                              <span class="text-xs font-medium text-zinc-800">{{ m.name }}</span>
+                              <Tag variant="solid" size="small" :color="statusColor(m.status)">{{ statusText(m.status) }}</Tag>
+                              <span v-if="m.tokens" class="text-[11px] text-zinc-400">{{ fmtInt(m.tokens) }} tok</span>
+                              <span v-if="m.duration_ms" class="text-[11px] text-zinc-400">{{ fmtMs(m.duration_ms) }}</span>
+                            </div>
+                            <p v-if="m.degraded" class="text-[11px] text-[#ff9f0a] mt-0.5">{{ m.degraded }}</p>
+                            <p v-if="m.error" class="text-[11px] text-[#ff3b30] break-all mt-0.5">{{ m.error }}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 工具调用步骤（Meta.tool_calls）：看这次子代理/成员具体做了什么 -->
+                      <div v-if="metaOf(record).tool_calls?.length" class="space-y-2">
+                        <h3 class="task-subtitle">
+                          工具调用
+                          <span v-if="metaOf(record).tool_calls_total > metaOf(record).tool_calls.length" class="normal-case tracking-normal text-zinc-300">
+                            （共 {{ metaOf(record).tool_calls_total }} 次，仅保留前 {{ metaOf(record).tool_calls.length }} 条）
+                          </span>
+                        </h3>
+                        <div v-for="(tc, i) in metaOf(record).tool_calls" :key="i" class="task-tool">
+                          <div class="flex items-center gap-2 px-3 py-2 border-b border-zinc-100">
+                            <span class="text-xs font-mono font-medium text-zinc-800">{{ tc.name }}</span>
+                            <Tag v-if="tc.error" variant="solid" size="small" color="app-red">失败</Tag>
+                            <span class="ml-auto text-[11px] text-zinc-400 font-mono">{{ fmtMs(tc.duration_ms) }}</span>
+                          </div>
+                          <div class="px-3 py-2 space-y-2">
+                            <div v-if="tc.arguments">
+                              <div class="task-tool-label">参数</div>
+                              <pre class="task-tool-pre">{{ tc.arguments }}</pre>
+                            </div>
+                            <div v-if="tc.error">
+                              <div class="task-tool-label text-red-400">错误</div>
+                              <pre class="task-tool-pre text-[#ff3b30]">{{ tc.error }}</pre>
+                            </div>
+                            <div v-else-if="tc.result">
+                              <div class="task-tool-label">结果</div>
+                              <pre class="task-tool-pre">{{ tc.result }}</pre>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 结果 / 错误 / 原始 Meta -->
+                      <template v-if="record.error">
+                        <h3 class="task-subtitle">错误</h3>
+                        <pre class="task-pre" :class="{ 'task-pre-open': isFieldOpen(record, 'error') }">{{ record.error }}</pre>
+                        <Button v-if="record.error.length > 200" type="text" size="small" @click.stop="toggleField(record, 'error')">
+                          {{ isFieldOpen(record, 'error') ? '收起' : '展开全部' }}
+                        </Button>
+                      </template>
+                      <template v-if="record.result">
+                        <h3 class="task-subtitle">结果</h3>
+                        <pre class="task-pre" :class="{ 'task-pre-open': isFieldOpen(record, 'result') }">{{ record.result }}</pre>
+                        <Button v-if="record.result.length > 200" type="text" size="small" @click.stop="toggleField(record, 'result')">
+                          {{ isFieldOpen(record, 'result') ? '收起' : '展开全部' }}
+                        </Button>
+                      </template>
+                      <template v-if="record.meta && !hasMetaDetail(record)">
+                        <h3 class="task-subtitle">Meta</h3>
+                        <pre class="task-pre task-pre-open">{{ prettyMeta(record.meta) }}</pre>
+                      </template>
+                      <p v-if="!record.error && !record.result && !record.meta && !record.prompt" class="text-xs text-zinc-400">
+                        该任务尚无结果 / 错误 / Meta 记录（可能仍在执行中）
+                      </p>
                     </div>
                   </td>
                 </tr>
@@ -203,6 +266,8 @@ const kindLabels = {
   goal_round: '目标轮次',
   workflow: '后台工作流',
   team_task: '团队任务',
+  team_run: '团队运行',
+  team_member: '团队成员',
 }
 
 const statusLabels = {
@@ -262,7 +327,7 @@ const filtered = computed(() => {
     if (filters.status && t.status !== filters.status) return false
     if (filters.kind && t.kind !== filters.kind) return false
     if (!kw) return true
-    return [t.title, t.id, t.session_key].some((s) => (s || '').toLowerCase().includes(kw))
+    return [t.title, t.id, t.session_key, t.prompt].some((s) => (s || '').toLowerCase().includes(kw))
   })
 })
 
@@ -378,6 +443,45 @@ function fmtInt(n) {
   return Math.round(Number(n) || 0).toLocaleString('en-US')
 }
 
+// Meta 结构化解析：团队运行（members）/ 子代理与团队成员（tool_calls）在详情里
+// 单独渲染，解析失败或未知结构时回退为原始 JSON。按任务 ID 缓存，避免同一行
+// 在模板里多次读取时反复 JSON.parse。
+const metaById = computed(() => {
+  const m = new Map()
+  for (const t of tasks.value) m.set(t.id, parseMeta(t.meta))
+  return m
+})
+
+function parseMeta(raw) {
+  if (!raw) return {}
+  try {
+    const v = JSON.parse(raw)
+    return v && typeof v === 'object' ? v : {}
+  } catch {
+    return { _raw: raw }
+  }
+}
+
+function metaOf(t) {
+  return metaById.value.get(t.id) || {}
+}
+
+// 是否有结构化详情（成员摘要 / 工具步骤 / 执行概况）：有则不再重复展示原始 Meta。
+function hasMetaDetail(t) {
+  const m = metaOf(t)
+  return !!(m.members?.length || m.tool_calls?.length || m.iterations || m.duration_ms)
+}
+
+// 毫秒级耗时（工具调用与成员的 Meta 字段）
+function fmtMs(ms) {
+  const n = Number(ms) || 0
+  if (n <= 0) return '—'
+  if (n < 1000) return `${n}ms`
+  if (n < 60000) return `${(n / 1000).toFixed(1)}s`
+  const sec = Math.round(n / 1000)
+  return `${Math.floor(sec / 60)}m${sec % 60}s`
+}
+
 // Meta 是 JSON 字符串：解析失败时原样展示
 function prettyMeta(s) {
   try {
@@ -456,6 +560,52 @@ onUnmounted(() => {
   padding: 0;
   background: #fafafa;
   border-bottom: 1px dashed var(--line, #ece8e1);
+}
+/* 详情字段名 / 分区标题 */
+.task-dt {
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #a1a1aa;
+  align-self: center;
+}
+.task-subtitle {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: #71717a;
+}
+/* 团队成员摘要行 */
+.task-member-row {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line, #ece8e1);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+}
+/* 工具调用步骤卡片 */
+.task-tool {
+  border: 1px solid var(--line, #ece8e1);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  overflow: hidden;
+}
+.task-tool-label {
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #a1a1aa;
+  margin-bottom: 0.2rem;
+}
+.task-tool-pre {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-2, #3f3a33);
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 /* 标题列：限制两行、超出省略；完整标题在悬停提示与展开详情中查看 */
 .task-title-cell {

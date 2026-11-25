@@ -102,9 +102,10 @@ func (p *AIChatPlugin) runSubagent(ctx context.Context, b bot.Bot, id message.QI
 // subagentRunOptions 子代理（含团队成员）单次执行的定制项：除提示词与单次
 // 超时覆盖外，其余执行参数（模型、生成参数、轮数）一律跟随主模型。
 type subagentRunOptions struct {
-	prompt     string        // 系统提示词，空用 defaultSubagentPrompt（团队成员传角色提示词）
-	timeoutSec int           // 本次调用覆盖的秒数（先限幅再乘 time.Second），<=0 用默认超时
-	steer      <-chan string // 运行中追加指令（异步子代理专用；nil 表示不支持 steering）
+	prompt     string         // 系统提示词，空用 defaultSubagentPrompt（团队成员传角色提示词）
+	timeoutSec int            // 本次调用覆盖的秒数（先限幅再乘 time.Second），<=0 用默认超时
+	steer      <-chan string  // 运行中追加指令（异步子代理专用；nil 表示不支持 steering）
+	trace      *subagentTrace // 可选：收集本次执行的工具调用步骤（团队/异步子代理运行记录用）
 }
 
 // steerDrain 返回 ChatOptions.Steer 回调：非阻塞排空追加指令通道。
@@ -183,6 +184,11 @@ func (p *AIChatPlugin) runSubagentWithOptions(ctx context.Context, b bot.Bot, id
 		chat.SetSkillManager(p.skillManager)
 	}
 	chat.SetMaxIterations(p.mainMaxIterations())
+	// 执行步骤观测：团队成员与异步子代理的运行记录用；
+	// 主对话的 Query 日志观察者挂在各自 ChatBot 上，二者互不影响。
+	if o.trace != nil {
+		chat.SetToolObserver(o.trace.observe)
+	}
 
 	// 钩子与工具门禁：子代理同样走 PreToolUse/PostToolUse 等钩子与计划模式/审批门禁
 	// （AgentKind=subagent 供钩子配置区分）；门禁审批路径仅管理员可批（requester=0），

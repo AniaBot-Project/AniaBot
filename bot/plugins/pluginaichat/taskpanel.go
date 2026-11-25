@@ -10,7 +10,9 @@ import (
 //
 // 后台任务注册表（ania_agent_task）与长任务目标表（ania_agent_goal）都属于插件
 // 的 SQL 持久层；面板是旁路只读视图，直接用一条全局查询取最近 N 条即可，不引入
-// 新的写路径。表结构见 taskstore.go / goalstore.go，本文件不改动它们。
+// 新的写路径。表结构见 taskstore.go / goalstore.go，本文件不改动它们。行内同时
+// 承载 Agent 团队运行（team_run）与团队成员（team_member）记录，供面板展示
+// 任务指令、成员产出与工具调用步骤。
 //
 // 降级约定：SQL 后端不可用（taskStore/goalStore 为 nil）或查询失败时返回空切片，
 // 面板按空列表展示，不影响其它页面与插件运行。
@@ -18,9 +20,9 @@ import (
 // taskPanelDefaultLimit AgentTasks 未收到合法 limit 时使用的条数（与 adminpanel 默认一致）。
 const taskPanelDefaultLimit = 100
 
-// taskPanelColumns 面板查询列顺序，必须与 scanAgentTaskRow 的扫描顺序一致
-// （与 taskstore.go 的 taskColumns 相同，面板不返回 prompt）。
-const taskPanelColumns = `id, session_key, kind, status, title, result, ` +
+// taskPanelColumns 面板查询列顺序，必须与下面的 Scan 顺序一致：与 taskstore.go 的
+// taskColumns 相同（额外带 prompt，面板详情要展示任务指令）。
+const taskPanelColumns = `id, session_key, parent_id, kind, status, title, prompt, result, ` +
 	`error, stop_reason, tokens, meta, created_at, started_at, updated_at, finished_at`
 
 // AgentTasks 返回最近的后台任务（updated_at 倒序），实现 adminpanel.TaskSource。
@@ -46,8 +48,8 @@ func (p *AIChatPlugin) AgentTasks(limit int) []plugininfo.AgentTaskView {
 	views := make([]plugininfo.AgentTaskView, 0, limit)
 	for rows.Next() {
 		var v plugininfo.AgentTaskView
-		if err := rows.Scan(&v.ID, &v.SessionKey, &v.Kind, &v.Status, &v.Title,
-			&v.Result, &v.Error, &v.StopReason, &v.Tokens, &v.Meta,
+		if err := rows.Scan(&v.ID, &v.SessionKey, &v.ParentID, &v.Kind, &v.Status, &v.Title,
+			&v.Prompt, &v.Result, &v.Error, &v.StopReason, &v.Tokens, &v.Meta,
 			&v.CreatedAt, &v.StartedAt, &v.UpdatedAt, &v.FinishedAt); err != nil {
 			p.taskPanelLogger().Warn("面板解析后台任务行失败", "error", err.Error())
 			return empty

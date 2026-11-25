@@ -78,6 +78,10 @@ func renderTaskLine(t *agentTask) string {
 		kind = "回合"
 	case taskKindClock:
 		kind = "定时"
+	case taskKindTeamRun:
+		kind = "团队"
+	case taskKindTeamMember:
+		kind = "团队成员"
 	}
 	dur := ""
 	if t.StartedAt > 0 {
