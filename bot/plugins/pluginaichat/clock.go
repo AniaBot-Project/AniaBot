@@ -685,7 +685,15 @@ func (m *clockManager) runTask(task *ClockTask) {
 			// 为负 duration（context 立即过期，任务每次触发即超时），见 clockMaxTimeoutSec
 			timeout = time.Duration(min(task.TimeoutSec, clockMaxTimeoutSec)) * time.Second
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		// timeout=0 表示不限制（default_timeout_sec=0 或调用方显式关闭）：
+		// 只派生可取消 context，避免定时任务被固定时长截断
+		var ctx context.Context
+		var cancel context.CancelFunc
+		if timeout > 0 {
+			ctx, cancel = context.WithTimeout(context.Background(), timeout)
+		} else {
+			ctx, cancel = context.WithCancel(context.Background())
+		}
 		defer cancel()
 
 		// 每日配额检查：任务所属会话超限时跳过执行并告知用户

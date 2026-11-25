@@ -23,17 +23,17 @@ func TestTeamMaxMembers(t *testing.T) {
 	}
 }
 
-// TestTeamTimeoutFollowsMain 团队成员超时与子代理同源（框架消息处理预算），
+// TestTeamTimeoutFollowsMain 团队成员超时与子代理同源（subagent.default_timeout_sec），
 // 并对超大 timeout_sec 先限幅再乘 time.Second 防 int64 溢出。
 func TestTeamTimeoutFollowsMain(t *testing.T) {
 	p := &AIChatPlugin{}
-	p.msgEventTimeout = 7 * time.Minute
+	p.cfg.Subagent.DefaultTimeoutSec = 7 * 60
 	got, err := resolveSubagentTimeout(p.subagentTimeout(), 0, context.Background())
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
 	if got != 7*time.Minute {
-		t.Fatalf("成员超时应跟随框架消息处理预算, got %v", got)
+		t.Fatalf("成员超时应跟随 subagent.default_timeout_sec, got %v", got)
 	}
 
 	got, err = resolveSubagentTimeout(p.subagentTimeout(), 10000000000, context.Background())
@@ -378,6 +378,7 @@ func TestTeamRunToolValidation(t *testing.T) {
 
 func TestNewTeamTools(t *testing.T) {
 	p := newTeamToolPlugin(t)
+	p.cfg.Subagent.DefaultTimeoutSec = 300
 
 	groupTools := newTeamTools(p, nil, message.FromUint64(12345), true)
 	if len(groupTools) != 4 {

@@ -38,7 +38,8 @@ func (m *planManager) Set(key string, on bool) {
 // screenshot/active_window/list_windows 是只读观察，不阻断（计划模式下
 // AI 可以看屏幕做分析）；其余只读/中性工具（time/历史消息（qq_get_msg_history 等）/
 // load_images/local_image/config_get/memory_search/kb_search/skill_*/
-// mcp_list/clock_list/clock_get/clock_log/subagent_list/subagent_cancel/team_list）
+// mcp_list/clock_list/clock_get/clock_log/subagent_list/subagent_cancel/team_list/goal_status/
+// workflow 与任务板的状态已经体现在各自工具里，plan 阶段被阻断）
 // 不受影响。内置 web 技能依赖 bash，bash 已被阻断，计划模式下无法联网。
 //
 // MCP 工具无法静态列出（服务器在运行时增删），由 isPlanBlockedTool 的动态腿兜住。
@@ -52,6 +53,10 @@ var planBlockedTools = map[string]struct{}{
 	"skill_install": {}, "skill_remove": {},
 	"mcp_add": {}, "mcp_remove": {}, "mcp_reconnect": {},
 	"subagent_run": {}, "team_run": {}, "team_create": {}, "team_delete": {},
+	// 目标工具会改变跨回合自动续跑状态（plan 阶段只做规划，不应建立/推进目标）
+	"goal_create": {}, "goal_update": {},
+	// 工作流与团队任务板都会派发后台执行/改变任务状态，属于副作用操作
+	"workflow_run": {}, "team_task_create": {}, "team_task_claim": {}, "team_task_complete": {},
 }
 
 // mcpToolPrefixes 懒加载模式下 MCP 专属工具的前缀：发现/加载本身虽不产生副作用，

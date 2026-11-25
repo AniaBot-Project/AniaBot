@@ -79,6 +79,10 @@ func (b *anthropicBackend) generate(ctx context.Context, messages []Message, opt
 	return resp, usage, err
 }
 
+// streamsInternally 标记本后端在非流式 generate 内部走流式通道聚合：LLMClient
+// 的 Generate 路径据此同样应用流空闲看门狗（见 llmguard.go internalStreamer）。
+func (b *anthropicBackend) streamsInternally() bool { return true }
+
 func (b *anthropicBackend) generateStream(ctx context.Context, messages []Message, opts ChatOptions) (GenerateResponse, TokenUsage, bool, error) {
 	params, err := b.buildParams(messages, opts)
 	if err != nil {
@@ -93,6 +97,8 @@ func (b *anthropicBackend) generateStream(ctx context.Context, messages []Messag
 	started := false
 	for stream.Next() {
 		event := stream.Current()
+		// 向流空闲看门狗报告一次活动（无看门狗时为空操作），见 llmguard.go
+		notifyStreamActivity(ctx)
 		acc.Add(event)
 		started = true // 任何流事件都算已开始输出
 	}

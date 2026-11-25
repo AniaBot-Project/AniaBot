@@ -35,7 +35,7 @@
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
 | `bot.admin_ids` | 空 | 管理员 ID 列表，每行一个，可多个。QQ 写 `qq:QQ号`；其他平台写带前缀 ID（`fs:ou_xxx`、`tg:123456`、`dc:123456`、`wx:…`、`qo:…`、`lil:…`）。管理员可 `/reboot`、`/exit`、看全部定时任务、接收启动/异常通知、审批 AI 改配置 |
-| `bot.msg_event_timeout_sec` | `300` | 单条消息事件（一次 AI 回复）的最长执行时长，超时强制中止；复杂多轮工具/子代理被中断时调大。0 或负数回退 300 |
+| `bot.msg_event_timeout_sec` | `300` | 单条框架消息事件的最长执行时长，超时强制中止；**AI 的 IM 回合已改为后台运行器，不再受它限制**（仅面板试聊室等 AI 内层路径仍使用）。0 或负数回退 300 |
 
 ### Web 面板
 
@@ -144,9 +144,9 @@
 | `model` | `deepseek-chat` | 模型名 |
 | `api_format` | `chat_completions` | `chat_completions`（OpenAI 兼容）/ `responses`（OpenAI Responses）/ `anthropic`（Messages） |
 | `multimodal` | `false` | 主模型是否支持图片输入 |
-| `rate_limit` | `2` | 同时处理的 AI 请求数上限，超出直接拒绝 |
+| `rate_limit` | `4` | 同时执行的 AI 对话回合上限，超出直接拒绝并清空该会话排队；后台子代理使用独立并发池，不占该名额 |
 | `max_context_tokens` | `128000` | 上下文 Token 上限，超过 80% 触发历史压缩 |
-| `max_iterations` | `100` | 单次回复最多连续调用工具轮数 |
+| `max_iterations` | `0` | 单次回复中工具调用循环的轮数上限；`0` 表示不限制（由重复调用/无进展看门狗兜底）。旧库已有值（如 100）继续生效，可改为 0 关闭 |
 | `headers` | 空 | 附加到全部 LLM 请求的自定义头，每行 `Name: Value`；值支持会话占位符 `${session}`（每会话唯一，新建会话后换新）/ `${session_id}` / `${session_type}` |
 | `prompt` | 内置默认提示词 | 系统提示词（人设/行为规则）。清空会回退默认 |
 | `thinking.enable` | `false` | 启用深度思考 |
@@ -197,6 +197,64 @@
 | `tool_result.retention_hours` | `24` | 落盘文件保留时长，过期自动清理 |
 | `tool_result.max_total_mb` | `512` | 落盘目录总容量上限，超出优先删除最旧文件 |
 
+### 回合与请求保护（turn / llm）
+
+框架的 `bot.msg_event_timeout_sec` 不再约束 AI 的 IM 回合（消息入口入队后立即返回，后台运行器执行）。回合自身三层保护：
+
+| 键 | 默认 | 说明 |
+| --- | --- | --- |
+| `turn.soft_timeout_sec` | `600` | 软截止：到时向模型注入一次「收尾或转后台」提醒，**不取消**；0 关闭 |
+| `turn.hard_timeout_sec` | `14400` | 硬截止（默认 4 小时）：最终兜底，超时取消回合并提示原因；0 表示不限制 |
+| `turn.progress_reminder_after` | `6` | 工具轮数达到该值时提醒模型考虑委派子代理；0 关闭 |
+| `turn.repeat_tool_warn` | `3,5,8` | 相同工具+参数连续重复达到这些次数时各提醒一次；留空关闭 |
+| `turn.no_progress_limit` | `12` | 连续相同工具调用达到该次数时终止回合并回报原因；0 只提醒 |
+| `turn.ack_after_sec` | `20` | 回合运行超过该时长仍无可见输出时先发「正在处理」提示；0 关闭 |
+| `llm.request_timeout_sec` | `600` | 单次 LLM 请求（含流式）总超时，按可重试错误处理；0 不限制 |
+| `llm.stream_idle_timeout_sec` | `120` | 流式响应空闲超时（无新内容），中断并重试；0 不限制 |
+
+### 子代理（subagent）
+
+| 键 | 默认 | 说明 |
+| --- | --- | --- |
+| `subagent.enable` | `true` | 启用子代理；关闭后不注册 `subagent_run/list/send/cancel`、`task_handoff` 与 `workflow_run` |
+| `subagent.default_timeout_sec` | `1800` | 子代理单次执行默认超时（30 分钟）；0 表示不限制。不再跟随 `bot.msg_event_timeout_sec` |
+| `subagent.max_timeout_sec` | `0` | 模型单次 `timeout_sec` 的业务上限；0 不限 |
+| `subagent.max_concurrent_per_session` | `4` | 每会话同时运行的后台子代理上限，超出直接拒绝 |
+| `subagent.max_concurrent_global` | `8` | 全局后台子代理并发上限，与对话回合的 `rate_limit` 分开计算 |
+| `subagent.result_inline_runes` | `8000` | 异步子代理结果内联上限；超长结果落盘为预览 + handle，用 `read_tool_output` 读回；0 不限 |
+
+子代理是异步的：`subagent_run` 立即返回任务 ID，完成后结果自动回到会话。可传 `name`（1~32 位、小写字母开头，只含小写字母/数字/连字符，会话内运行中唯一）；`subagent_send(id 或名字, message)` 给运行中的子代理追加指令（下一个模型请求前以 `[追加指令]` 注入），`subagent_cancel` 与 `/stop <ID 或名字>` 支持 ID 或名字。完成通知首行为 `【子代理执行完成】状态=completed`（失败/超时为 `状态=failed` / `状态=timeout`），附任务 ID 与名称。深度固定为 1（子代理不能再委派），没有对应配置项。
+
+### 长任务目标（goal）
+
+跨回合自动续跑：AI 用 `goal_create` 登记目标后，每个回合正常结束且会话空闲时自动开启下一轮推进，直到完成、阻塞或达到轮数上限。目标按会话唯一，存 SQL 表 `ania_agent_goal`（需要 SQL 持久化；建表失败目标功能自动关闭）。
+
+| 键 | 默认 | 说明 |
+| --- | --- | --- |
+| `goal.enable` | `true` | 启用目标续跑；关闭后不注册 `goal_create/update/status`，也不会自动续跑 |
+| `goal.max_rounds` | `64` | 单个目标默认最多自动续跑的轮数（AI 建目标可覆盖，硬上限 500）；达到后自动 `blocked`（`round-limit`）并通知 |
+
+- 工具：`goal_create(objective, max_rounds?)` / `goal_update(action=complete|blocked|pause|resume|clear, reason?, evidence?)` / `goal_status`。
+- 用户命令：`/goal`、`/goal pause`、`/goal resume`、`/goal clear`（群聊需 @）。`/stop` 会暂停目标。
+- **进程重启后目标仍 active 但不会自动续跑**（续跑武装状态不落库），需用户 `/goal resume`；`blocked` 只要 AI 说明原因即可，没有「连续多轮」门槛。
+- 计划模式阻断 `goal_create`/`goal_update`，`goal_status` 放行。
+- 每轮续跑以任务类型 `goal_round` 记入后台任务表；面板「后台任务」页可看进行中的目标。
+
+### 工作流（workflow）与团队任务板（team_task）
+
+- **工作流** `workflow_run(goal?, steps=[{id,task,depends_on}], concurrency?)`：1~8 个步骤、ID 唯一、依赖无环；并发 1~4（默认 2）；后台执行（每步一个子代理，按依赖调度，失败后继 `skipped`），全部结束后汇总结果回灌会话；任务类型 `workflow`，`/stop` 可取消；仅 `subagent.enable=true` 时注册；计划模式阻断。无独立配置项。
+- **团队任务板** `team_task_create/list/claim/complete`：会话级持久任务清单，`blocked_by` 依赖未完成不能认领，`write_scopes` 仅建议不做锁；每会话最多 20 个未完成任务；复用任务表（类型 `team_task`），需要 SQL 持久化；计划模式阻断 create/claim/complete、放行 list。无独立配置项。
+- 两者都可以在面板「后台任务」页（只读）或 `/tasks` 里观察。
+
+### 任务记录（task）
+
+| 键 | 默认 | 说明 |
+| --- | --- | --- |
+| `task.retention_days` | `7` | 已结束任务记录保留天数，每 6 小时清理一次；0 不清理 |
+
+任务记录存于 SQL 表 `ania_agent_task`（需要 SQL 持久化，建表失败自动降级为不持久化），`kind` 除回合/子代理/交接/工作流外的团队运行与团队成员（`team_run` / `team_member`）也在这里。进程重启时遗留任务标记 `interrupted`，用户用 `/resume <任务ID>` 恢复；`/tasks` 查看本会话任务，`/stop` 取消当前回合并清空排队，`/stop <任务ID>` 取消指定后台子代理。
+
+
 ### 备用识图（主模型不支持多模态时把图片转文字）
 
 `ocr.enable`（`false`）、`ocr.base_url`（`https://api.siliconflow.cn/v1`）、`ocr.api_key`（敏感）、`ocr.model`（`Qwen/Qwen3-VL-8B-Instruct`）、`ocr.max_token`（`600`）、`ocr.temperature` / `top_p` / `top_k`（留空不传）、`ocr.prompt`（识图提示词）。
@@ -206,7 +264,7 @@
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
 | `clock.enable` | `true` | AI 定时任务总开关 |
-| `clock.default_timeout_sec` | `120` | 单次任务超时 |
+| `clock.default_timeout_sec` | `120` | 单次任务超时；`0` 表示不限制 |
 | `proactive.enable` | `false` | 主动互动总开关（还要按会话启用） |
 | `proactive.activity` | `50` | 活跃度滑条 0–100，换算冷场阈值/最小间隔/每日上限/冷却；50 = 历史默认 |
 | `proactive.scopes` | 空 | 启用主动互动的会话，每行 `g:<群ID>` 或 `f:<用户ID>`（ID 带平台前缀，如 `g:qq:123456`）；`/proactive on` 会直接改写这里 |
@@ -312,6 +370,6 @@ ID 必须带平台前缀（`qq:` / `fs:` / `tg:` / `dc:` / `wx:` / `qo:` / `lil:
 | 外置技能 | `./skills`（可改 `skills_dir`） |
 | 内置技能（只读来源，物化副本） | `<skills_dir>/.builtin/`，每次加载由二进制重写，改这里无效 |
 
-数据表（SQL 后端）：`ania_kv`（配置与 KV）、`ania_chat_session` / `ania_chat_message`（对话历史）、`ania_memory`、`ania_kb_doc`、`ania_intention`（主动互动意图）、`ania_query_log`、`ania_task_log`、`ania_op_log`。
+数据表（SQL 后端）：`ania_kv`（配置与 KV）、`ania_chat_session` / `ania_chat_message`（对话历史）、`ania_memory`、`ania_kb_doc`、`ania_intention`（主动互动意图）、`ania_query_log`（含普通对话的 `stop_reason` / `task_id`）、`ania_task_log`、`ania_op_log`、`ania_agent_task`（后台任务注册表：回合/子代理/交接/工作流/团队任务/目标轮次/团队运行/团队成员）、`ania_agent_goal`（长任务目标）。
 
 备份：停掉 Bot 后复制整个 `data/` 目录最稳妥；只想备份配置可用面板「配置管理」页的导出功能，或用「配置预设」把当前配置存成快照后一键回切。恢复时注意 Bot 必须停止，否则 SQLite 可能拿到不一致的副本。

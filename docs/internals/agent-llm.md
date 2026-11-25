@@ -22,7 +22,7 @@ flowchart TB
 
 - `NewChatBot(baseURL, apiKey, model, prompt, maxContextTokens, toolExecutor, historyStore, opts...)`
 - 主对话 / 子代理 / 定时任务 / OCR 各自创建独立 ChatBot；子代理与定时任务跟随主模型（同一个模型四元组），压缩器与备用模型可另配，OCR 独立配置
-- `SetMaxIterations` 控制工具循环轮数上限（主对话与子代理均取主模型的「最大工具调用轮数」配置）
+- `SetMaxIterations` 控制工具循环轮数上限（主对话与子代理均取主模型的「最大工具调用轮数」配置；默认 0 = 不限制，负数归一为 0）
 
 ## LLMClient：多格式统一外壳
 
@@ -93,6 +93,14 @@ type TokenUsage struct {
 
 `LastPromptTokens` 与 `PromptTokens` 的区分是压缩阈值判断正确性的关键：前者代表上下文真实长度（用于触发压缩），后者是跨工具轮次的累加值（只适合计费统计）。
 
+## 请求级保护：超时与流空闲看门狗
+
+放开回合总超时后，上游挂死必须由**单次请求**兜底（`llmguard.go`）：
+
+- **请求总超时**（`llm.request_timeout_sec`，默认 600s）：每次尝试（含重试、备用模型切换）在 `LLMClient` 出口派生带 deadline 的 context，三种 API 格式后端统一生效；超时错误包裹 `context.DeadlineExceeded`，按普通可重试错误进入重试/备用模型逻辑。
+- **流式空闲看门狗**（`llm.stream_idle_timeout_sec`，默认 120s）：按「连续多久没有新数据块」计时，后端每读到一个块（内容/思考/工具参数增量/usage）调用 `notifyStreamActivity` 重置；只要模型还在出字，单次请求总时长超过阈值也不会误杀。触发时取消本次请求并改写为可识别的超时错误。
+- anthropic 后端的非流式 `generate` 内部走流式通道，同样套用空闲看门狗；`chat_completions`/`responses` 的非流式请求在响应返回前没有增量，只受请求总超时约束。
+
 ## 消息构建
 
 `MessageBuilder` 负责把系统提示词、历史、当前输入组装成 LLM 请求：
@@ -120,9 +128,11 @@ flowchart TB
     E --> F[并行执行全部工具<br/>先过门禁,按 index 回填结果]
     F --> G[追加 tool 结果消息]
     G --> H[流式模式: 清空本轮缓冲<br/>下一轮文本覆盖同一条消息]
-    H --> I{还有下一轮?}
-    I -->|是, i < maxIterations| B
-    I -->|否, 达上限| J["追加「工具已达上限」指令<br/>去掉工具定义再调一次"]
+    H --> I{继续循环?<br/>无进展看门狗未终止}
+    I -->|是| B
+    I -->|否, 看门狗终止| K["返回 WatchdogAbortError<br/>由插件层呈现原因"]
+    K --> D
+    I -->|配置了轮数上限且已达上限| J["追加「工具已达上限」指令<br/>去掉工具定义再调一次"]
     J --> D
 ```
 
@@ -130,9 +140,11 @@ flowchart TB
 
 - **并行执行**：同一轮的多个工具调用并发执行（goroutine + WaitGroup），结果按 `index` 预分配回填，保证 tool 结果消息与 assistant 消息中 `tool_calls` 的顺序一一对应（OpenAI API 要求）；单个工具 panic 转为错误文本回填，不传染进程
 - **工具门禁**：每个工具在 goroutine 内、真正执行前先过请求级门禁（`ChatOptions.PreToolGate`：计划模式 → PreToolUse 钩子 → 人工审批），被拦时门禁文本作为该工具的结果回填、循环继续；执行完成后触发 `PostToolUse` 钩子（仅通知）。详见 [AI 引擎（三）](/internals/agent-tools#工具门禁管线)；用户消息进入对话前还会触发 `UserPromptSubmit` 钩子（可阻断/注入上下文）
+- **运行中追加输入（steering）**：`ChatOptions.Steer` 是可选回调，工具循环在**每次发起 LLM 请求前**调用它排空已到达的追加指令，每条以 `[追加指令] …` 的 user 消息插入本轮上下文；正在执行的那一批工具不会被中断。异步子代理的 `subagent_send` 就基于它：通道有 8 格缓冲，满了丢弃新指令并给调用方返回提示（不阻塞工具执行）。
 - **回调串行化**：工具回调（发消息、图片加载队列等）内部可能修改共享状态，`lockedCallbacks` 用同一把互斥锁串行化；发送顺序可能不再等于调用顺序，但结果回填顺序不受影响
 - **流式边界**：流式模式下每轮增量直接发到平台，**全程只维持一条消息**；工具边界调用 `OnStreamRoundEnd` 清空本轮累积缓冲，下一轮文本从零累积并整体覆盖这条消息（Patch 是覆盖语义），最终留下的就是最后一轮的最终回复
-- **迭代上限**：达到 `maxIterations` 后追加一条「工具调用已达限制，请直接回答」的用户消息，并**移除工具定义**再调一次——否则模型可能继续发起工具调用而被静默丢弃，导致空响应
+- **轮数上限与看门狗**：默认 `maxIterations=0` 表示不限制，循环只能由「模型给出最终回复 / 无进展看门狗终止 / 上层取消（`/stop`、硬截止、关停）」结束；配置为正数时保留旧语义——到达上限后追加「工具调用已达限制，请直接回答」并移除工具定义再调一次。看门狗（`WatchdogOptions`，由插件层按 `turn.*` 填充）在每轮工具调用前检查：相同工具+参数连续重复按 `repeat_tool_warn`（3/5/8）提醒，达到 `no_progress_limit`（12）时返回 `WatchdogAbortError` 终止本轮；工具轮数达到 `progress_reminder_after`（6）时注入一次委派提醒；`soft_timeout_sec` 到达时注入一次「收尾或转后台」提醒（不取消）。提醒均以 user 角色追加、随本轮返回值进入历史。
+- **单请求内上下文保护**：每步 LLM 返回后若 prompt token 超过窗口的 85%，`pruneContextMessages` 把较旧的大工具结果裁成「标记 + 原始长度 + 头尾片段」，保留最近 6 条消息与 tool_call 配对，避免长工具循环撑爆窗口导致整批请求失败（窗口级压缩见 [AI 引擎（二）](/internals/agent-context)）。
 - **中间轮文本**：非流式模式下工具轮的 assistant 文本**不发送**——只发送最后一轮的最终回复（中间轮常是「边想边说」的草稿，发出去会与最终回复重复刷屏）；`callbacks.SendText` 保留给工具/宿主显式发送消息，定时任务/子代理的 SendText 回调则丢弃（仅记日志），见 [AI 引擎（三）](/internals/agent-tools)
 
 ### 图片加载的注入时机
@@ -145,13 +157,15 @@ if imageURLs := callbacks.TakeLoadedImages(); len(imageURLs) > 0 {
 }
 ```
 
-## 会话内请求串行化
+## 会话内请求串行化与回合预算
 
-插件层保证同一会话同一时刻只有一个进行中的请求：
+插件层用会话运行器保证同一会话同一时刻只有一个进行中的回合（`runner.go`）：
 
-- 会话锁（`tryLock`）：基于缓存层 `SetString + WithCheckExist + TTL` 的**分布式锁**（Redis 后端可跨实例），10 分钟自动过期防死锁
-- `rateCh` 并发槽：`plugin.ai_chat_bot.rate_limit`（默认 2）限制全局并发请求数
-- 响应期间到达的消息进入**排队队列**（每会话上限 20 条），当前响应结束后合并为一轮逐条回应；`/stop` 取消当前请求并清空队列
+- **入口零阻塞**：消息事件只做门禁/命令/入队并立即返回，后台运行器按会话串行执行；长回合既不占用框架事件 goroutine，也不受 `bot.msg_event_timeout_sec` 约束
+- **会话锁**（`tryLock`）：基于缓存层 `SetString + WithCheckExist + TTL` 的**分布式锁**（Redis 后端可跨实例），10 分钟自动过期防死锁
+- **并发槽**：`rateCh` 限制全局**对话回合**并发（`plugin.ai_chat_bot.rate_limit`，默认 4）；后台子代理使用独立池（`subagent.max_concurrent_global`，默认 8），不挤占对话
+- **回合预算三层**：软截止 `turn.soft_timeout_sec`（默认 600s）只注入收尾提醒；硬截止 `turn.hard_timeout_sec`（默认 14400s，0=不限）取消回合；看门狗负责重复调用/无进展。回合上下文丢弃框架 deadline（`context.WithoutCancel`）但关联插件生命周期
+- **排队消息**：回合进行中到达的消息进入**排队队列**（每会话上限 20 条），当前回合结束后合并为一轮逐条回应；`/stop` 取消当前回合并清空队列，`/stop <任务ID>` 只取消指定后台子代理
 
 ## 下一步
 

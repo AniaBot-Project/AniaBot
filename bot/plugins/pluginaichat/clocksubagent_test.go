@@ -237,12 +237,12 @@ func TestEventBudgetFollowsParentDeadline(t *testing.T) {
 	}
 }
 
-// TestPendingDrainHonorsTotalBudget 一次消息事件的总时长必须有上界：排空循环每批
-// 都会派生新预算，若不做累计结算，只要持续有新消息入队就能无限延长（旧实现即
-// 如此，配置项 bot.msg_event_timeout_sec 失去意义）。
-func TestPendingDrainHonorsTotalBudget(t *testing.T) {
+// TestPendingDrainHonorsHardDeadline 回合硬截止必须有上界：排空循环每批都会
+// 消费新入队的消息，若没有硬截止，只要持续有新消息入队就能无限延长。
+// （P1 起"事件总预算"已移除：默认硬截止 4 小时、0=不限制；软截止只提醒不取消。）
+func TestPendingDrainHonorsHardDeadline(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(200 * time.Millisecond) // 每批固定耗时，便于让总预算先耗尽
+		time.Sleep(200 * time.Millisecond) // 每批固定耗时，便于让硬截止先到期
 		fakePlainChatReply(w, "回复")
 	}))
 	defer srv.Close()
@@ -253,12 +253,11 @@ func TestPendingDrainHonorsTotalBudget(t *testing.T) {
 		cfg:  aiChatConfig{BaseURL: srv.URL, APIKey: "k", Model: "m", MaxContextTokens: 128000},
 	}
 	p.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
-	p.msgEventTimeout = budget
+	p.turnHardTimeout = budget
 	p.rateCh = make(chan struct{}, 2)
 	p.lockStorage = newLockFake()
 
 	rb := &recordBot{}
-	key := sessionKey(message.FromUint64(1001), true)
 
 	chat, err := aichat.NewChatBot(srv.URL, "k", "m", "系统提示", 128000, nil, nil)
 	if err != nil {
@@ -266,7 +265,7 @@ func TestPendingDrainHonorsTotalBudget(t *testing.T) {
 	}
 
 	// 队列持续有消息涌入：模拟"响应期间不断有人 @ 机器人"，
-	// 若总预算不结算，排空循环会一直跟着队列跑下去。
+	// 若硬截止不结算，排空循环会一直跟着队列跑下去。
 	const sessionID = uint64(1001)
 	p.enqueuePending(message.FromUint64(sessionID), true, testGroupMsg(sessionID, "在吗"))
 	refillStop := make(chan struct{})
@@ -293,48 +292,37 @@ func TestPendingDrainHonorsTotalBudget(t *testing.T) {
 		}
 	}()
 
-	parent, cancelParent := context.WithTimeout(context.Background(), budget)
-	defer cancelParent()
-	runCtx, eventDeadline, cancelRun := p.bridgeRunContext(parent)
+	// 与 newTurnContext 相同：回合只受硬截止约束（框架事件 deadline 不再参与）
+	runCtx, cancelRun := context.WithTimeout(context.Background(), budget)
 	defer cancelRun()
 
 	start := time.Now()
-	// 与 OnGroupMsg 相同的排空循环：每批独立预算，总时长受 eventDeadline 结算
 	batch := p.drainPending(message.FromUint64(sessionID), true)
 	for len(batch) > 0 {
-		next, ok := p.drainChatBatches(runCtx, eventDeadline, rb, message.FromUint64(sessionID), true, chat, batch)
+		next, ok := p.drainChatBatches(runCtx, rb, message.FromUint64(sessionID), true, chat, batch)
 		if !ok {
 			break
 		}
 		batch = next
 	}
 	elapsed := time.Since(start)
-	// 若总预算未结算，循环会一直跟着 refiller 跑下去（远超声明的预算）
+	// 若硬截止未结算，循环会一直跟着 refiller 跑下去（远超声明的预算）
 	if elapsed > 1500*time.Millisecond {
-		t.Fatalf("排空循环未受总预算约束，耗时 %v（预算 %v）", elapsed, budget)
+		t.Fatalf("排空循环未受硬截止约束，耗时 %v（预算 %v）", elapsed, budget)
 	}
 	close(refillStop)
 	refillWG.Wait()
-	// 涌入已停：此时若总预算结算生效，积压的排队消息应已被丢弃。允许残留至多
-	// 一条——涌入协程可能在「收尾丢弃」与「停手」之间的微秒级窗口里恰好投递一条，
-	// 它属于下一条消息的消费范围（生产里由 kickPending 兜底），不是滞留积压；
-	// 真正没结算的话，这里会是成批滞留（每 20ms 一条，远超 1）。
-	if n := pendingMsgCount(p, key); n > 1 {
-		t.Fatalf("总预算耗尽后剩余排队消息应被丢弃, 剩余 %d 条", n)
-	}
 	sent := rb.sent()
-	// 关键不变量：用户确实被告知（不是静默丢弃）。文案可能是插件自己的
-	//「本次处理已达时间上限」，也可能是某一批的预算恰与框架 deadline 同刻到期时
-	// 由 processChatBatch 输出的「请求超时」——后者语义同样正确（确实是超时）。
+	// 关键不变量：用户确实被告知（不是静默丢弃）——硬截止文案为「最长运行时间」
 	notified := false
 	for _, s := range sent {
-		if strings.Contains(s, "时间上限") || strings.Contains(s, "请求超时") {
+		if strings.Contains(s, "最长运行时间") || strings.Contains(s, "请求超时") {
 			notified = true
 			break
 		}
 	}
 	if !notified {
-		t.Fatalf("预算耗尽必须告知用户, got %v", sent)
+		t.Fatalf("硬截止必须告知用户, got %v", sent)
 	}
 	// 不应以框架取消文案收尾（会被误读为用户主动停止）
 	if n := len(sent); n > 0 && strings.Contains(sent[n-1], "已被停止") {

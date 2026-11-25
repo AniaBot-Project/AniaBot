@@ -275,6 +275,8 @@ type Options struct {
 	QueryLogs           func(f querylog.Filter) []querylog.Entry                                 // AI Query 日志（可为 nil）
 	QueryLogsStats      func(f querylog.Filter) []querylog.StatRow                               // Query 日志的轻量统计行（可为 nil）
 	QueryLogsClear      func(f querylog.Filter) int                                              // 清除 AI Query 日志（可为 nil）
+	AgentTasks          func(limit int) []AgentTaskView                                          // AI 后台任务注册表（新在前，可为 nil）
+	AgentGoals          func() []AgentGoalView                                                   // 当前 active 的会话目标（可为 nil）
 	ConsoleLogs         func(limit int, beforeID uint64) []consollog.Entry                       // 控制台日志（slog + log 输出，可为 nil）
 	QRLogins            []QRLoginChannel                                                         // 支持扫码登录的平台适配器（如微信；可为 nil）
 	Logger              *slog.Logger
@@ -357,6 +359,8 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/tokenstats", s.requireAuth(http.HandlerFunc(s.handleTokenStats)))
 	s.mux.Handle("GET /api/balance", s.requireAuth(http.HandlerFunc(s.handleBalance)))
 	s.mux.Handle("GET /api/tokenstats/detail", s.requireAuth(http.HandlerFunc(s.handleTokenStatsDetail)))
+	s.mux.Handle("GET /api/agent-tasks", s.requireAuth(http.HandlerFunc(s.handleAgentTasks)))
+	s.mux.Handle("GET /api/agent-goals", s.requireAuth(http.HandlerFunc(s.handleAgentGoals)))
 	s.mux.Handle("GET /api/clocks", s.requireAuth(http.HandlerFunc(s.handleClockList)))
 	s.mux.Handle("POST /api/clocks", s.requireAuth(http.HandlerFunc(s.handleClockCreate)))
 	s.mux.Handle("PUT /api/clocks/{id}", s.requireAuth(http.HandlerFunc(s.handleClockUpdate)))

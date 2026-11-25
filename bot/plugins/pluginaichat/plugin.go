@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -160,8 +162,40 @@ type AIChatPlugin struct {
 	historyTools sync.Map
 
 	// msgEventTimeout 框架级消息处理超时（bot.msg_event_timeout_sec，Start 时
-	// 从全量 viper 读取）：tryProcessPending 等后台触发的会话处理复用同一预算
+	// 从全量 viper 读取）：仅供历史遗留路径（面板试聊室等）兜底；AI 回合不再使用
+	// 该预算，改由 turnSoftTimeout / turnHardTimeout 与本包看门狗管理（见 runner.go）。
 	msgEventTimeout time.Duration
+
+	// runCtx 插件生命周期上下文：回合运行器与后台任务继承它，OnUnload 时取消，
+	// 确保进程重启/插件卸载能中止在跑的后台工作（b.Go 本身不接 ctx）。
+	runCtx    context.Context
+	runCancel context.CancelFunc
+
+	// turnSoftTimeout 回合软截止：到时向模型注入一次"收尾或转后台"提醒，不取消；0=关闭
+	turnSoftTimeout time.Duration
+	// turnHardTimeout 回合硬截止：到时取消当前回合；0=不限制
+	turnHardTimeout time.Duration
+	// taskAckAfter 长任务受理提示阈值：回合运行超过该时长仍无可见输出时先发一条
+	// "正在处理"提示；0=关闭
+	taskAckAfter time.Duration
+
+	// subagentSem 后台子代理全局并发信号量（容量来自 subagent.max_concurrent_global，
+	// nil 表示不限制）；对话回合使用 rateCh，两者互不挤占
+	subagentSem chan struct{}
+
+	// taskStore 后台任务注册表（SQL 持久化）；historyDB 不可用时为 nil，
+	// 任务只保留内存态（/tasks 仍可看当前运行中的子代理）
+	taskStore *taskStore
+
+	// goalStore 长任务目标存储（SQL 持久化）；nil 表示功能未启用或持久层不可用
+	goalStore *goalStore
+	// goalArmed 进程内「目标续跑已武装」状态（key=sessionKey）；不持久化，
+	// 进程重启后清空，需用户 /goal resume 重新开启（避免升级重启后自动烧 token）
+	goalArmed sync.Map
+
+	// teamBoardMu 团队任务板的进程内互斥（claim/complete 的原子性；多实例部署
+	// 时以 DB 为准，本进程内串行足够避免同一任务被并发认领）
+	teamBoardMu sync.Mutex
 
 	// chatConsole 面板「试聊室」会话管理器（Web 面板内直接对话测试）；
 	// Start 末尾构造，未就绪时为 nil（面板接口退化为明确错误）
@@ -185,11 +219,11 @@ func NewAIChatPlugin() *AIChatPlugin {
 	return &AIChatPlugin{
 		Meta: plugin.Meta{
 			Name:      "AI对话插件",
-			HelpWords: "@我聊天哦，带上 #新对话 标签可以创建新对话，发送 /stop 可以停止 AI 响应，/status 查看当前响应状态",
+			HelpWords: "@我聊天哦，带上 #新对话 标签可以创建新对话，发送 /stop 可以停止 AI 响应（/stop 任务ID 取消指定后台任务），/tasks 查看后台任务，/goal 查看长任务目标，/status 查看当前响应状态",
 			Order:     plugin.LevelPostHandle,
 			ShowFor:   plugininfo.ShowForGroup | plugininfo.ShowForFriend,
 			Author:    "jeanhua",
-			Version:   "1.0.0",
+			Version:   "1.1.0",
 		},
 	}
 }
@@ -240,25 +274,48 @@ func (p *AIChatPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 		return p.handleClockCommand(ctx, bot, cmd, msg)
 	}
 
+	if cmd.Name == "tasks" {
+		return p.handleTasksCommand(bot, msg)
+	}
+
+	if cmd.Name == "resume" {
+		taskID := ""
+		if len(cmd.Args) > 0 {
+			taskID = strings.TrimSpace(cmd.Args[0])
+		}
+		return p.handleResumeCommand(bot, msg, taskID)
+	}
+
+	if cmd.Name == "goal" {
+		return p.handleGoalCommand(bot, cmd, msg)
+	}
+
 	if cmd.Name == "stop" {
+		if len(cmd.Args) > 0 {
+			return p.handleStopByID(bot, msg, strings.TrimSpace(cmd.Args[0]))
+		}
 		isAdmin := p.SystemConfig.IsAdmin(msg.Sender.UserId)
-		stopped, denied := p.stopRequest(msg.GroupId, true, msg.Sender.UserId, isAdmin)
+		stopped, runningTasks, denied := p.stopSessionWork(msg.GroupId, true, msg.Sender.UserId, isAdmin)
 		if denied != "" {
 			builder := msgchain.Builder().Group()
 			builder.Text(denied)
 			bot.SendGroupMsg(msg.GroupId, builder.Build())
 			return false, nil
 		}
-		// 确实停止了一个请求才丢弃排队消息、取消异步子代理：无活跃请求时
-		// 不清队列（队列里可能有待消费的遗留消息，由兜底清扫器负责处理）
 		builder := msgchain.Builder().Group()
-		if stopped {
-			p.cancelAsyncSubagents(msg.GroupId, true)
-			p.drainPending(msg.GroupId, true)
+		switch {
+		case stopped && runningTasks > 0:
+			builder.Text("已停止当前 AI 响应与后台任务")
+		case stopped:
 			builder.Text("用户停止AI响应")
-			p.Logger.Info("用户停止 AI 响应", "group", msg.GroupId, "user", msg.Sender.UserId)
-		} else {
+		case runningTasks > 0:
+			builder.Text("已停止后台任务")
+		default:
 			builder.Text("当前没有正在进行的 AI 请求")
+		}
+		if stopped || runningTasks > 0 {
+			p.Logger.Info("用户停止 AI 工作", "group", msg.GroupId, "user", msg.Sender.UserId,
+				"turn_stopped", stopped, "tasks_stopped", runningTasks)
 		}
 		bot.SendGroupMsg(msg.GroupId, builder.Build())
 		return false, nil
@@ -281,68 +338,11 @@ func (p *AIChatPlugin) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.
 		p.commandManager.rewriteCustomCommand(cmd, &msg)
 	}
 
-	lock, fail := p.tryLockDetailed(msg.GroupId, true)
-	if lock == nil {
-		if fail == lockRateLimited {
-			// 全局并发槽位已满：与「会话正忙」不同，此队列没有消费者
-			//（会话本身空闲，拿不到的是配额），直接拒绝而不是静默排队
-			builder := msgchain.Builder().Group()
-			builder.Text("当前请求太多啦，请稍后再试~")
-			bot.SendGroupMsg(msg.GroupId, builder.Build())
-			return true, nil
-		}
-		// 当前正在响应：消息静默进入排队队列（不额外提示，避免刷屏），
-		// 响应结束后自动合并处理；只有队列已满导致消息被丢弃时才告知用户
-		if _, ok := p.enqueuePending(msg.GroupId, true, msg); !ok {
-			builder := msgchain.Builder().Group()
-			builder.Text("排队消息太多啦，稍后再试试吧~")
-			bot.SendGroupMsg(msg.GroupId, builder.Build())
-		}
-		p.touchChat(sessionKey(msg.GroupId, true))
-		// 兜底唤醒：入队可能与持锁者最后一次 drain 交错而错过所有消费者，
-		// 由后台尝试接管会话消费队列（正常路径下锁仍在，短暂重试即放弃）
-		bot.Go("pending:"+sessionKey(msg.GroupId, true), func() { p.kickPending(bot, msg.GroupId, true) })
-		return true, nil
-	}
-	p.touchChat(sessionKey(msg.GroupId, true))
-	defer lock.release()
-	defer p.clearActiveContext(msg.GroupId, true)
-
-	chat, err := p.getChat(bot, msg.GroupId, true, p.getPromptForID(msg.GroupId, true))
-	if err != nil {
-		builder := msgchain.Builder().Group()
-		builder.Text("无法创建对话：" + aichat.SafeErrorText(err))
-		bot.SendGroupMsg(msg.GroupId, builder.Build())
-		return true, nil
-	}
-
-	// 未@消息计数达到阈值时补清：会话重启/闲置淘汰后重建（历史从持久层回放），
-	// 若阈值是在会话未驻留期间达到的，这里清空让本轮对话从新上下文开始；
-	// 无论是否清空，@ 消息都会重置连续未@计数
-	p.applyNoMentionClear(ctx, msg.GroupId, chat)
-
-	// runCtx 承载 /stop、锁丢失与框架关停（ania.ctx）的取消信号；每批消息各自
-	// 派生独立预算，但整个事件的累计时长受 eventBudget 结算——复用同一个 ctx
-	// 会让第二批及之后只剩首批消耗后的残额（长响应下几乎必然超时），而完全不
-	// 结算则让单次事件的时长无上界（见 bridgeRunContext / eventBudget）。
-	runCtx, eventDeadline, cancelRun := p.bridgeRunContext(ctx)
-	defer cancelRun()
-	lock.attachCancel(cancelRun)
-
-	// 先取出可能遗留的排队消息（上一响应结束瞬间到达、未来及处理的），与本次消息合并；
-	// 之后每轮响应结束继续排空队列，直到没有新消息或总预算耗尽
-	batch := append(p.drainPending(msg.GroupId, true), msg)
-	start := time.Now()
-	for len(batch) > 0 {
-		p.setActiveContext(msg.GroupId, true, newActiveRequest(cancelRun, batchRequester(batch), start))
-		next, ok := p.drainChatBatches(runCtx, eventDeadline, bot, msg.GroupId, true, chat, batch)
-		p.clearActiveContext(msg.GroupId, true)
-		if !ok {
-			return false, nil
-		}
-		batch = next
-	}
-	return true, nil
+	// 回合改为后台执行：消息只入队并唤醒该会话的运行器，事件处理立即返回。
+	// 长回合不再占用框架事件 goroutine，也不会被 bot.msg_event_timeout_sec
+	// 截断；同一会话的串行性由会话锁 + 排队队列保证（见 runner.go）。
+	p.submitTurn(bot, msg.GroupId, true, msg)
+	return false, nil
 }
 
 // newConversationRequested 本批消息中是否有任何一条**自身的文本段**包含 #新对话。
@@ -368,57 +368,43 @@ func newConversationRequested(batch []message.Message) bool {
 	return false
 }
 
-// drainChatBatches 排空一批（及后续陆续入队的）消息，是消息事件与后台接管共用的
-// 执行循环。返回下一批待处理消息与是否继续（false 表示请求被取消/出错，调用方应
-// 终止整条处理链：剩余排队消息已被丢弃，等待下一条消息重新触发）。
+// drainChatBatches 执行一批（及后续陆续入队的）消息，是回合运行器与后台接管
+// 共用的执行循环。返回下一批待处理消息与是否继续（false 表示本回合被取消/中止，
+// 调用方应终止整条处理链；**剩余排队消息保留**，等待下一次运行器接管）。
 //
-// 预算语义：
-//   - 每批派生独立预算 min(p.msgEventTimeout, 剩余总预算)：复用同一个 ctx 会让
-//     第二批及之后只剩首批消耗后的残额（长响应下几乎必然超时）；
-//   - 总预算以 eventDeadline 结算（框架事件 deadline，见 bridgeRunContext）：
-//     不做累计结算时，只要持续有新消息入队就能无限延长单次事件——旧实现即如此，
-//     bot.msg_event_timeout_sec 失去上界意义。eventDeadline 为零值时按配置逐批复位
-//     （兼容无 deadline 的后台路径）。
-func (p *AIChatPlugin) drainChatBatches(runCtx context.Context, eventDeadline time.Time, b bot.Bot, id message.QID, isGroup bool, chat *aichat.ChatBot, batch []message.Message) ([]message.Message, bool) {
-	remaining := p.msgEventTimeout
-	if !eventDeadline.IsZero() {
-		remaining = time.Until(eventDeadline)
+// 预算语义（P1）：
+//   - 不再有"事件总预算"：回合只受 ctx 的硬截止（turnHardTimeout，默认 4 小时、
+//     0=不限制）与 /stop/关停取消约束；
+//   - 软截止（turnSoftTimeout）由 aichat 编排层在工具循环内注入一次收尾/交接
+//     提醒，不在这里取消；
+//   - 排队消息不再因预算耗尽被丢弃，避免长任务期间用户消息/子代理结果丢失。
+func (p *AIChatPlugin) drainChatBatches(ctx context.Context, b bot.Bot, id message.QID, isGroup bool, chat *aichat.ChatBot, batch []message.Message) ([]message.Message, bool) {
+	if err := ctx.Err(); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			p.reportTurnTimeout(b, id, isGroup)
+		}
+		return nil, false
 	}
-	if remaining <= 0 {
-		// 总预算耗尽：告知用户并丢弃剩余排队消息，避免无上界的连续响应。
-		// 先声明由插件收尾，让框架的同刻超时不再以「AI 响应已被停止」覆盖本条提示。
-		claimEventTimeout(runCtx)
-		p.reportEventBudgetExhausted(b, id, isGroup, len(p.drainPending(id, isGroup))+len(batch))
-		return nil, true
-	}
-	batchCtx, cancelBatch := batchContext(runCtx, min(p.msgEventTimeout, remaining))
-	ok := p.processChatBatch(batchCtx, b, id, isGroup, chat, batch)
-	cancelBatch()
-	if !ok {
-		// 本批被取消：可能是 /stop、锁丢失，也可能是框架事件 deadline 到期
-		//（父取消桥接在截止时刻取消了 runCtx）。后者属于「总预算耗尽」，
-		// 必须由插件自己说明，否则用户只看到框架统一的取消文案、且剩余排队
-		// 消息会静默滞留到下一次触发。
-		if parentExpiredByDeadline(runCtx) {
-			p.reportEventBudgetExhausted(b, id, isGroup, len(p.drainPending(id, isGroup)))
+	if !p.processChatBatch(ctx, b, id, isGroup, chat, batch) {
+		// 本批被取消：/stop、锁丢失、关停或硬截止到期。硬截止单独说明原因，
+		// 其余情况由 processChatBatch 内部的错误呈现负责。
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			p.reportTurnTimeout(b, id, isGroup)
 		}
 		return nil, false
 	}
 	return p.drainPending(id, isGroup), true
 }
 
-// reportEventBudgetExhausted 总预算耗尽时统一向用户说明并丢弃剩余排队消息。
-// pending <= 0 表示没有滞留消息（用户已收到本批回复），只需静默收尾。
-func (p *AIChatPlugin) reportEventBudgetExhausted(b bot.Bot, id message.QID, isGroup bool, pending int) {
-	if pending <= 0 {
-		return
+// reportTurnTimeout 回合硬截止到时向用户说明原因；剩余排队消息保留，不丢弃。
+func (p *AIChatPlugin) reportTurnTimeout(b bot.Bot, id message.QID, isGroup bool) {
+	p.Logger.Warn("回合超过硬截止被中止", "id", id, "is_group", isGroup, "timeout", p.turnHardTimeout)
+	text := "本轮处理已超过最长运行时间，已中止。已完成的进度会保留；发送 /stop 可停止后续任务。"
+	if p.turnHardTimeout > 0 {
+		text = "本轮处理已超过最长运行时间（" + formatStatusDuration(p.turnHardTimeout) + "），已中止。已完成的进度会保留；发送 /stop 可停止后续任务。"
 	}
-	p.Logger.Warn("消息事件总预算耗尽，丢弃剩余排队消息", "id", id, "is_group", isGroup, "pending", pending)
-	p.drainPending(id, isGroup)
-	p.sendPlainText(b, id, isGroup, "本次处理已达时间上限，请重新发送消息")
+	p.sendPlainText(b, id, isGroup, text)
 }
-
-// parentExpiredByDeadline 见 lock.go（运行上下文是否因框架事件 deadline 到期被取消）。
 
 func (p *AIChatPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command.Command, msg message.Message) (bool, error) {
 	// 未完成初始化（如未配置 API KEY）时跳过全部处理，交由后续插件
@@ -448,9 +434,28 @@ func (p *AIChatPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command
 		return p.handleProactiveCommand(ctx, bot, cmd, msg)
 	}
 
+	if cmd.Name == "tasks" {
+		return p.handleTasksCommand(bot, msg)
+	}
+
+	if cmd.Name == "resume" {
+		taskID := ""
+		if len(cmd.Args) > 0 {
+			taskID = strings.TrimSpace(cmd.Args[0])
+		}
+		return p.handleResumeCommand(bot, msg, taskID)
+	}
+
+	if cmd.Name == "goal" {
+		return p.handleGoalCommand(bot, cmd, msg)
+	}
+
 	if cmd.Name == "stop" {
+		if len(cmd.Args) > 0 {
+			return p.handleStopByID(bot, msg, strings.TrimSpace(cmd.Args[0]))
+		}
 		isAdmin := p.SystemConfig.IsAdmin(msg.Sender.UserId)
-		stopped, denied := p.stopRequest(msg.Sender.UserId, false, msg.Sender.UserId, isAdmin)
+		stopped, runningTasks, denied := p.stopSessionWork(msg.Sender.UserId, false, msg.Sender.UserId, isAdmin)
 		if denied != "" {
 			builder := msgchain.Builder().Friend()
 			builder.Text(denied)
@@ -458,13 +463,19 @@ func (p *AIChatPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command
 			return false, nil
 		}
 		builder := msgchain.Builder().Friend()
-		if stopped {
-			p.cancelAsyncSubagents(msg.Sender.UserId, false)
-			p.drainPending(msg.Sender.UserId, false)
+		switch {
+		case stopped && runningTasks > 0:
+			builder.Text("已停止当前 AI 响应与后台任务")
+		case stopped:
 			builder.Text("用户停止AI响应")
-			p.Logger.Info("用户停止 AI 响应", "user", msg.Sender.UserId)
-		} else {
+		case runningTasks > 0:
+			builder.Text("已停止后台任务")
+		default:
 			builder.Text("当前没有正在进行的 AI 请求")
+		}
+		if stopped || runningTasks > 0 {
+			p.Logger.Info("用户停止 AI 工作", "user", msg.Sender.UserId,
+				"turn_stopped", stopped, "tasks_stopped", runningTasks)
 		}
 		bot.SendFriendMsg(msg.Sender.UserId, builder.Build())
 		return false, nil
@@ -487,59 +498,9 @@ func (p *AIChatPlugin) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command
 		p.commandManager.rewriteCustomCommand(cmd, &msg)
 	}
 
-	lock, fail := p.tryLockDetailed(msg.Sender.UserId, false)
-	if lock == nil {
-		if fail == lockRateLimited {
-			// 全局并发槽位已满：没有消费者会处理排队的消息，直接拒绝
-			builder := msgchain.Builder().Friend()
-			builder.Text("当前请求太多啦，请稍后再试~")
-			bot.SendFriendMsg(msg.Sender.UserId, builder.Build())
-			return true, nil
-		}
-		// 当前正在响应：消息静默进入排队队列（不额外提示，避免刷屏），
-		// 响应结束后自动合并处理；只有队列已满导致消息被丢弃时才告知用户
-		if _, ok := p.enqueuePending(msg.Sender.UserId, false, msg); !ok {
-			builder := msgchain.Builder().Friend()
-			builder.Text("排队消息太多啦，稍后再试试吧~")
-			bot.SendFriendMsg(msg.Sender.UserId, builder.Build())
-		}
-		p.touchChat(sessionKey(msg.Sender.UserId, false))
-		// 兜底唤醒：入队可能与持锁者最后一次 drain 交错而错过所有消费者
-		bot.Go("pending:"+sessionKey(msg.Sender.UserId, false), func() { p.kickPending(bot, msg.Sender.UserId, false) })
-		return true, nil
-	}
-	p.touchChat(sessionKey(msg.Sender.UserId, false))
-	defer lock.release()
-	defer p.clearActiveContext(msg.Sender.UserId, false)
-
-	chat, err := p.getChat(bot, msg.Sender.UserId, false, p.getPromptForID(msg.Sender.UserId, false))
-	if err != nil {
-		builder := msgchain.Builder().Friend()
-		builder.Text("无法创建对话：" + aichat.SafeErrorText(err))
-		bot.SendFriendMsg(msg.Sender.UserId, builder.Build())
-		return true, nil
-	}
-
-	// runCtx 承载 /stop、锁丢失与框架关停（ania.ctx）的取消信号；总预算结算
-	// 同 OnGroupMsg（见 bridgeRunContext / eventBudget）
-	runCtx, eventDeadline, cancelRun := p.bridgeRunContext(ctx)
-	defer cancelRun()
-	lock.attachCancel(cancelRun)
-
-	// 先取出可能遗留的排队消息（上一响应结束瞬间到达、未来得及处理的），与本次消息合并；
-	// 之后每轮响应结束继续排空队列，直到没有新消息或总预算耗尽（见 drainChatBatches）
-	batch := append(p.drainPending(msg.Sender.UserId, false), msg)
-	start := time.Now()
-	for len(batch) > 0 {
-		p.setActiveContext(msg.Sender.UserId, false, newActiveRequest(cancelRun, batchRequester(batch), start))
-		next, ok := p.drainChatBatches(runCtx, eventDeadline, bot, msg.Sender.UserId, false, chat, batch)
-		p.clearActiveContext(msg.Sender.UserId, false)
-		if !ok {
-			return false, nil
-		}
-		batch = next
-	}
-	return true, nil
+	// 回合同群聊：消息入队后由后台运行器执行（见 runner.go / submitTurn）
+	p.submitTurn(bot, msg.Sender.UserId, false, msg)
+	return false, nil
 }
 
 // processChatBatch 处理一批消息：可能只有一条（直接触发），也可能包含 AI 响应期间
@@ -655,12 +616,22 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	// 故流式生效时不做拆分。
 	stream := p.newStreamReplyFor(b, id, isGroup, batch)
 	if stream != nil {
-		chatOpts.OnStreamDelta = stream.OnDelta
+		chatOpts.OnStreamDelta = func(delta string) {
+			// 首个流式增量即视为可见输出：长任务受理提示不再发送
+			markTurnVisible(ctx)
+			stream.OnDelta(delta)
+		}
 		chatOpts.OnStreamRoundEnd = stream.OnRoundEnd
 		chatOpts.OnStreamRestart = stream.OnRestart
 	}
 
 	recorder := p.beginQuery(chat, id, isGroup, batch, extraText)
+	// 回合任务 ID 写入 Query 日志（stop_reason 在收尾时按错误原因回填）
+	if recorder != nil {
+		if info := turnInfoFrom(ctx); info != nil {
+			recorder.taskID = info.taskID
+		}
+	}
 
 	// 记忆/知识库检索须基于原始用户消息：下面的注入会改写 extraText
 	userText := extraText
@@ -810,6 +781,7 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	// 最终回复片段（流式未生效时才会走到这里，如平台不支持流式或流式已退化）：
 	// AI 用 ||| 指定了消息边界时拆成多条逐条发送，否则整段一条；片段过多
 	//（> forwardSegThreshold）时平台支持合并转发（QQ）则改为一条合并转发，避免刷屏。
+	markTurnVisible(ctx)
 	segments := replySegments(resp)
 	if isGroup {
 		// 群聊中 @ 本批所有发言者（去重），让排队消息的每个人都收到回应；
@@ -882,7 +854,49 @@ func (p *AIChatPlugin) buildAdminPromptSender(b bot.Bot) func(text string) bool 
 }
 
 func (p *AIChatPlugin) buildChatOptions() aichat.ChatOptions {
-	return p.thinkingOpts()
+	opts := p.thinkingOpts()
+	opts.Watchdog = p.watchdogOptions(true)
+	return opts
+}
+
+// buildSubagentChatOptions 子代理/团队成员的一次性会话参数：保留重复调用与
+// 无进展保护，但不注入"收尾或转后台"软截止提醒（子代理没有 handoff 工具，
+// 其生命周期由 subagent 超时与 /stop 管理）。
+func (p *AIChatPlugin) buildSubagentChatOptions() aichat.ChatOptions {
+	opts := p.thinkingOpts()
+	opts.Watchdog = p.watchdogOptions(false)
+	return opts
+}
+
+// watchdogOptions 构造 aichat 编排层的工具循环保护配置。
+func (p *AIChatPlugin) watchdogOptions(withSoftDeadline bool) aichat.WatchdogOptions {
+	wo := aichat.WatchdogOptions{
+		ProgressReminderAfter: p.cfg.Turn.ProgressReminderAfter,
+		RepeatWarnThresholds:  parseRepeatToolWarn(p.cfg.Turn.RepeatToolWarn),
+		NoProgressLimit:       p.cfg.Turn.NoProgressLimit,
+	}
+	if withSoftDeadline && p.turnSoftTimeout > 0 {
+		wo.SoftDeadline = time.Now().Add(p.turnSoftTimeout)
+	}
+	return wo
+}
+
+// parseRepeatToolWarn 解析 "3,5,8" 形式的重复调用提醒阈值；非法项跳过。
+func parseRepeatToolWarn(raw string) []int {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]int, 0, len(parts))
+	for _, part := range parts {
+		n, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil || n <= 0 {
+			continue
+		}
+		out = append(out, n)
+	}
+	sort.Ints(out)
+	return out
 }
 
 func (p *AIChatPlugin) buildOCRChatOptions() aichat.ChatOptions {
@@ -909,9 +923,20 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	// 插件配置已由框架自动填充到 p.cfg（见 ConfigSchema），这里只做校验与兜底
 	rateLimit := p.cfg.RateLimit
 	if rateLimit <= 0 {
-		rateLimit = 2
+		rateLimit = 4
 	}
 	p.rateCh = make(chan struct{}, rateLimit)
+
+	// 回合预算：软截止只提醒、硬截止才取消；0 表示关闭/不限制（见 turnConfig）
+	p.turnSoftTimeout = secondsDuration(p.cfg.Turn.SoftTimeoutSec)
+	p.turnHardTimeout = secondsDuration(p.cfg.Turn.HardTimeoutSec)
+	p.taskAckAfter = secondsDuration(p.cfg.Turn.AckAfterSec)
+	// 插件生命周期上下文：后台运行器与异步子代理继承，OnUnload 统一取消
+	p.runCtx, p.runCancel = context.WithCancel(context.Background())
+	// 后台子代理全局并发池（与对话回合的 rateCh 分开计算）
+	if n := p.cfg.Subagent.MaxConcurrentGlobal; n > 0 {
+		p.subagentSem = make(chan struct{}, n)
+	}
 
 	// AI 必需配置缺失不算初始化错误（首次启动设置向导期间是正常状态）：
 	// 记警告并以降载模式加载（ready=false），消息事件直接跳过，不刷错误日志
@@ -1223,9 +1248,14 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 
 	// 对话历史行级化：按行存于 ania_chat_session/ania_chat_message
 	// （增量追加只插入新行，避免整段 JSON 反复全量重写）；探测或建表失败时
-	// historyDB 保持 nil，历史仅存于内存窗口（重启丢失），不影响对话
+	// historyDB 保持 nil，历史仅存于内存窗口（重启丢失），不影响对话。
+	// 建表使用独立上下文：Start 的 1 分钟预算可能已被前置的 MCP 连接等消耗，
+	// 继续用 startCtx 会让建表在建连慢时直接失败、历史持久化静默失效。
 	if db, dialect, ok := storage.SQLBackend(p.PersistentStorage); ok {
-		if err := storage.EnsureTables(ctx, db, dialect, chatHistoryTables...); err != nil {
+		tableCtx, tableCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		err := storage.EnsureTables(tableCtx, db, dialect, chatHistoryTables...)
+		tableCancel()
+		if err != nil {
 			p.Logger.Error("创建对话历史表失败，历史将不持久化", "error", err.Error())
 		} else {
 			p.historyDB = db
@@ -1238,6 +1268,40 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	// 纯内存计数（行为等同旧版，重启清零）
 	if p.cfg.Session.NoMentionClear > 0 && p.PersistentStorage != nil {
 		p.noMentionStore = p.PersistentStorage.Clone(noMentionKeyPrefix)
+	}
+
+	// 后台任务注册表：会话/子代理/handoff 等后台工作的状态、进度与结果落库，
+	// 供 /tasks 展示与重启后恢复。建表失败降级为不持久化（不阻断启动）。
+	if p.historyDB != nil {
+		taskTableCtx, taskTableCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		store := newTaskStore(p.historyDB, p.Logger.WithGroup("task"))
+		err := store.EnsureTables(taskTableCtx)
+		taskTableCancel()
+		if err != nil {
+			p.Logger.Error("创建后台任务表失败，任务将不做持久化", "error", err.Error())
+		} else {
+			p.taskStore = store
+			if n, err := store.MarkInterrupted(context.Background()); err != nil {
+				p.Logger.Warn("标记中断任务失败", "error", err.Error())
+			} else if n > 0 {
+				p.Logger.Info("已标记上次进程遗留的未完成任务为 interrupted", "count", n)
+			}
+		}
+	}
+
+	// 长任务目标（跨回合续跑）：需要 SQL 持久层；建表失败降级为功能不可用。
+	// 注意：启动时不自动武装任何目标（goalArmed 为空）——进程重启后目标保持
+	// active 但不会自动续跑，需用户 /goal resume。
+	if p.historyDB != nil && p.cfg.Goal.Enable {
+		goalTableCtx, goalTableCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		store := newGoalStore(p.historyDB, p.Logger.WithGroup("goal"))
+		err := store.EnsureTables(goalTableCtx)
+		goalTableCancel()
+		if err != nil {
+			p.Logger.Error("创建长任务目标表失败，目标续跑不可用", "error", err.Error())
+		} else {
+			p.goalStore = store
+		}
 	}
 
 	// 会话内存回收：闲置淘汰 + LRU 容量上限，防止活跃会话增多导致内存线性增长。
@@ -1257,6 +1321,9 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	// 排队消息兜底清扫器：唤醒集中在入队路径时，限流饱和或与锁释放交错
 	// 都可能让消息错过所有消费者，由周期扫描接管（队列为空时零开销）
 	p.startPendingSweeper()
+
+	// 任务记录清理器：按 task.retention_days 删除过期已结束任务
+	p.startTaskJanitor()
 
 	// 面板「试聊室」：把聊天搬到 Web 控制面板上做对话测试——复用完整对话管线
 	// （提示词/记忆/知识库/工具/上下文压缩），回复只回显面板、不向任何平台发送
@@ -1311,4 +1378,21 @@ func (p *AIChatPlugin) getPromptForID(id message.QID, isGroup bool) string {
 		}
 	}
 	return p.cfg.Prompt
+}
+
+// OnUnload 插件卸载收尾：取消插件生命周期上下文，中止回合运行器与全部异步
+// 子代理，避免进程重启/插件被卸载后仍有后台 goroutine 在跑（b.Go 本身不接 ctx）。
+func (p *AIChatPlugin) OnUnload(ctx context.Context, reason plugin.UnloadReason) error {
+	if p.runCancel != nil {
+		p.runCancel()
+	}
+	p.asyncSubagents.Range(func(_, v any) bool {
+		if g, ok := v.(*asyncSubagentGroup); ok && g != nil {
+			g.cancelAll()
+		}
+		return true
+	})
+	p.asyncSubagents.Clear()
+	p.Logger.Info("AI 对话插件卸载：已取消后台运行器与子代理", "reason", string(reason))
+	return nil
 }

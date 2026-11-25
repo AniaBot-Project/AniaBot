@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jeanhua/AniaBot/bot/component/aichat"
 	"github.com/jeanhua/AniaBot/bot/component/llmtool"
 	"github.com/jeanhua/AniaBot/bot/component/tasklog"
 	"github.com/jeanhua/AniaBot/common/bot"
@@ -262,12 +263,14 @@ type teamMemberSpec struct {
 }
 
 // teamMemberResult 单成员执行结果。成功时 result 含 runSubagent 的元信息前缀，
-// 失败时 err 为分类后的错误。
+// 失败时 err 为分类后的错误；usage/duration 供 team_run 父记录汇总成员消耗与耗时。
 type teamMemberResult struct {
 	label    string
 	result   string
 	err      error
 	degraded string
+	usage    aichat.TokenUsage
+	duration time.Duration
 }
 
 // resolveTeamMemberSpec 成员解析降级链：
@@ -327,43 +330,59 @@ func teamEffectiveTask(base, memberTask string) string {
 // 全部完成后组装汇总报告返回。成员之间互不可见、互不影响；单成员超时/失败不中断
 // 整体执行（失败进报告）。
 //
+// 运行记录：开始时写一条 team_run 父记录与每个成员一条 team_member 子记录，
+// 结束时回填状态/产出/token/耗时与工具调用步骤，供面板「后台任务」页查看
+// （taskStore 未启用时全部降级为 nil，不影响执行）。
+//
 // 注意：成员 context 不在此预建超时——每个成员由 runSubagentWithOptions 内部按
 // 父 ctx deadline 独立压缩预算（预留收尾时间），外层预建会双重压缩损失预算；
 // 也正因为每成员超时都有界，wg.Wait() 必然收敛。
 func (p *AIChatPlugin) runTeam(ctx context.Context, b bot.Bot, id message.QID, isGroup bool,
-	timeoutSec int, specs []teamMemberSpec, parentCbs llmtool.CallBackFuncs) (string, error) {
+	task string, timeoutSec int, specs []teamMemberSpec, parentCbs llmtool.CallBackFuncs) (string, error) {
 	// 预算预检：剩余不足（父 deadline 30s 内）时直接失败，不启动任何成员
 	if _, err := resolveSubagentTimeout(p.subagentTimeout(), timeoutSec, ctx); err != nil {
 		return "", fmt.Errorf("无法启动 Agent 团队: %w", err)
 	}
 
 	start := time.Now()
+	runTask := p.beginTeamRunTask(id, isGroup, task)
 	results := make([]teamMemberResult, len(specs))
 	var wg sync.WaitGroup
 	for i, spec := range specs {
 		wg.Add(1)
 		b.Go(fmt.Sprintf("team:%s:%d:%s", sessionKey(id, isGroup), i, spec.label), func() {
 			defer wg.Done()
-			results[i] = p.runTeamMember(ctx, b, id, isGroup, timeoutSec, spec, parentCbs)
+			results[i] = p.runTeamMember(ctx, b, id, isGroup, timeoutSec, spec, parentCbs, runTask)
 		})
 	}
 	wg.Wait()
 
-	return buildTeamReport(results, time.Since(start)), nil
+	duration := time.Since(start)
+	report := buildTeamReport(results, duration)
+	p.finishTeamRunTask(runTask, report, results, duration, ctx.Err())
+	return report, nil
 }
 
 // runTeamMember 单个成员的执行：带角色提示词的一次性子代理，执行参数与主模型
 // 一致（模型/生成参数/工具轮数取主模型配置，超时取框架消息处理预算；见
-// runSubagentWithOptions）。
+// runSubagentWithOptions）。执行期间用 subagentTrace 收集工具调用步骤，随成员
+// 子记录落库（面板可展开查看它具体做了什么）。
 func (p *AIChatPlugin) runTeamMember(ctx context.Context, b bot.Bot, id message.QID, isGroup bool,
-	timeoutSec int, spec teamMemberSpec, parentCbs llmtool.CallBackFuncs) teamMemberResult {
+	timeoutSec int, spec teamMemberSpec, parentCbs llmtool.CallBackFuncs, runTask *agentTask) teamMemberResult {
 	logger := p.Logger.WithGroup("team")
 	result := teamMemberResult{label: spec.label, degraded: spec.degraded}
 
+	memberTask := p.beginTeamMemberTask(runTask, id, isGroup, spec)
+	trace := newSubagentTrace()
+	start := time.Now()
 	resp, usage, err := p.runSubagentWithOptions(ctx, b, id, isGroup, spec.task, subagentRunOptions{
 		prompt:     spec.prompt,
 		timeoutSec: timeoutSec,
+		trace:      trace,
 	}, parentCbs)
+	result.usage = usage
+	result.duration = time.Since(start)
+	p.finishTeamMemberTask(memberTask, spec, resp, usage, err, result.duration, trace)
 	// 成员消耗计入会话与全局配额（发起方已做前置检查，这里只累加不重复拒绝）
 	p.quotaManager.Add(sessionKey(id, isGroup), usage)
 	// 成员消耗并入会话统计：team_run 在主请求内同步等待完成，

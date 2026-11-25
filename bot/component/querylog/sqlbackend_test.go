@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -353,5 +355,167 @@ func TestSQLBackendStatsColumnsBackfill(t *testing.T) {
 	rows = l.Stats(Filter{})
 	if len(rows) != 2 || rows[1].TotalTokens != 20 {
 		t.Fatalf("补列后新记录统计异常: %+v", rows)
+	}
+}
+
+// TestStopReasonTaskIDRoundTrip stop_reason / task_id 全链路往返：
+// Record 写入 → Recent / Query 读回一致，Update 能回填，冗余列同步落库；
+// 未设置时按空字符串出现在 Entry JSON 中（面板 API 字段始终存在）。
+func TestStopReasonTaskIDRoundTrip(t *testing.T) {
+	l, db := newSQLLogger(t)
+
+	// Record 直接写入两个字段
+	rec := l.Record(Entry{
+		ChatType: "group", TargetID: "10001", Query: "帮我查天气",
+		Status: StatusSuccess, StopReason: "completed", TaskID: "t-abc123",
+	})
+	recent := l.Recent(1)
+	if len(recent) != 1 || recent[0].ID != rec.ID ||
+		recent[0].StopReason != "completed" || recent[0].TaskID != "t-abc123" {
+		t.Fatalf("Recent 未读回 stop_reason/task_id: %+v", recent)
+	}
+	byQuery := l.Query(Filter{TargetID: "10001", Limit: 1})
+	if len(byQuery) != 1 || byQuery[0].StopReason != "completed" || byQuery[0].TaskID != "t-abc123" {
+		t.Fatalf("Query 未读回 stop_reason/task_id: %+v", byQuery)
+	}
+	// 冗余列确实写入（INSERT 语句包含这两列）
+	seq, err := strconv.ParseUint(rec.ID, 36, 64)
+	if err != nil {
+		t.Fatalf("日志 ID 解析失败: %v", err)
+	}
+	var stopReason, taskID string
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT stop_reason, task_id FROM ania_query_log WHERE seq = ?`, seq).Scan(&stopReason, &taskID); err != nil {
+		t.Fatalf("读取冗余列失败: %v", err)
+	}
+	if stopReason != "completed" || taskID != "t-abc123" {
+		t.Fatalf("冗余列未写入: stop_reason=%q task_id=%q", stopReason, taskID)
+	}
+
+	// Update 路径回填（running → stopped）
+	pending := l.Record(Entry{ChatType: "friend", TargetID: "20002", Query: "在吗"})
+	l.Update(pending.ID, func(e *Entry) {
+		e.Status = StatusStopped
+		e.StopReason = "user_stop"
+		e.TaskID = "t-def456"
+	})
+	updated := l.Query(Filter{TargetID: "20002", Limit: 1})
+	if len(updated) != 1 || updated[0].StopReason != "user_stop" || updated[0].TaskID != "t-def456" {
+		t.Fatalf("Update 未回填 stop_reason/task_id: %+v", updated)
+	}
+
+	// 未设置时读回空字符串，Entry JSON 中字段仍存在（面板兼容）
+	l.Record(Entry{ChatType: "group", TargetID: "30003", Query: "空字段"})
+	empty := l.Query(Filter{TargetID: "30003", Limit: 1})
+	if len(empty) != 1 || empty[0].StopReason != "" || empty[0].TaskID != "" {
+		t.Fatalf("未设置时应读回空字符串: %+v", empty)
+	}
+	data, err := json.Marshal(empty[0])
+	if err != nil {
+		t.Fatalf("Entry 序列化失败: %v", err)
+	}
+	if s := string(data); !strings.Contains(s, `"stop_reason":""`) || !strings.Contains(s, `"task_id":""`) {
+		t.Fatalf("空值也应以空字符串出现在 Entry JSON 中: %s", s)
+	}
+}
+
+// TestStopReasonTaskIDLegacyTableMigration 旧表（没有 stop_reason / task_id 列）
+// 启动时幂等补列：历史记录读回空字符串，新记录两列正常往返；再次启动不重复
+// 加列，补列后的冗余列仍可用。
+func TestStopReasonTaskIDLegacyTableMigration(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { db.Close() })
+
+	// 升级前的表结构（含 kind 与统计列，但没有 stop_reason / task_id）
+	if _, err := db.Exec(`CREATE TABLE ania_query_log (seq INTEGER NOT NULL PRIMARY KEY, kind TEXT NOT NULL DEFAULT '', chat_type TEXT NOT NULL, target_id TEXT NOT NULL, senders TEXT NOT NULL, status TEXT NOT NULL, query_text TEXT NOT NULL, created_at INTEGER NOT NULL, iterations INTEGER NOT NULL DEFAULT 0, prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0, total_tokens INTEGER NOT NULL DEFAULT 0, cached_tokens INTEGER NOT NULL DEFAULT 0, payload TEXT NOT NULL)`); err != nil {
+		t.Fatalf("建旧表失败: %v", err)
+	}
+	// 旧记录 payload 里没有新字段
+	old := Entry{ID: "1", Time: time.Now(), ChatType: "group", TargetID: "1", Query: "旧记录", Status: StatusSuccess}
+	payload, _ := json.Marshal(old)
+	if _, err := db.Exec(`INSERT INTO ania_query_log (seq, kind, chat_type, target_id, senders, status, query_text, created_at, iterations, prompt_tokens, completion_tokens, total_tokens, cached_tokens, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		1, old.Kind, old.ChatType, old.TargetID, ",", string(old.Status), old.Query, old.Time.Unix(), 0, 0, 0, 0, 0, string(payload)); err != nil {
+		t.Fatalf("写入旧记录失败: %v", err)
+	}
+
+	// 触发建表 / 迁移：旧库自动补齐两列
+	l := New(&sqlFakeStore{fakeStore: newFakeStore(), db: db}, nil)
+	cols, err := tableColumns(context.Background(), db, storage.SQLDialectSQLite)
+	if err != nil || !cols["stop_reason"] || !cols["task_id"] {
+		t.Fatalf("旧表未补齐 stop_reason/task_id 列: cols=%v err=%v", cols, err)
+	}
+
+	// 历史记录读回空字符串（旧 payload 缺字段）
+	got := l.Query(Filter{Limit: 10})
+	if len(got) != 1 || got[0].Query != "旧记录" || got[0].StopReason != "" || got[0].TaskID != "" {
+		t.Fatalf("旧记录应读回空 stop_reason/task_id: %+v", got)
+	}
+
+	// 补列后新记录正常写入与读取
+	rec := l.Record(Entry{ChatType: "friend", TargetID: "2", Query: "新记录",
+		Status: StatusTimeout, StopReason: "timeout", TaskID: "t-legacy"})
+	recent := l.Recent(1)
+	if len(recent) != 1 || recent[0].ID != rec.ID ||
+		recent[0].StopReason != "timeout" || recent[0].TaskID != "t-legacy" {
+		t.Fatalf("补列后新记录读回异常: %+v", recent)
+	}
+	var stopReason, taskID string
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT stop_reason, task_id FROM ania_query_log WHERE seq = 2`).Scan(&stopReason, &taskID); err != nil {
+		t.Fatalf("补列后读取冗余列失败: %v", err)
+	}
+	if stopReason != "timeout" || taskID != "t-legacy" {
+		t.Fatalf("补列后冗余列未写入: stop_reason=%q task_id=%q", stopReason, taskID)
+	}
+
+	// 再次启动：迁移幂等（不重复加列），列仍可用、序号继续递增
+	l2 := New(&sqlFakeStore{fakeStore: newFakeStore(), db: db}, nil)
+	rec2 := l2.Record(Entry{ChatType: "group", TargetID: "3", Query: "重启后",
+		StopReason: "watchdog", TaskID: "t-after-restart"})
+	if rec2.ID == rec.ID {
+		t.Fatalf("重启后 ID 冲突: %q", rec2.ID)
+	}
+	got2 := l2.Query(Filter{TargetID: "3", Limit: 1})
+	if len(got2) != 1 || got2[0].StopReason != "watchdog" || got2[0].TaskID != "t-after-restart" {
+		t.Fatalf("重启后新记录读回异常: %+v", got2)
+	}
+}
+
+// TestQueryLogDDLIncludesStopReasonTaskID 两种方言的建表语句都必须包含新列
+// （MySQL 无本地测试环境，用静态断言守住方言 DDL 不遗漏）。
+func TestQueryLogDDLIncludesStopReasonTaskID(t *testing.T) {
+	cases := []struct {
+		dialect string
+		stmts   []string
+		want    []string
+	}{
+		{
+			dialect: "sqlite",
+			stmts:   queryLogTables[0].SQLite,
+			want: []string{
+				`stop_reason TEXT NOT NULL DEFAULT ''`,
+				`task_id TEXT NOT NULL DEFAULT ''`,
+			},
+		},
+		{
+			dialect: "mysql",
+			stmts:   queryLogTables[0].MySQL,
+			want: []string{
+				`stop_reason VARCHAR(64) COLLATE utf8mb4_bin NOT NULL DEFAULT ''`,
+				`task_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL DEFAULT ''`,
+			},
+		},
+	}
+	for _, c := range cases {
+		ddl := strings.Join(c.stmts, "\n")
+		for _, want := range c.want {
+			if !strings.Contains(ddl, want) {
+				t.Errorf("%s 建表语句缺少 %q", c.dialect, want)
+			}
+		}
 	}
 }

@@ -18,26 +18,19 @@ import (
 )
 
 const (
-	// subagentMaxTimeoutSec 子代理单次执行的超时上限（秒），防止 AI 传入离谱的 timeout_sec
-	subagentMaxTimeoutSec = 1800
-	// subagentParentReserve 为主请求预留的收尾时间。框架对单次消息处理有总预算
-	// （bot.msg_event_timeout_sec，默认 5min，见 core.MsgEventTimeout），子代理超时
-	// 必须早于该预算触发，超时才能作为
-	// 工具结果优雅返回、让主 AI 用剩余时间完成最终回复；否则父 deadline 先触发，
-	// 整个主请求会以「请求超时」中止
+	// subagentMaxTimeoutSec 单次 timeout_sec 的绝对上限（秒）：防 int→time.Duration
+	// 溢出；业务上限由 subagent.max_timeout_sec 配置在调用处限幅（0=不限制）。
+	subagentMaxTimeoutSec = 30 * 24 * 3600
+	// subagentParentReserve 父请求仍有 deadline 时为父请求预留的收尾时间
+	// （同步子代理作为工具调用返回后，主 AI 还需要一轮时间整理最终回复）。
 	subagentParentReserve = 30 * time.Second
 )
 
-// subagentTimeout 子代理/团队成员/定时任务的默认执行超时：跟随主请求预算——
-// 框架级消息处理超时（bot.msg_event_timeout_sec，Start 时读入 p.msgEventTimeout）。
-// 单次调用可用 timeout_sec 覆盖；实际执行还会按父请求剩余预算压缩
-// （见 resolveSubagentTimeout）。
+// subagentTimeout 子代理默认执行超时：独立配置 subagent.default_timeout_sec
+// （默认 1800 秒 = 30 分钟），0 表示不限制。不再从框架消息事件超时派生——
+// 后台任务生命周期与对话回合预算是两件不同的事。
 func (p *AIChatPlugin) subagentTimeout() time.Duration {
-	if p.msgEventTimeout > 0 {
-		return p.msgEventTimeout
-	}
-	// Start 未执行（如测试）时的兜底，与 core.MsgEventTimeout 的默认值一致
-	return 5 * time.Minute
+	return secondsDuration(p.cfg.Subagent.DefaultTimeoutSec)
 }
 
 // defaultSubagentPrompt 子代理的系统提示词：子代理是主 AI 委派任务的一次性工作者，
@@ -55,10 +48,13 @@ const defaultSubagentPrompt = `你是一个子代理，由主 AI 委派执行一
 - 你执行过程中的中间消息不会发送给任何人`
 
 // resolveSubagentTimeout 计算子代理单次执行的实际超时：
-//  1. timeoutSec>0 时覆盖默认值（先限幅 int 再乘 time.Second，防溢出绕过上限）；
-//  2. 父上下文带 deadline 时（框架消息处理总预算），再为主请求预留
-//     subagentParentReserve 收尾时间压缩超时——保证子代理超时先触发，以工具结果
-//     优雅返回；剩余预算不足时直接报错，不启动子代理。
+//  1. defaultTimeout 由 subagent.default_timeout_sec 配置（0=不限制）；
+//  2. timeoutSec>0 时覆盖默认值（先限幅 int 再乘 time.Second，防溢出绕过上限）；
+//  3. 父上下文仍带 deadline 时（同步子代理嵌在带硬截止的回合里），为主请求预留
+//     收尾时间并压缩超时——保证子代理超时先触发、以工具结果优雅返回；剩余
+//     预算不足时缩短到剩余量（保底 10 秒），不再直接拒绝启动。
+//
+// 返回 0 表示不限制（调用方据此不派生带 deadline 的 context）。
 func resolveSubagentTimeout(defaultTimeout time.Duration, timeoutSec int, parentCtx context.Context) (time.Duration, error) {
 	timeout := defaultTimeout
 	if timeoutSec > 0 {
@@ -68,11 +64,20 @@ func resolveSubagentTimeout(defaultTimeout time.Duration, timeoutSec int, parent
 		timeout = time.Duration(timeoutSec) * time.Second
 	}
 	if deadline, ok := parentCtx.Deadline(); ok {
-		budget := time.Until(deadline) - subagentParentReserve
-		if budget <= 0 {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
 			return 0, fmt.Errorf("当前请求剩余时间不足，无法启动子代理")
 		}
-		if timeout > budget {
+		budget := remaining - subagentParentReserve
+		if budget <= 0 {
+			// 不足一轮收尾预留：缩短到剩余量的一半（至少 10 秒），仍允许子代理
+			// 在父请求结束前拿到部分结果
+			budget = remaining / 2
+			if budget < 10*time.Second {
+				budget = min(remaining, 10*time.Second)
+			}
+		}
+		if timeout <= 0 || timeout > budget {
 			timeout = budget
 		}
 	}
@@ -97,21 +102,57 @@ func (p *AIChatPlugin) runSubagent(ctx context.Context, b bot.Bot, id message.QI
 // subagentRunOptions 子代理（含团队成员）单次执行的定制项：除提示词与单次
 // 超时覆盖外，其余执行参数（模型、生成参数、轮数）一律跟随主模型。
 type subagentRunOptions struct {
-	prompt     string // 系统提示词，空用 defaultSubagentPrompt（团队成员传角色提示词）
-	timeoutSec int    // 本次调用覆盖的秒数（先限幅再乘 time.Second），<=0 用默认超时
+	prompt     string         // 系统提示词，空用 defaultSubagentPrompt（团队成员传角色提示词）
+	timeoutSec int            // 本次调用覆盖的秒数（先限幅再乘 time.Second），<=0 用默认超时
+	steer      <-chan string  // 运行中追加指令（异步子代理专用；nil 表示不支持 steering）
+	trace      *subagentTrace // 可选：收集本次执行的工具调用步骤（团队/异步子代理运行记录用）
+}
+
+// steerDrain 返回 ChatOptions.Steer 回调：非阻塞排空追加指令通道。
+// 通道关闭或空时返回 nil；每条指令由编排层以 [追加指令] 用户消息注入。
+func steerDrain(ch <-chan string) func() []string {
+	if ch == nil {
+		return nil
+	}
+	return func() []string {
+		var out []string
+		for {
+			select {
+			case msg, ok := <-ch:
+				if !ok {
+					return out
+				}
+				out = append(out, msg)
+			default:
+				return out
+			}
+		}
+	}
 }
 
 // runSubagentWithOptions 泛化的子代理执行：主体即原 runSubagent，差异仅在于
 // 提示词（Agent 团队成员的并行执行复用它，传入角色提示词）。执行参数跟随主模型：
-// 模型与生成参数、工具轮数取主模型配置，超时取框架消息处理预算（见
-// subagentTimeout / resolveSubagentTimeout）。调用方不应预建带超时的 context，
+// 模型与生成参数、工具轮数取主模型配置；超时取独立配置 subagent.default_timeout_sec
+// （0=不限制），单次 timeout_sec 可覆盖、subagent.max_timeout_sec 可再限幅
+// （见 subagentTimeout / resolveSubagentTimeout）。调用方不应预建带超时的 context，
 // 否则会被二次压缩损失预算。
 func (p *AIChatPlugin) runSubagentWithOptions(ctx context.Context, b bot.Bot, id message.QID, isGroup bool, task string, o subagentRunOptions, parentCbs llmtool.CallBackFuncs) (string, aichat.TokenUsage, error) {
 	timeout, err := resolveSubagentTimeout(p.subagentTimeout(), o.timeoutSec, ctx)
 	if err != nil {
 		return "", aichat.TokenUsage{}, err
 	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	// 业务上限（subagent.max_timeout_sec，0=不限制）：在默认/单次值之外再限幅
+	if maxTimeout := secondsDuration(p.cfg.Subagent.MaxTimeoutSec); maxTimeout > 0 && (timeout <= 0 || timeout > maxTimeout) {
+		timeout = maxTimeout
+	}
+	// timeout=0 表示不限制：只派生可取消的 context，不叠加 deadline
+	var runCtx context.Context
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, timeout)
+	} else {
+		runCtx, cancel = context.WithCancel(ctx)
+	}
 	defer cancel()
 
 	// 一次性会话：注册与主会话一致的会话级工具（clock/memory），但不注册 subagent 自身
@@ -143,6 +184,11 @@ func (p *AIChatPlugin) runSubagentWithOptions(ctx context.Context, b bot.Bot, id
 		chat.SetSkillManager(p.skillManager)
 	}
 	chat.SetMaxIterations(p.mainMaxIterations())
+	// 执行步骤观测：团队成员与异步子代理的运行记录用；
+	// 主对话的 Query 日志观察者挂在各自 ChatBot 上，二者互不影响。
+	if o.trace != nil {
+		chat.SetToolObserver(o.trace.observe)
+	}
 
 	// 钩子与工具门禁：子代理同样走 PreToolUse/PostToolUse 等钩子与计划模式/审批门禁
 	// （AgentKind=subagent 供钩子配置区分）；门禁审批路径仅管理员可批（requester=0），
@@ -167,7 +213,8 @@ func (p *AIChatPlugin) runSubagentWithOptions(ctx context.Context, b bot.Bot, id
 
 	logger.Info("子代理开始执行", "id", id, "is_group", isGroup, "timeout", timeout, "task", task)
 	start := time.Now()
-	chatOpts := p.buildChatOptions()
+	chatOpts := p.buildSubagentChatOptions()
+	chatOpts.Steer = steerDrain(o.steer)
 	chatOpts.PreToolGate = p.buildPreToolGate(sKey, agenthook.AgentKindSubagent, message.FromUint64(0),
 		func(text string) { p.sendPlainText(b, id, isGroup, text) },
 		p.buildAdminPromptSender(b))

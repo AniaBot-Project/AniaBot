@@ -67,6 +67,9 @@ func NewChatBot(baseURL, apiKey, model, prompt string, maxContextTokens int, too
 	msgBuilder := NewMessageBuilder(prompt)
 	msgBuilder.SetScene(cfg.scene)
 	toolOrchestrator := NewToolOrchestrator(toolExecutor, msgBuilder)
+	// 单请求内上下文保护：长工具循环内 prompt 逼近窗口时裁剪较旧的大工具结果，
+	// 与窗口级压缩（回合开始前）形成两层保护
+	toolOrchestrator.SetMaxContextTokens(maxContextTokens)
 
 	compressor := NewContextCompressor(prompt)
 	window := newMessageWindow(maxContextTokens, llmClient, compressor, historyStore, cfg.compressorClient)
@@ -233,6 +236,7 @@ func (b *ChatBot) SetSkillManager(manager *llmtool.SkillManager) {
 }
 
 // SetMaxIterations 设置工具调用循环的最大轮数（子代理等场景使用比主对话更小的上限）。
+// max<=0 表示不设上限，此时循环由无进展看门狗、模型自行收尾或上层取消结束。
 func (b *ChatBot) SetMaxIterations(max int) {
 	b.toolOrchestrator.SetMaxIterations(max)
 }

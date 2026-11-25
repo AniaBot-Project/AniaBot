@@ -7,7 +7,8 @@
 | 位置 | 面板路径 | 内容 | 保留 |
 | --- | --- | --- | --- |
 | 控制台日志 | 控制台日志 `/#/console` | 进程日志（slog + 标准 log）：启动流程、适配器连接、配置加载、插件加载、报错栈 | 约 2000 条，**纯内存，重启即清空** |
-| Query 日志 | Query 日志 `/#/querylogs` | 每次 AI 请求的触发、工具调用、token 消耗、最终输出；含定时任务与主动互动（失败/跳过也有记录） | SQL 持久化 |
+| Query 日志 | Query 日志 `/#/querylogs` | 每次 AI 请求的触发、工具调用、token 消耗、最终输出；含定时任务与主动互动（失败/跳过也有记录）；普通对话带停止原因与关联任务 ID（API/导出可见） | SQL 持久化 |
+| 后台任务 | 后台任务 `/#/agent-tasks` | AI 后台任务注册表（回合/子代理/交接/工作流/团队任务/目标轮次/团队运行/团队成员）与进行中的长任务目标；只读，可按状态/类型/关键词筛选；展开可看任务指令、成员产出与工具调用步骤 | SQL 持久化 |
 | 操作日志 | 操作日志 `/#/oplogs` | 人/AI 的操作审计：改配置、重启、装插件、审批 | SQL 持久化 |
 | 任务日志 | 定时任务 `/#/tasklogs` | 定时任务的每次执行结果与推送状态 | SQL 持久化 |
 | 消息日志 | 消息日志 `/#/msglogs` | 全部进出消息（含 Bot 自己发的），按会话分组 | 约 5000 条，存在缓存存储（`memory` 驱动重启清空，`redis` 驱动保留） |
@@ -38,11 +39,15 @@
 
 1. **配置缺失**：控制台日志里搜 `AI 对话未配置`。缺少 `plugin.ai_chat_bot.base_url` / `model` / `api_key` 任一项时 AI 插件会降载（消息直接跳过，不报错刷屏）。补齐后重启。
 2. **没触发**：群聊必须 **@机器人**；私聊直接说即可。还可能被请求拦截插件挡住：`plugin.interceptor.enable` / `mode` / `groups` / `friends` / `group_users` / `platforms`（未勾选的平台直接拦截）。
-3. **在忙或排队**：提示「当前请求太多啦，请稍后再试~」是 `rate_limit` 并发上限（默认 2）；「排队消息太多啦」是排队队列满。等前一条结束或调大 `rate_limit`。
-4. **超时被打断**：提示「本次处理已达时间上限，请重新发送消息」→ 调 `bot.msg_event_timeout_sec`（默认 300 秒），或减少 `max_iterations`、别让一次任务做太多事。
-5. **停在审批**：AI 调用了需审批的工具（`approval.tools` 里的工具、或 `config_set` / `config_file_set` 恒需管理员审批），会私聊通知管理员回「允许」/「拒绝」，超时（默认 120 秒，`approval.timeout_sec`）自动拒绝。管理员没收到 → 检查 `bot.admin_ids` 是否配了、ID 是否带正确平台前缀。
-6. **配额用尽**：开了 `quota.enable` 且当日超标时请求被拒，面板「配额管理」可看/重置。
-7. **上游报错**：Query 日志会有错误原文。401 = Key 失效，402/余额不足 = 充值，429 = 限流（可调 `retry.*`、配 `fallback.model` 备用模型），400 多半是 `api_format` 与 `base_url` 不匹配（如拿 Anthropic 地址配成 `chat_completions`）。
+3. **在忙或排队**：提示「当前请求太多啦，请稍后再试~」是 `rate_limit` 并发上限（默认 4）且该会话排队消息被清空；「排队消息太多啦」是排队队列满。等前一条结束或调大 `rate_limit`（后台子代理有独立并发池，不占这个名额）。
+4. **运行很久 / 被停止**：AI 回合不再受 `bot.msg_event_timeout_sec` 限制。软截止（`turn.soft_timeout_sec`，默认 600 秒）只会提醒模型收尾/转后台，不会中断；硬截止（`turn.hard_timeout_sec`，默认 4 小时）才会取消并提示「已超过最长运行时间」；「任务因重复执行相同工具调用被终止」是看门狗（`turn.repeat_tool_warn` / `turn.no_progress_limit`）。单次请求挂起看 `llm.request_timeout_sec` / `llm.stream_idle_timeout_sec`（超时按可重试错误处理，会重试/切备用模型）。
+5. **任务想继续 / 想停后台任务**：`/tasks` 看本会话运行中与最近任务；`/resume <任务ID>` 恢复进程重启前被中断（interrupted）的子代理/交接任务（仅本会话）；`/stop` 取消当前回合并清空排队（同时暂停自动续跑目标），`/stop <任务ID 或名字>` 只取消指定后台子代理。
+6. **长任务目标不自动续跑**：先 `/goal` 看状态与「已续跑 N/M 轮」。常见原因——① 进程重启过：续跑武装状态不落库，目标仍是 active 但不会自动继续，用户在当前会话发 `/goal resume` 即可；② 用户之前 `/stop` 过：目标被暂停，`/goal resume` 恢复；③ 达到 `plugin.ai_chat_bot.goal.max_rounds`（默认 64）：状态变 `blocked`、原因 `round-limit`，可 `/goal clear` 后让 AI 重新建目标（或建目标时给更大 `max_rounds`，硬上限 500）；④ 会话一直有排队消息或运行中的子代理：等它们收敛后才会续跑；⑤ `goal.enable=false` 或 SQL 存储不可用（目标工具根本没注册）。
+7. **工作流 / 团队任务板失败**：`workflow_run` 在启动前就会校验 DAG（步骤 1~8、ID 唯一、依赖存在且无环），参数错误会直接返回原因；执行中单步失败时依赖它的步骤标记 `skipped`，其余分支继续，最后回灌汇总。`workflow_run` 需要 `subagent.enable=true`，`team_task_*` 需要 SQL 持久化（任务表建不起来时返回「任务板未启用」）；团队任务在 `blocked_by` 依赖未完成时不能认领，先 `team_task_list` 看依赖状态。
+8. **停止原因怎么读**：面板「后台任务」页与 Query 日志（API/导出）里的 `stop_reason`——`completed` 正常完成、`aborted` 中止、`max_tokens` 达到输出上限、`error` 出错、`watchdog` 循环保护终止、`timeout` 超时、`user_stop` 用户 `/stop`；任务表的状态另有 `cancelled`（取消）/`interrupted`（进程重启中断，可 `/resume`）。
+9. **停在审批**：AI 调用了需审批的工具（`approval.tools` 里的工具、或 `config_set` / `config_file_set` 恒需管理员审批），会私聊通知管理员回「允许」/「拒绝」，超时（默认 120 秒，`approval.timeout_sec`）自动拒绝。管理员没收到 → 检查 `bot.admin_ids` 是否配了、ID 是否带正确平台前缀。
+10. **配额用尽**：开了 `quota.enable` 且当日超标时请求被拒，面板「配额管理」可看/重置。
+11. **上游报错**：Query 日志会有错误原文。401 = Key 失效，402/余额不足 = 充值，429 = 限流（可调 `retry.*`、配 `fallback.model` 备用模型），400 多半是 `api_format` 与 `base_url` 不匹配（如拿 Anthropic 地址配成 `chat_completions`）。
 
 ## 四、回复质量与上下文
 
@@ -64,6 +69,10 @@
 | MCP 工具调不出来 | `files.mcp_json` 格式错（保存时只校验 JSON 语法，语义错要重启看日志）；`mcp.lazy_load=true` 时先 `mcp_discover_<服务器>` 再 `mcp_load_<服务器>`；服务器命令本身要能在宿主机跑通 |
 | 技能不生效 | 白名单 `plugin.ai_chat_bot.skills` 漏了它 / 被禁用（`skills_disabled`）/ 外置技能改文件后没 `skill_reload` |
 | AI 想改配置但被拒 | `config_tool.enable` 没开，或管理员审批超时/拒绝 |
+| 后台任务 / 子代理相关的任务查不到 | 任务记录需要 SQL 持久化：确认存储后端为 sqlite/mysql 且启动日志没有「创建后台任务表失败」；`/tasks` 仍可看到内存中运行中的子代理，面板「后台任务」页只读展示最近 100 条 |
+| 工作流 / 任务板用不了 | `workflow_run` 需要 `subagent.enable=true`；团队任务板需要 SQL 持久化（建表失败会提示「任务板未启用」）；工作流参数不合法（步骤数、ID 重复、依赖缺失/成环）会在启动前直接报错 |
+| 长任务目标不续跑 | 进程重启后需 `/goal resume`；`/stop` 会暂停目标；轮数用尽会 `blocked(round-limit)`；`goal.enable=false` 或 SQL 不可用时目标工具不注册 |
+| 进程重启后长任务没了 | 启动时遗留任务会被标记 `interrupted`（不自动续跑）；用户在该会话发 `/resume <任务ID>` 让主 AI 带历史继续（仅子代理/交接任务）；长任务目标发 `/goal resume` 重新武装 |
 
 ## 六、配置改了没反应
 
