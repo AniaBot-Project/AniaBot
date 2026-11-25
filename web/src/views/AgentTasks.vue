@@ -88,7 +88,10 @@
             <Tag variant="solid" size="small" :color="statusColor(record.status)">{{ statusText(record.status) }}</Tag>
           </template>
           <template #cell-title="{ record }">
-            <span class="truncate font-medium" :title="record.title">{{ record.title || '(无标题)' }}</span>
+            <!-- 标题最多两行（超出省略），悬停看全文；点击行可在下方展开完整详情 -->
+            <div class="min-w-0">
+              <p class="task-title font-medium" :title="record.title || ''">{{ record.title || '(无标题)' }}</p>
+            </div>
           </template>
           <template #cell-session_key="{ record }">
             <span class="font-mono text-[11px] text-zinc-600 whitespace-nowrap">{{ record.session_key || '—' }}</span>
@@ -119,6 +122,8 @@
             <dl class="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-xs">
               <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">任务 ID</dt>
               <dd class="font-mono text-zinc-700 break-all">{{ t.id }}</dd>
+              <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">标题</dt>
+              <dd class="text-zinc-700 whitespace-pre-wrap break-all">{{ t.title || '—' }}</dd>
               <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">会话</dt>
               <dd class="font-mono text-zinc-700">{{ t.session_key || '—' }}</dd>
               <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">创建 / 开始 / 结束</dt>
@@ -417,6 +422,17 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 标题列：限制两行、超出省略；完整标题在悬停提示与展开详情中查看 */
+.task-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
 .task-pre {
   margin: 0;
   max-height: 9rem;
