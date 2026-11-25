@@ -63,102 +63,95 @@
         {{ tasks.length ? '没有符合筛选条件的任务' : '暂无后台任务（AI 处理中 / 子代理 / 定时触发等工作会登记在这里）' }}
       </p>
       <template v-else>
-        <Table
-          :columns="columns"
-          :data-source="filtered"
-          row-key="id"
-          :pagination="false"
-          :striped="false"
-          :on-row="rowAttrs"
-        >
-          <template #cell-id="{ record }">
-            <span class="flex items-center gap-1.5 min-w-0">
-              <span
-                class="[&>svg]:w-3 [&>svg]:h-3 text-zinc-400 transition-transform shrink-0"
-                :class="{ 'rotate-90': expanded.has(record.id) }"
-                v-html="icons.chevron"
-              />
-              <span class="font-mono text-[11px] truncate" :title="record.id">{{ record.id }}</span>
-            </span>
-          </template>
-          <template #cell-kind="{ record }">
-            <Tag variant="outlined" size="small">{{ kindText(record.kind) }}</Tag>
-          </template>
-          <template #cell-status="{ record }">
-            <Tag variant="solid" size="small" :color="statusColor(record.status)">{{ statusText(record.status) }}</Tag>
-          </template>
-          <template #cell-title="{ record }">
-            <!-- 标题最多两行（超出省略），悬停看全文；点击行可在下方展开完整详情 -->
-            <div class="min-w-0">
-              <p class="task-title font-medium" :title="record.title || ''">{{ record.title || '(无标题)' }}</p>
-            </div>
-          </template>
-          <template #cell-session_key="{ record }">
-            <span class="font-mono text-[11px] text-zinc-600 whitespace-nowrap">{{ record.session_key || '—' }}</span>
-          </template>
-          <template #cell-tokens="{ record }">
-            <span class="font-mono text-[11px] whitespace-nowrap">{{ record.tokens ? fmtInt(record.tokens) : '—' }}</span>
-          </template>
-          <template #cell-duration="{ record }">
-            <span class="text-zinc-500 whitespace-nowrap">{{ fmtDuration(record) }}</span>
-          </template>
-          <template #cell-updated_at="{ record }">
-            <span class="text-zinc-600 whitespace-nowrap" :title="fmtTimeFull(record.updated_at)">{{ fmtTime(record.updated_at) }}</span>
-          </template>
-          <template #cell-note="{ record }">
-            <span
-              class="text-[11px] whitespace-nowrap"
-              :class="record.error ? 'text-[#ff3b30]' : 'text-zinc-400'"
-              :title="record.error || record.stop_reason || ''"
-            >
-              {{ record.error ? '错误' : stopText(record.stop_reason) }}
-            </span>
-          </template>
-        </Table>
-
-        <!-- 行展开详情：完整结果 / 错误 / Meta（长文本折叠，可展开全部） -->
-        <template v-for="t in filtered" :key="'detail-' + t.id">
-          <div v-if="expanded.has(t.id)" class="border-b border-dashed border-zinc-100 last:border-0 bg-zinc-50/40 px-6 py-4">
-            <dl class="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-xs">
-              <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">任务 ID</dt>
-              <dd class="font-mono text-zinc-700 break-all">{{ t.id }}</dd>
-              <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">标题</dt>
-              <dd class="text-zinc-700 whitespace-pre-wrap break-all">{{ t.title || '—' }}</dd>
-              <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">会话</dt>
-              <dd class="font-mono text-zinc-700">{{ t.session_key || '—' }}</dd>
-              <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">创建 / 开始 / 结束</dt>
-              <dd class="text-zinc-700">{{ fmtTimeFull(t.created_at) }} → {{ fmtTimeFull(t.started_at) }} → {{ fmtTimeFull(t.finished_at) }}</dd>
-              <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">状态 / 停止原因</dt>
-              <dd class="text-zinc-700">{{ statusText(t.status) }} / {{ stopText(t.stop_reason) }}</dd>
-              <template v-if="t.error">
-                <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">错误</dt>
-                <dd>
-                  <pre class="task-pre" :class="{ 'task-pre-open': isFieldOpen(t, 'error') }">{{ t.error }}</pre>
-                  <Button v-if="t.error.length > 200" type="text" size="small" @click.stop="toggleField(t, 'error')">
-                    {{ isFieldOpen(t, 'error') ? '收起' : '展开全部' }}
-                  </Button>
-                </dd>
+        <div class="task-table-wrap">
+          <table class="task-table">
+            <thead>
+              <tr>
+                <th v-for="col in columns" :key="col.key" :style="col.width ? { width: col.width } : undefined">{{ col.title }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="record in filtered" :key="record.id">
+                <tr class="task-table-row" :class="{ 'is-expanded': expanded.has(record.id) }" @click="toggleExpand(record.id)">
+                  <td>
+                    <span class="flex items-center gap-1.5 min-w-0">
+                      <span
+                        class="[&>svg]:w-3 [&>svg]:h-3 text-zinc-400 transition-transform shrink-0"
+                        :class="{ 'rotate-90': expanded.has(record.id) }"
+                        v-html="icons.chevron"
+                      />
+                      <span class="font-mono text-[11px] truncate" :title="record.id">{{ record.id }}</span>
+                    </span>
+                  </td>
+                  <td><Tag variant="outlined" size="small">{{ kindText(record.kind) }}</Tag></td>
+                  <td><Tag variant="solid" size="small" :color="statusColor(record.status)">{{ statusText(record.status) }}</Tag></td>
+                  <td class="task-title-cell">
+                    <!-- 标题最多两行（超出省略），悬停看全文；点击行在下方就地展开完整详情 -->
+                    <p class="task-title font-medium" :title="record.title || ''">{{ record.title || '(无标题)' }}</p>
+                  </td>
+                  <td><span class="block truncate font-mono text-[11px] text-zinc-600" :title="record.session_key || ''">{{ record.session_key || '—' }}</span></td>
+                  <td><span class="font-mono text-[11px] whitespace-nowrap">{{ record.tokens ? fmtInt(record.tokens) : '—' }}</span></td>
+                  <td><span class="text-zinc-500 whitespace-nowrap">{{ fmtDuration(record) }}</span></td>
+                  <td><span class="text-zinc-600 whitespace-nowrap" :title="fmtTimeFull(record.updated_at)">{{ fmtTime(record.updated_at) }}</span></td>
+                  <td>
+                    <span
+                      class="text-[11px] whitespace-nowrap"
+                      :class="record.error ? 'text-[#ff3b30]' : 'text-zinc-400'"
+                      :title="record.error || record.stop_reason || ''"
+                    >
+                      {{ record.error ? '错误' : stopText(record.stop_reason) }}
+                    </span>
+                  </td>
+                </tr>
+                <!-- 展开详情：就地渲染在对应任务行下方（完整标题 / 结果 / 错误 / Meta） -->
+                <tr v-if="expanded.has(record.id)" class="task-table-detail-row">
+                  <td :colspan="columns.length">
+                    <div class="px-6 py-4">
+                      <dl class="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-xs">
+                        <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">任务 ID</dt>
+                        <dd class="font-mono text-zinc-700 break-all">{{ record.id }}</dd>
+                        <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">标题</dt>
+                        <dd class="text-zinc-700 whitespace-pre-wrap break-all">{{ record.title || '—' }}</dd>
+                        <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">会话</dt>
+                        <dd class="font-mono text-zinc-700">{{ record.session_key || '—' }}</dd>
+                        <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">创建 / 开始 / 结束</dt>
+                        <dd class="text-zinc-700">{{ fmtTimeFull(record.created_at) }} → {{ fmtTimeFull(record.started_at) }} → {{ fmtTimeFull(record.finished_at) }}</dd>
+                        <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">状态 / 停止原因</dt>
+                        <dd class="text-zinc-700">{{ statusText(record.status) }} / {{ stopText(record.stop_reason) }}</dd>
+                        <template v-if="record.error">
+                          <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">错误</dt>
+                          <dd>
+                            <pre class="task-pre" :class="{ 'task-pre-open': isFieldOpen(record, 'error') }">{{ record.error }}</pre>
+                            <Button v-if="record.error.length > 200" type="text" size="small" @click.stop="toggleField(record, 'error')">
+                              {{ isFieldOpen(record, 'error') ? '收起' : '展开全部' }}
+                            </Button>
+                          </dd>
+                        </template>
+                        <template v-if="record.result">
+                          <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">结果</dt>
+                          <dd>
+                            <pre class="task-pre" :class="{ 'task-pre-open': isFieldOpen(record, 'result') }">{{ record.result }}</pre>
+                            <Button v-if="record.result.length > 200" type="text" size="small" @click.stop="toggleField(record, 'result')">
+                              {{ isFieldOpen(record, 'result') ? '收起' : '展开全部' }}
+                            </Button>
+                          </dd>
+                        </template>
+                        <template v-if="record.meta">
+                          <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">Meta</dt>
+                          <dd><pre class="task-pre task-pre-open">{{ prettyMeta(record.meta) }}</pre></dd>
+                        </template>
+                        <template v-if="!record.error && !record.result && !record.meta">
+                          <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">详情</dt>
+                          <dd class="text-zinc-400">该任务尚无结果 / 错误 / Meta 记录（可能仍在执行中）</dd>
+                        </template>
+                      </dl>
+                    </div>
+                  </td>
+                </tr>
               </template>
-              <template v-if="t.result">
-                <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">结果</dt>
-                <dd>
-                  <pre class="task-pre" :class="{ 'task-pre-open': isFieldOpen(t, 'result') }">{{ t.result }}</pre>
-                  <Button v-if="t.result.length > 200" type="text" size="small" @click.stop="toggleField(t, 'result')">
-                    {{ isFieldOpen(t, 'result') ? '收起' : '展开全部' }}
-                  </Button>
-                </dd>
-              </template>
-              <template v-if="t.meta">
-                <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">Meta</dt>
-                <dd><pre class="task-pre task-pre-open">{{ prettyMeta(t.meta) }}</pre></dd>
-              </template>
-              <template v-if="!t.error && !t.result && !t.meta">
-                <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">详情</dt>
-                <dd class="text-zinc-400">该任务尚无结果 / 错误 / Meta 记录（可能仍在执行中）</dd>
-              </template>
-            </dl>
-          </div>
-        </template>
+            </tbody>
+          </table>
+        </div>
       </template>
     </Card>
 
@@ -189,7 +182,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { Button, Card, Input, Select, Switch, Table, Tag } from 'animal-island-vue'
+import { Button, Card, Input, Select, Switch, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
 import LoadingState from '../components/LoadingState.vue'
 
@@ -243,15 +236,15 @@ const kindOptions = [
 ]
 
 const columns = [
-  { title: '任务 ID', dataIndex: 'id', width: '18%' },
-  { title: '类型', dataIndex: 'kind', width: '9%' },
-  { title: '状态', dataIndex: 'status', width: '8%' },
-  { title: '标题', dataIndex: 'title' },
-  { title: '会话', dataIndex: 'session_key', width: '13%' },
-  { title: 'Token', dataIndex: 'tokens', width: '8%' },
-  { title: '耗时', dataIndex: 'duration', width: '8%' },
-  { title: '更新时间', dataIndex: 'updated_at', width: '12%' },
-  { title: '备注', dataIndex: 'note', width: '8%' },
+  { key: 'id', title: '任务 ID', dataIndex: 'id', width: '16%' },
+  { key: 'kind', title: '类型', dataIndex: 'kind', width: '8%' },
+  { key: 'status', title: '状态', dataIndex: 'status', width: '7%' },
+  { key: 'title', title: '标题', dataIndex: 'title' },
+  { key: 'session_key', title: '会话', dataIndex: 'session_key', width: '11%' },
+  { key: 'tokens', title: 'Token', dataIndex: 'tokens', width: '7%' },
+  { key: 'duration', title: '耗时', dataIndex: 'duration', width: '7%' },
+  { key: 'updated_at', title: '更新时间', dataIndex: 'updated_at', width: '10%' },
+  { key: 'note', title: '备注', dataIndex: 'note', width: '8%' },
 ]
 
 const tasks = ref([])
@@ -422,7 +415,52 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 任务表：自定义 table 以支持"点击行在对应行下方就地展开详情"（组件库 Table 无行展开能力） */
+.task-table-wrap {
+  overflow-x: auto;
+}
+.task-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.task-table thead th {
+  padding: 0.65rem 1rem;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #a1a1aa;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line, #ece8e1);
+}
+.task-table tbody td {
+  padding: 0.7rem 1rem;
+  font-size: 12px;
+  color: var(--ink-2, #3f3a33);
+  vertical-align: middle;
+  border-bottom: 1px solid #f4f4f5;
+}
+.task-table-row {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.task-table-row:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+.task-table-row.is-expanded {
+  background: #fafafa;
+}
+.task-table-detail-row > td {
+  padding: 0;
+  background: #fafafa;
+  border-bottom: 1px dashed var(--line, #ece8e1);
+}
 /* 标题列：限制两行、超出省略；完整标题在悬停提示与展开详情中查看 */
+.task-title-cell {
+  min-width: 0;
+}
 .task-title {
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -432,6 +470,7 @@ onUnmounted(() => {
   white-space: normal;
   overflow-wrap: anywhere;
   line-height: 1.45;
+  margin: 0;
 }
 .task-pre {
   margin: 0;
