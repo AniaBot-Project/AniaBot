@@ -299,10 +299,10 @@ export function buildQueryLogs(now) {
     t += ri(4, 9) * 60 * 1000
   }
   items.reverse()
-  // 演示「历史回合 ↔ Query 日志」互跳：给一条群聊记录关联后台任务页的历史 turn
+  // 演示「Query 日志 → 后台任务」互跳：给一条群聊记录关联一个真实存在的后台任务
   const linked = items.find((x) => !x.kind && x.chat_type === 'group')
   if (linked) {
-    linked.task_id = 't-m5x1a2-3f9c'
+    linked.task_id = 't-m5x0ta-9c4b'
     linked.stop_reason = 'completed'
   }
   return items

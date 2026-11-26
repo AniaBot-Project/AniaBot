@@ -31,7 +31,7 @@ const (
 	// 任务种类：一条任务记录描述哪种后台工作。
 	//
 	// turn 是升级前遗留的类型：普通回合曾与 Query 日志一起各写一行，现已不再
-	// 写入任务表（避免重复），面板仅在读取旧记录时识别它。
+	// 写入任务表（避免重复）；面板数据源会排除它，仅 /tasks 兼容旧数据时展示。
 	taskKindTurn       = "turn"        // 历史遗留的会话回合记录
 	taskKindSubagent   = "subagent"    // 子代理
 	taskKindHandoff    = "handoff"     // 回合交接出的后台任务

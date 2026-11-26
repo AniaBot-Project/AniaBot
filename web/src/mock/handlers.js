@@ -75,11 +75,10 @@ const now0 = Date.now()
 const bootAt = now0 - (2 * 3600 + 42 * 60) * 1000 // 演示：Bot 已运行 2 小时 42 分
 
 // 后台任务注册表演示数据（时间戳为 unix 秒，与 /api/agent-tasks 返回一致）。
-// turn 为升级前的历史记录（新版本普通回合只写 Query 日志），默认被「仅后台工作」隐藏。
+// 普通回合不再写入任务表，真实接口也不会返回历史 turn 行。
 function buildAgentTasks(nowSec) {
   const t = (delta) => nowSec - delta
   return [
-    { id: 't-m5x1a2-3f9c', session_key: 'g:qq:123456', kind: 'turn', status: 'completed', title: '帮我统计本周群里的活跃用户', result: '本周活跃用户 18 人，发言最多的是…', error: '', stop_reason: 'completed', meta: '{"step":2}', tokens: 0, created_at: t(35), started_at: t(35), updated_at: t(4), finished_at: t(4) },
     { id: 't-m5x19k-8a1d', session_key: 'g:qq:123456', kind: 'subagent', status: 'running', title: '检索并整理 Vue 3 组合式 API 的迁移要点', result: '', error: '', stop_reason: '', meta: '{"tools":3}', tokens: 1820, created_at: t(120), started_at: t(118), updated_at: t(8), finished_at: 0 },
     { id: 't-m5x18c-2b7e', session_key: 'f:qq:10000', kind: 'handoff', status: 'waiting', title: '后台运行测试套件并等待结果', result: '', error: '', stop_reason: '', meta: '{"waiting":"team_member"}', tokens: 640, created_at: t(300), started_at: t(298), updated_at: t(20), finished_at: 0 },
     { id: 't-m5x0ta-9c4b', session_key: 'g:qq:123456', kind: 'subagent', status: 'completed', title: '总结群聊近 100 条消息的讨论主题', result: '近 100 条消息主要围绕：1. 周末活动安排（约 40%）；2. 新版面板的截图与主题色讨论（约 35%）；3. 代码问题排查（约 25%）。\n活动安排集中在周六下午，有 6 人报名。', error: '', stop_reason: 'completed', meta: '{"tools":4,"iterations":6}', tokens: 5321, created_at: t(900), started_at: t(898), updated_at: t(700), finished_at: t(702) },
