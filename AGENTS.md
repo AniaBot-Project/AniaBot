@@ -524,6 +524,12 @@ registry and goal continuation, and owns all session-scoped tool registration.
   (`pauseGoalOnStop`). Commands: `/goal [status|pause|resume|clear]`. `blocked` is simplified
   relative to DSH — there is no "same blocker for 3 consecutive rounds" gate; `goal_update
   action=blocked` just requires a reason. Plan mode blocks `goal_create`/`goal_update`.
+  All goal state transitions (mutating `/goal` branches, `goal_create`/`goal_update`, the
+  drive's read-modify-write, `pauseGoalOnStop`) hold `AIChatPlugin.goalMu`: they run on
+  different goroutines (framework event goroutine, turn goroutine, background drive
+  goroutine), and an unlocked interleaving lets a late drive write go through `Upsert`'s
+  INSERT fallback and revive a goal the user already cleared. Regression test:
+  `TestGoalClearSerializedWithDrive`.
 - **Workflows** (`workflow.go`): `workflow_run(goal?, steps=[{id, task, depends_on}],
   concurrency?)` validates a step DAG (1–8 steps, unique IDs ≤32 chars, existing dependencies,
   no cycles) and then runs it in the background, one subagent per step, scheduling ready steps up

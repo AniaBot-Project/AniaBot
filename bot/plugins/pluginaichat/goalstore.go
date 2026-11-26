@@ -76,6 +76,18 @@ func goalTables() []storage.TableDDL {
 	}
 }
 
+// goalStoreAPI 目标存储的最小接口：生产实现为 *goalStore；测试可注入阻塞实现，
+// 用来构造「读-改-写」与 /goal clear 交错的确定性回归用例。
+type goalStoreAPI interface {
+	EnsureTables(ctx context.Context) error
+	Get(ctx context.Context, sessionKey string) (*agentGoal, bool, error)
+	Upsert(ctx context.Context, g *agentGoal) error
+	Clear(ctx context.Context, sessionKey string) error
+	ListActive(ctx context.Context) ([]*agentGoal, error)
+}
+
+var _ goalStoreAPI = (*goalStore)(nil)
+
 // goalStore 目标表存储层。
 type goalStore struct {
 	db     *sql.DB
@@ -115,8 +127,10 @@ func (s *goalStore) Get(ctx context.Context, sessionKey string) (*agentGoal, boo
 }
 
 // Upsert 写入或更新会话目标（created_at 只在首次写入时生效）。
-// 用「先 UPDATE 再 INSERT」而不是方言专属 upsert：目标写操作只发生在会话回合
-// 串行路径上，不存在同一会话的并发写。
+// 用「先 UPDATE 再 INSERT」而不是方言专属 upsert：目标写操作由 AIChatPlugin.goalMu
+// 串行化（/goal 命令、回合内的 goal 工具与续跑驱动可能来自不同协程）。
+// 注意行缺失时补 INSERT 的兜底语义：调用方必须持有 goalMu、基于锁内读到的最新
+// 快照写入，否则会把已被 /goal clear 删除的目标重新插回去。
 func (s *goalStore) Upsert(ctx context.Context, g *agentGoal) error {
 	now := time.Now().Unix()
 	if g.CreatedAt == 0 {

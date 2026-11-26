@@ -185,10 +185,16 @@ type AIChatPlugin struct {
 	taskStore *taskStore
 
 	// goalStore 长任务目标存储（SQL 持久化）；nil 表示功能未启用或持久层不可用
-	goalStore *goalStore
+	goalStore goalStoreAPI
 	// goalArmed 进程内「目标续跑已武装」状态（key=sessionKey）；不持久化，
 	// 进程重启后清空，需用户 /goal resume 重新开启（避免升级重启后自动烧 token）
 	goalArmed sync.Map
+	// goalMu 串行化目标状态的「读-改-写」：/goal 命令在框架事件协程执行，
+	// 续跑驱动（maybeDriveGoal）在后台协程执行，回合内的 goal 工具又在回合协程
+	// 执行。三者可能同时操作同一会话的目标行，不加锁时迟到的写会把刚被清除的
+	// 目标重新插回去（见 goalstore.Upsert 的 INSERT 兜底），或覆盖 pause 状态。
+	// 目标写操作只发生在少数路径上（每回合最多几次），单锁足够，无需按会话分片。
+	goalMu sync.Mutex
 
 	// teamBoardMu 团队任务板的进程内互斥（claim/complete 的原子性；多实例部署
 	// 时以 DB 为准，本进程内串行足够避免同一任务被并发认领）

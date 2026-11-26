@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jeanhua/AniaBot/bot/component/llmtool"
 	"github.com/jeanhua/AniaBot/common/model/command"
@@ -52,6 +54,30 @@ type syncGoBot struct{ *recordBot }
 func (b syncGoBot) Go(_ string, f func()) {
 	defer func() { _ = recover() }()
 	f()
+}
+
+// noopGoBot 丢弃 b.Go 的后台执行：只关心目标状态迁移、不想真的跑回合时使用。
+type noopGoBot struct{ *recordBot }
+
+func (noopGoBot) Go(string, func()) {}
+
+// blockingGoalStore 包装真实存储，在第一次 Get 时阻塞：续跑驱动此时已进入
+// goalMu 保护的「读-改-写」段（读到目标快照之前），用它把临界区固定住。
+// 只阻塞第一次：后续 Get（例如 /goal clear 的读取）照常返回，否则会掩盖被测的
+// 串行化行为。
+type blockingGoalStore struct {
+	*goalStore
+	entered chan struct{}
+	release chan struct{}
+	first   atomic.Bool
+}
+
+func (s *blockingGoalStore) Get(ctx context.Context, sessionKey string) (*agentGoal, bool, error) {
+	if s.first.CompareAndSwap(false, true) {
+		close(s.entered)
+		<-s.release
+	}
+	return s.goalStore.Get(ctx, sessionKey)
 }
 
 // ---- 存储层 ----
@@ -292,6 +318,73 @@ func TestHandleGoalCommand(t *testing.T) {
 	}
 	if _, ok, _ := p.loadGoal(key); ok {
 		t.Fatal("clear 后目标应不存在")
+	}
+}
+
+// TestGoalClearSerializedWithDrive 防回归：续跑驱动进入「读-改-写」段（持有
+// goalMu、尚未写回）时，用户发送 /goal clear，清除必须等这段结束后再执行。
+//
+// 修复前的线上交错是：驱动读到目标快照 → /goal clear 删除该行 → 驱动 saveGoal，
+// 而 goalStore.Upsert 在行缺失时会补 INSERT，于是 clear 之后目标又被复活（CI 上
+// TestHandleGoalCommand 的偶发失败即由此而来）。这里用阻塞存储把驱动固定在临界区
+// 内，断言清除不会插队；去掉任一方的 goalMu，该用例都会失败。
+func TestGoalClearSerializedWithDrive(t *testing.T) {
+	real, _ := newGoalTestStore(t)
+	store := &blockingGoalStore{
+		goalStore: real,
+		entered:   make(chan struct{}),
+		release:   make(chan struct{}),
+	}
+	p := &AIChatPlugin{Meta: plugin.Meta{Name: "AI对话插件"}, goalStore: store}
+	p.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	p.goalArmed = sync.Map{}
+	p.cfg.Goal.Enable = true
+	p.cfg.Goal.MaxRounds = 5
+
+	id := message.FromUint64(1001)
+	key := sessionKey(id, true)
+	if err := p.saveGoal(&agentGoal{SessionKey: key, Objective: "目标", Phase: goalPhaseActive, MaxRounds: 5}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	p.armGoal(key)
+
+	driveDone := make(chan struct{})
+	go func() {
+		defer close(driveDone)
+		p.maybeDriveGoal(noopGoBot{&recordBot{}}, id, true)
+	}()
+	<-store.entered // 驱动已读到目标快照，即将写回
+
+	clearErr := make(chan error, 1)
+	cleared := make(chan struct{})
+	go func() {
+		defer close(cleared)
+		_, err := p.handleGoalCommand(&recordBot{}, commandWithArgs("clear"), testGroupMsg(1001, "/goal clear"))
+		clearErr <- err
+	}()
+
+	select {
+	case <-cleared:
+		// 未串行化：驱动还在读-改-写段内，清除就已经完成了。
+		close(store.release)
+		<-driveDone
+		t.Fatalf("清除不应在续跑驱动的读-改-写完成前执行（clear err: %v）", <-clearErr)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(store.release)
+	<-driveDone
+	<-cleared
+	if err := <-clearErr; err != nil {
+		t.Fatalf("clear err: %v", err)
+	}
+
+	if _, ok, err := p.loadGoal(key); err != nil {
+		t.Fatalf("load: %v", err)
+	} else if ok {
+		t.Fatal("clear 之后目标被续跑驱动复活")
+	}
+	if p.goalIsArmed(key) {
+		t.Fatal("clear 之后目标不应仍处于武装状态")
 	}
 }
 

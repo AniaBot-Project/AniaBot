@@ -22,6 +22,10 @@ import (
 //     子代理，则 rounds_started+1 并把 <goal_round> 续跑指令入队，开启下一轮；
 //   - 达到轮数上限自动 block；进程重启后 goalArmed 清空（需用户 /goal resume），
 //     避免升级重启后自动烧 token。
+//
+// 并发约定：目标状态的「读-改-写」一律在 goalMu 内完成。命令（框架事件协程）、
+// goal 工具（回合协程）与续跑驱动（后台协程）会并发操作同一会话的目标行，
+// 不加锁时一次迟到的写会经 Upsert 的 INSERT 兜底复活已清除的目标。
 
 // goalToolBase 目标工具共享插件引用与会话信息。
 type goalToolBase struct {
@@ -83,6 +87,10 @@ func (t *goalCreateTool) Execute(ctx context.Context, params any, callbacks llmt
 		return "目标续跑功能已在配置中关闭（plugin.ai_chat_bot.goal.enable=false）", nil
 	}
 	key := t.sessionKey()
+	// 目标的「查重 + 写入」必须在 goalMu 内完成：/goal clear 或 /goal resume 可能
+	// 在框架事件协程并发执行，否则会出现重复建立目标或写入被清除打断的中间态。
+	t.plugin.goalMu.Lock()
+	defer t.plugin.goalMu.Unlock()
 	if cur, ok, err := t.plugin.loadGoal(key); err != nil {
 		return "", err
 	} else if ok && cur.Phase != goalPhaseComplete {
@@ -135,12 +143,19 @@ func (t *goalUpdateTool) Execute(ctx context.Context, params any, callbacks llmt
 		if t.plugin.goalStore == nil {
 			return "目标持久化未启用", nil
 		}
+		// 与 /goal clear、续跑驱动串行：清除是「删除 + 解除武装」的原子动作。
+		t.plugin.goalMu.Lock()
+		defer t.plugin.goalMu.Unlock()
 		if err := t.plugin.clearGoal(key); err != nil {
 			return "", err
 		}
 		t.plugin.disarmGoal(key)
 		return "已清除当前目标", nil
 	}
+	// 后续所有分支都是「读-改-写」：锁定后其他协程（/goal 命令、续跑驱动）不会
+	// 在读到目标与写回之间清除/暂停它，避免用旧快照覆盖新状态。
+	t.plugin.goalMu.Lock()
+	defer t.plugin.goalMu.Unlock()
 	g, ok, err := t.plugin.loadGoal(key)
 	if err != nil {
 		return "", err
@@ -265,52 +280,74 @@ func (p *AIChatPlugin) handleGoalCommand(b bot.Bot, cmd command.Command, msg mes
 		p.sendPlainText(b, id, isGroup, p.renderGoalStatus(key))
 		return false, nil
 	}
+	res := p.applyGoalCommand(key, action)
+	p.sendPlainText(b, id, isGroup, res.text)
+	if res.drive {
+		// 立即尝试推进一轮（会话空闲时）；maybeDriveGoal 会在 goalMu 内重新
+		// 校验目标状态，即使这里与 /goal clear 交错也不会复活已清除的目标。
+		b.Go("goal-drive:"+key, func() { p.maybeDriveGoal(b, id, isGroup) })
+	}
+	return false, nil
+}
+
+// goalCommandResult /goal 状态迁移的结果：要回复用户的文本，以及迁移完成后
+// 是否需要在会话空闲时立即推进一轮（resume）。
+type goalCommandResult struct {
+	text  string
+	drive bool
+}
+
+// applyGoalCommand 在 goalMu 内完成 pause/resume/clear 的状态迁移并返回要发送
+// 的文本，发送由调用方在锁外做（避免慢平台发送阻塞其他会话的目标操作）。
+//
+// 加锁的必要性：/goal 命令跑在框架事件协程，续跑驱动跑在后台协程。若清除与
+// 续跑驱动的「读-改-写」交错，驱动那次基于旧快照的 saveGoal 会在行已被删除后
+// 走 Upsert 的 INSERT 兜底，把目标重新插回去（/goal clear 后目标又出现，且
+// 续跑指令已入队）。整段迁移串行化后，后拿到锁的一方一定能看到前一方写下的
+// 最终状态：清除先行则驱动看到未武装/无行而放弃；驱动先行则它推进的那一轮
+// 随后被清除整体撤销。
+func (p *AIChatPlugin) applyGoalCommand(key, action string) goalCommandResult {
+	p.goalMu.Lock()
+	defer p.goalMu.Unlock()
+
 	g, ok, err := p.loadGoal(key)
 	if err != nil {
-		p.sendPlainText(b, id, isGroup, "读取目标失败："+err.Error())
-		return false, nil
+		return goalCommandResult{text: "读取目标失败：" + err.Error()}
 	}
 	if !ok {
-		p.sendPlainText(b, id, isGroup, "当前会话没有长任务目标")
-		return false, nil
+		return goalCommandResult{text: "当前会话没有长任务目标"}
 	}
 	switch action {
 	case "pause":
 		g.Phase = goalPhasePaused
+		if err := p.saveGoal(g); err != nil {
+			return goalCommandResult{text: "暂停目标失败：" + err.Error()}
+		}
 		p.disarmGoal(key)
-		_ = p.saveGoal(g)
-		p.sendPlainText(b, id, isGroup, "目标已暂停自动续跑（发送 /goal resume 恢复）")
+		return goalCommandResult{text: "目标已暂停自动续跑（发送 /goal resume 恢复）"}
 	case "resume":
 		if g.Phase == goalPhaseComplete {
-			p.sendPlainText(b, id, isGroup, "目标已完成，不能恢复；如需新目标请让 AI 用 goal_create 建立")
-			return false, nil
+			return goalCommandResult{text: "目标已完成，不能恢复；如需新目标请让 AI 用 goal_create 建立"}
 		}
 		if g.RoundsStarted >= g.MaxRounds {
-			p.sendPlainText(b, id, isGroup, fmt.Sprintf("目标已用满 %d 轮，无法恢复", g.MaxRounds))
-			return false, nil
+			return goalCommandResult{text: fmt.Sprintf("目标已用满 %d 轮，无法恢复", g.MaxRounds)}
 		}
 		g.Phase = goalPhaseActive
 		g.BlockedCode = ""
 		g.BlockedMessage = ""
 		if err := p.saveGoal(g); err != nil {
-			p.sendPlainText(b, id, isGroup, "恢复目标失败："+err.Error())
-			return false, nil
+			return goalCommandResult{text: "恢复目标失败：" + err.Error()}
 		}
 		p.armGoal(key)
-		p.sendPlainText(b, id, isGroup, "目标已恢复自动续跑")
-		// 立即尝试推进一轮（会话空闲时）
-		b.Go("goal-drive:"+key, func() { p.maybeDriveGoal(b, id, isGroup) })
+		return goalCommandResult{text: "目标已恢复自动续跑", drive: true}
 	case "clear":
 		if err := p.clearGoal(key); err != nil {
-			p.sendPlainText(b, id, isGroup, "清除目标失败："+err.Error())
-			return false, nil
+			return goalCommandResult{text: "清除目标失败：" + err.Error()}
 		}
 		p.disarmGoal(key)
-		p.sendPlainText(b, id, isGroup, "目标已清除")
-	default:
-		p.sendPlainText(b, id, isGroup, "用法：/goal [status|pause|resume|clear]")
+		return goalCommandResult{text: "目标已清除"}
 	}
-	return false, nil
+	return goalCommandResult{text: "用法：/goal [status|pause|resume|clear]"}
 }
 
 // ---- 存储与武装状态 ----
@@ -372,35 +409,20 @@ func (p *AIChatPlugin) maybeDriveGoal(b bot.Bot, id message.QID, isGroup bool) {
 		return
 	}
 	key := sessionKey(id, isGroup)
+	// 未武装是绝大多数会话的常态：先做无锁快速判断，避免每个回合结束都去
+	// 查子代理/排队队列。真正的判定在 advanceGoalRound 的锁内重新做。
 	if !p.goalIsArmed(key) {
 		return
 	}
 	if p.hasPending(key) || len(p.listRunningSubagents(id, isGroup)) > 0 {
 		return
 	}
-	g, ok, err := p.loadGoal(key)
-	if err != nil || !ok {
+	g, notice := p.advanceGoalRound(key)
+	if notice != "" {
+		p.sendPlainText(b, id, isGroup, notice)
 		return
 	}
-	if g.Phase != goalPhaseActive {
-		p.disarmGoal(key)
-		return
-	}
-	if g.RoundsStarted >= g.MaxRounds {
-		g.Phase = goalPhaseBlocked
-		g.BlockedCode = goalBlockRoundLimit
-		g.BlockedMessage = fmt.Sprintf("已达到最大自动续跑轮数（%d）", g.MaxRounds)
-		if err := p.saveGoal(g); err != nil {
-			p.Logger.Warn("目标达到轮数上限后写库失败", "session", key, "error", err.Error())
-		}
-		p.disarmGoal(key)
-		p.sendPlainText(b, id, isGroup, fmt.Sprintf("目标已达到最大自动续跑轮数（%d），自动续跑已停止。可发送 /goal resume 或 /goal clear，或让 AI 调整目标。", g.MaxRounds))
-		return
-	}
-	g.RoundsStarted++
-	if err := p.saveGoal(g); err != nil {
-		p.Logger.Warn("更新目标轮数失败，停止续跑", "session", key, "error", err.Error())
-		p.disarmGoal(key)
+	if g == nil {
 		return
 	}
 	synthetic := message.Message{
@@ -416,6 +438,47 @@ func (p *AIChatPlugin) maybeDriveGoal(b bot.Bot, id message.QID, isGroup bool) {
 	b.Go("goal-drive:"+key, func() { p.runQueued(b, id, isGroup) })
 }
 
+// advanceGoalRound 在 goalMu 内完成「校验武装 → 读目标 → 判断可续跑性 → 推进
+// 一轮或标记轮数上限」。返回 nil 表示本次不续跑；notice 非空表示需要通知用户
+// （达到轮数上限自动阻塞，通知由调用方在锁外发送）。
+//
+// 这里必须与 /goal clear|pause、/stop 的暂停、goal 工具的状态迁移共用 goalMu：
+// 它们都在别的协程里执行，若读与写之间被插入一次 DELETE，写回就会经 Upsert 的
+// INSERT 兜底把目标复活。
+func (p *AIChatPlugin) advanceGoalRound(key string) (*agentGoal, string) {
+	p.goalMu.Lock()
+	defer p.goalMu.Unlock()
+
+	if !p.goalIsArmed(key) {
+		return nil, ""
+	}
+	g, ok, err := p.loadGoal(key)
+	if err != nil || !ok {
+		return nil, ""
+	}
+	if g.Phase != goalPhaseActive {
+		p.disarmGoal(key)
+		return nil, ""
+	}
+	if g.RoundsStarted >= g.MaxRounds {
+		g.Phase = goalPhaseBlocked
+		g.BlockedCode = goalBlockRoundLimit
+		g.BlockedMessage = fmt.Sprintf("已达到最大自动续跑轮数（%d）", g.MaxRounds)
+		if err := p.saveGoal(g); err != nil {
+			p.Logger.Warn("目标达到轮数上限后写库失败", "session", key, "error", err.Error())
+		}
+		p.disarmGoal(key)
+		return nil, fmt.Sprintf("目标已达到最大自动续跑轮数（%d），自动续跑已停止。可发送 /goal resume 或 /goal clear，或让 AI 调整目标。", g.MaxRounds)
+	}
+	g.RoundsStarted++
+	if err := p.saveGoal(g); err != nil {
+		p.Logger.Warn("更新目标轮数失败，停止续跑", "session", key, "error", err.Error())
+		p.disarmGoal(key)
+		return nil, ""
+	}
+	return g, ""
+}
+
 // pauseGoalOnStop 用户 /stop 停止会话时暂停目标自动续跑（与 DSH 语义一致：
 // 用户显式停止不应被自动续跑立刻顶回来）。
 func (p *AIChatPlugin) pauseGoalOnStop(id message.QID, isGroup bool) {
@@ -426,6 +489,9 @@ func (p *AIChatPlugin) pauseGoalOnStop(id message.QID, isGroup bool) {
 	if !p.goalIsArmed(key) {
 		return
 	}
+	// 与 /goal 命令、续跑驱动共用 goalMu：显式停止的暂停不能被迟到的续跑写覆盖。
+	p.goalMu.Lock()
+	defer p.goalMu.Unlock()
 	p.disarmGoal(key)
 	g, ok, err := p.loadGoal(key)
 	if err != nil || !ok || g.Phase != goalPhaseActive {

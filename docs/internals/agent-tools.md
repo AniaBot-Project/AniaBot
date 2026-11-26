@@ -255,6 +255,7 @@ clock 任务里注册的是**异步**子代理变体（`clocksubagent.go`）：�
 - **续跑驱动**：进程内 `goalArmed` 标记（`goal_create` 或 `/goal resume` 置位）；回合正常结束 → `maybeDriveGoal` 检查「已武装、无排队消息、无运行中子代理、phase=active」→ `rounds_started+1`、写库、把 `<goal_round>第 N/M 轮…</goal_round>` 合成消息入队并启动运行器。达到 `max_rounds` 时自动转 `blocked(round-limit)` 并通知会话。
 - **重启语义**：`goalArmed` **不持久化**，进程重启后目标仍 active 但不再自动续跑，需用户 `/goal resume`（与 DSH disarm 一致，避免升级重启后自动烧 token）。
 - **用户命令**：`/goal [status|pause|resume|clear]`；`/stop` 会 `pauseGoalOnStop` 把 active 目标暂停。计划模式阻断 `goal_create`/`goal_update`，`goal_status` 放行。
+- **并发**：目标状态的「读-改-写」由 `AIChatPlugin.goalMu` 串行化。三类调用来自不同协程——`/goal` 命令在框架事件协程、`goal_create`/`goal_update` 工具在回合协程、续跑驱动在后台协程；若读与写之间被插入一次 `clear`（`DELETE`），基于旧快照的 `Upsert` 会走「UPDATE 0 行 → INSERT」兜底把目标复活，`pause`/`resume` 也会被旧快照覆盖。锁内只做 DB 读写，发送与入队都在锁外。回归用例 `TestGoalClearSerializedWithDrive` 用阻塞存储复现该交错。
 
 ## 工作流（workflow）
 
