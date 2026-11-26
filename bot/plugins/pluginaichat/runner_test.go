@@ -152,7 +152,23 @@ func TestRenderTasksIncludesRunningAndRecent(t *testing.T) {
 	}
 
 	out := p.renderTasks(id, true)
-	for _, want := range []string{"运行中", "t-running-1", "最近任务", "t-recent-1", "完成"} {
+	for _, want := range []string{"运行中", "t-running-1", "最近后台任务", "t-recent-1", "完成"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("任务列表应包含 %q, got:\n%s", want, out)
+		}
+	}
+}
+
+// TestRenderTasksIncludesRecentTurns 普通回合不再写入任务表，但 /tasks 仍应
+// 展示进程内的最近回合摘要。
+func TestRenderTasksIncludesRecentTurns(t *testing.T) {
+	p := newRunnerTestPlugin()
+	p.recentTurns = newRecentTurnLog()
+	id := message.FromUint64(1001)
+	p.rememberTurn(id, true, "帮我查一下明天的天气", taskStatusCompleted, taskStopCompleted, time.Now().Add(-2*time.Second))
+
+	out := p.renderTasks(id, true)
+	for _, want := range []string{"最近回合", "帮我查一下明天的天气", "完成"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("任务列表应包含 %q, got:\n%s", want, out)
 		}

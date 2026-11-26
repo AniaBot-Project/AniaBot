@@ -554,7 +554,11 @@ registry and goal continuation, and owns all session-scoped tool registration.
   `parent_id` and `prompt`, so team runs / members and subagents can be inspected with their task
   instructions, member summaries and tool-call steps;
   `AgentGoals()` lists `active` rows from `ania_agent_goal` (`GET /api/agent-goals`). Missing SQL
-  backend or query failure returns an empty slice. Subagent / team-member tool steps are also
+  backend or query failure returns an empty slice. The page defaults to 「仅后台工作」 (hides the
+  legacy `turn` rows a long-running bot may still have); clicking a row opens a detail modal
+  (matching the Query-log page), a `turn` row links to the matching Query-log entries
+  (`/#/querylogs?task_id=…`), and Query-log rows with `task_id` link back to
+  `/#/agent-tasks?task=…`. Subagent / team-member tool steps are also
   written **while running**: `taskStore.UpdateProgress` (meta + `updated_at` only,
   `WHERE finished_at = 0` so a late progress write can never overwrite a terminal state) is fed by
   `subagentTrace.flushProgress`, throttled by `subagentProgressInterval` (3s; the first tool call
@@ -571,18 +575,21 @@ registry and goal continuation, and owns all session-scoped tool registration.
   session itself is idle (no active turn that could inject queued messages), the queue is
   dropped with a "too many requests" reply; when the session's own turn is running, the queue
   is kept for interjection.
-  `OnUnload` cancels `runCtx` (all runners/subagents) and every async subagent group. Every turn
-  and async subagent writes a row to `ania_agent_task` (kind
-  `turn|subagent|handoff|bash_job|clock|proactive|goal_round|workflow|team_task|team_run|team_member`,
-  status
+  `OnUnload` cancels `runCtx` (all runners/subagents) and every async subagent group. A normal
+  turn is **not** written to `ania_agent_task` (its canonical record is the Query-log row, which
+  carries stop reason, tool calls, tokens and reply); only background work writes a task row —
+  kinds `subagent|handoff|workflow|team_task|team_run|team_member` (`turn` is a legacy kind read
+  from older databases), status
   `queued|running|waiting|completed|failed|timeout|cancelled|interrupted`, stop reason
-  `completed|aborted|max_tokens|error|watchdog|timeout|user_stop`, plus tokens/meta/timestamps);
-  task DB writes use short standalone contexts (3s) so a stuck DB never blocks a turn. Startup
-  marks leftovers `interrupted`; `/tasks` shows running subagents + the most recent rows; `/resume
-  <id>` re-queues an interrupted subagent/handoff task as a synthetic message (this session only);
-  a janitor deletes finished rows past `task.retention_days` (default 7, every 6h). If the SQL
-  probe/DDL fails, task persistence degrades to in-memory/no-op without blocking startup; the
-  goal table (`ania_agent_goal`) is created by the same startup path and degrades the same way.
+  `completed|aborted|max_tokens|error|watchdog|timeout|user_stop`, plus tokens/meta/timestamps.
+  Task DB writes use short standalone contexts (3s) so a stuck DB never blocks a turn. Startup
+  marks leftovers `interrupted`; `/tasks` shows running subagents + the most recent persisted
+  background rows + the last few turns from an in-process ring (`recentTurns`, lost on restart);
+  `/resume <id>` re-queues an interrupted subagent/handoff task as a synthetic message (this
+  session only); a janitor deletes finished rows past `task.retention_days` (default 7, every 6h).
+  If the SQL probe/DDL fails, task persistence degrades to in-memory/no-op without blocking
+  startup; the goal table (`ania_agent_goal`) is created by the same startup path and degrades
+  the same way.
 - **Agent teams** (`team.go`, `teamroles.go`, `teamtool.go`, `teamlog.go`): persistent teams per
   scope (`g:`/`f:` in KV, `global` managed from the panel only), each member = name + role
   prompt. `team_run` runs members in parallel as ephemeral agents and synthesizes their outputs;
@@ -746,8 +753,9 @@ row-level components disable themselves with an error log when the SQL probe/DDL
 degradation must never block startup, and plugin-created tables must follow the same rule.
 Use the `ania_` prefix. Existing tables: `ania_kv` (config/KV), `ania_chat_session`,
 `ania_chat_message`, `ania_memory`, `ania_kb_doc`, `ania_intention`, `ania_query_log`,
-`ania_task_log`, `ania_op_log`, `ania_agent_task` (AI turn/subagent/handoff/workflow/team-task
-registry, with `(session_key,status)` and `(status,updated_at)` indexes),
+`ania_task_log`, `ania_op_log`, `ania_agent_task` (background-work registry: subagent/handoff/
+workflow/team-run/team-member/team-task; legacy `turn` rows only, with `(session_key,status)` and
+`(status,updated_at)` indexes),
 `ania_agent_goal` (`session_key` PK; cross-turn goal state). Conventions: MySQL string keys `VARCHAR(255) COLLATE
 utf8mb4_bin`, large payloads `MEDIUMTEXT`, timestamps as INTEGER unix seconds or fixed-width UTC
 text (lexicographic = chronological); redundant filter columns only narrow candidates in WHERE —
@@ -770,12 +778,14 @@ cross-compile friendly.
 merge-forwards and stream replies, with failure flags) through a chat-style session index; the
 panel proxies media and refreshes expired QQ URLs via `bot.MediaRefresher`. Only `pluginlog`
 writes to it. `querylog` feeds Token 统计/配额 pages; each normal-chat row also carries
-`stop_reason` (`completed|aborted|max_tokens|error|watchdog|timeout|user_stop`) and `task_id`
-(the related `t-…` row in `ania_agent_task`) — filled in when the turn finishes (normal
-completion, cancellation, hard deadline, watchdog, ordinary error); proactive and panel-console
-rows leave them empty. Both are redundant SQL columns added by an idempotent old-DB migration
-(SQLite `PRAGMA table_info` / MySQL `information_schema` probe, then `ALTER TABLE`), and the
-panel Query-log API/export return them automatically (the front-end list does not show them yet).
+`stop_reason` (`completed|aborted|max_tokens|error|watchdog|timeout|user_stop`) and, for
+historical rows, `task_id` (the related `t-…` row in `ania_agent_task`) — stop reason is filled in
+when the turn finishes (normal completion, cancellation, hard deadline, watchdog, ordinary error);
+`task_id` is no longer written for new turns (they are not task rows), proactive and panel-console
+rows always leave both empty. Both are redundant SQL columns added by an idempotent old-DB
+migration (SQLite `PRAGMA table_info` / MySQL `information_schema` probe, then `ALTER TABLE`);
+the panel Query-log list/detail and export show them, and `task_id` doubles as a filter
+(`GET /api/querylogs?task_id=…`) for the cross-page links.
 `tasklog` records clock runs including `OutputSkipped`/`SkipReason`.
 
 ### Web admin panel, marketplace & auto-update

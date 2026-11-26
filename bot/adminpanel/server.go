@@ -1381,6 +1381,7 @@ func parseQueryLogFilter(r *http.Request) (querylog.Filter, string) {
 		TargetID: q.Get("target_id"),
 		Sender:   q.Get("sender"),
 		Keyword:  q.Get("keyword"),
+		TaskID:   q.Get("task_id"),
 	}
 	if f.Kind != "" && f.Kind != querylog.KindChat && f.Kind != querylog.KindProactive {
 		return f, "kind 仅支持 chat / proactive"
@@ -1415,8 +1416,9 @@ func parseQueryLogFilter(r *http.Request) (querylog.Filter, string) {
 // handleQueryLogs 按条件分页查询 AI Query 日志（新在前）。
 // 支持查询参数：kind（chat / proactive，主动互动与普通对话区分）、
 // chat_type（group/friend/panel，panel 为面板试聊）、target_id（群号/QQ）、
-// sender（触发人 QQ）、start / end（RFC3339 或 datetime-local 格式）、
-// keyword（匹配用户输入）、limit（每页条数，默认 50，最大 200）、
+// sender（触发人 QQ）、keyword（匹配用户输入）、task_id（关联的后台任务 ID，
+// 供「后台任务」页跳转定位）、start / end（RFC3339 或 datetime-local 格式）、
+// limit（每页条数，默认 50，最大 200）、
 // before（分页游标：仅返回比该日志 ID 更旧的记录）。
 // 响应：{"items": [...], "has_more": bool}。
 func (s *Server) handleQueryLogs(w http.ResponseWriter, r *http.Request) {

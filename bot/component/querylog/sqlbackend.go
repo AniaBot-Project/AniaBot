@@ -524,6 +524,11 @@ func (b *sqlBackend) buildWhere(f Filter, beforeSeq uint64) ([]string, []any) {
 		where = append(where, `senders LIKE ? ESCAPE '\'`)
 		args = append(args, "%,"+escapeLike(f.Sender)+",%")
 	}
+	if f.TaskID != "" && b.cols.taskID {
+		// 旧库补列失败时 task_id 列不可用：只靠 Go 侧 match 终判，语义不变
+		where = append(where, `task_id = ?`)
+		args = append(args, f.TaskID)
+	}
 	if !f.Start.IsZero() {
 		where = append(where, `created_at >= ?`)
 		args = append(args, f.Start.Unix())

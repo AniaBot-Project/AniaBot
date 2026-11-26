@@ -86,6 +86,18 @@
       </div>
     </Card>
 
+    <!-- 从「后台任务」页跳转而来：只显示关联该任务的日志 -->
+    <Card v-if="applied.task_id" style="padding: 0">
+      <div class="px-5 py-3 flex items-center gap-2 flex-wrap text-xs text-slate-600">
+        <span class="text-[10px] tracking-[0.15em] uppercase text-zinc-400">定位任务</span>
+        <span class="font-mono text-slate-700">{{ applied.task_id }}</span>
+        <RouterLink class="text-[#0071e3] hover:underline" :to="{ path: '/agent-tasks', query: { task: applied.task_id } }">
+          查看后台任务 →
+        </RouterLink>
+        <Button class="ml-auto" type="text" size="small" @click="clearTaskFilter">清除定位</Button>
+      </div>
+    </Card>
+
     <!-- 日志列表（新在上，滚动到底部自动加载更早的记录） -->
     <section class="space-y-3">
       <!-- 首次加载 / 切换筛选：先显示加载中，避免请求返回前误判为没有数据 -->
@@ -122,6 +134,10 @@
             <Tag v-if="log.kind === 'proactive'" variant="solid" size="small" color="app-blue">
               主动互动
             </Tag>
+            <!-- 停止原因（正常完成不占位；异常结束在列表里直接可见） -->
+            <Tag v-if="log.stop_reason && log.stop_reason !== 'completed'" variant="solid" size="small" color="app-orange">
+              停止：{{ stopText(log.stop_reason) }}
+            </Tag>
             <Tag variant="solid" size="small">
               {{ chatTypeText(log.chat_type) }} · {{ log.target_id }}
             </Tag>
@@ -144,6 +160,15 @@
               </span>
             </template>
             <span v-if="log.senders?.length">来自 {{ log.senders.join(', ') }}</span>
+            <!-- 历史记录可能带关联任务：列表里直接给出跳转入口 -->
+            <RouterLink
+              v-if="log.task_id"
+              class="text-[#0071e3] hover:underline font-mono"
+              :to="{ path: '/agent-tasks', query: { task: log.task_id } }"
+              @click.stop
+            >
+              任务 {{ log.task_id }}
+            </RouterLink>
             <span class="ml-auto text-zinc-400">详情 ⤢</span>
           </div>
         </div>
@@ -192,6 +217,22 @@
             </span>
           </template>
           <span v-if="detail.senders?.length">来自 {{ detail.senders.join(', ') }}</span>
+        </div>
+
+        <!-- 停止原因与关联后台任务（历史记录可能带 task_id） -->
+        <div v-if="detail.stop_reason || detail.task_id" class="flex items-center gap-x-4 gap-y-1 text-[11px] text-slate-500 flex-wrap">
+          <span v-if="detail.stop_reason">
+            停止原因：<span class="font-mono text-slate-700">{{ stopText(detail.stop_reason) }}</span>
+          </span>
+          <span v-if="detail.task_id">
+            关联任务：
+            <RouterLink
+              class="font-mono text-[#0071e3] hover:underline"
+              :to="{ path: '/agent-tasks', query: { task: detail.task_id } }"
+            >
+              {{ detail.task_id }} →
+            </RouterLink>
+          </span>
         </div>
 
         <!-- 用户输入（主动互动为触发说明） -->
@@ -271,10 +312,14 @@
 
 <script setup>
 import { confirmAction } from '../ui/confirm'
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { Button, Card, Input, Modal, Notification, Switch, Tag, Tooltip } from 'animal-island-vue'
 import { api } from '../api.js'
 import LoadingState from '../components/LoadingState.vue'
+
+const route = useRoute()
+const router = useRouter()
 
 const typeTabs = [
   { value: '', label: '全部' },
@@ -294,7 +339,7 @@ const inputClass = 'mt-1 w-full border border-zinc-300 rounded-md px-2.5 py-1.5 
 
 // filters 为编辑中的条件，applied 为实际生效（已点查询/切换类型）的条件，
 // 自动刷新沿用 applied，避免输入到一半被轮询带出去
-const emptyFilters = () => ({ kind: '', chat_type: '', sender: '', target_id: '', start: '', end: '', keyword: '' })
+const emptyFilters = () => ({ kind: '', chat_type: '', sender: '', target_id: '', start: '', end: '', keyword: '', task_id: '' })
 const filters = reactive(emptyFilters())
 const applied = reactive(emptyFilters())
 
@@ -340,6 +385,32 @@ function applyFilters() {
 function resetFilters() {
   Object.assign(filters, emptyFilters())
   Object.assign(applied, filters)
+  dropTaskQuery()
+  resetList()
+  load()
+}
+
+// 从 URL 读取 task_id（由「后台任务」页跳转传入）：只显示关联该任务的日志。
+function applyTaskFromRoute() {
+  const taskId = String(route.query.task_id || '').trim()
+  if (!taskId) return
+  filters.task_id = taskId
+  applied.task_id = taskId
+}
+
+// 清除 URL 上的 task_id，避免刷新后又回到单任务筛选
+function dropTaskQuery() {
+  if (!route.query.task_id) return
+  const query = { ...route.query }
+  delete query.task_id
+  router.replace({ query })
+}
+
+// 清除任务定位，回到全部日志
+function clearTaskFilter() {
+  filters.task_id = ''
+  applied.task_id = ''
+  dropTaskQuery()
   resetList()
   load()
 }
@@ -473,6 +544,19 @@ function statusText(s) {
   return { running: '执行中', success: '成功', skipped: '保持安静', stopped: '已停止', timeout: '超时', error: '出错', interrupted: '中断' }[s] || s
 }
 
+// 停止原因展示（值域见 querylog.Entry.StopReason）
+function stopText(s) {
+  return {
+    completed: '正常完成',
+    aborted: '中止',
+    max_tokens: '达到输出上限',
+    error: '出错',
+    watchdog: '循环保护',
+    timeout: '超时',
+    user_stop: '用户停止',
+  }[s] || s || '—'
+}
+
 // 状态药丸颜色（Tag color）：成功绿、警告橙、错误红，其余走默认/主题色
 function statusColor(s) {
   return {
@@ -548,7 +632,18 @@ function onVisible() {
   if (!document.hidden && autoRefresh.value) load()
 }
 
+// 同一页面内再次从后台任务跳转（路由 query 变化）时重新筛选
+watch(() => route.query.task_id, (v) => {
+  const taskId = String(v || '').trim()
+  if (taskId === applied.task_id) return
+  filters.task_id = taskId
+  applied.task_id = taskId
+  resetList()
+  load()
+})
+
 onMounted(() => {
+  applyTaskFromRoute()
   load()
   timer = setInterval(() => { if (!document.hidden && autoRefresh.value) load() }, 4000)
   tickTimer = setInterval(() => { now.value = Date.now() }, 1000)

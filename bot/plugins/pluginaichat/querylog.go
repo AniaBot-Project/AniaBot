@@ -55,8 +55,7 @@ func (p *AIChatPlugin) QueryLogClear(f querylog.Filter) int {
 type queryRecorder struct {
 	entry          querylog.Entry
 	toolCalls      []querylog.ToolCallRecord
-	toolCallsTotal int    // 工具调用总数
-	taskID         string // 关联的后台任务 ID（可能为空）
+	toolCallsTotal int // 工具调用总数
 	start          time.Time
 	key            string // 会话 key（takeExtraUsage 用）
 }
@@ -272,7 +271,8 @@ func (p *AIChatPlugin) finishConsoleQuery(r *queryRecorder, usage aichat.TokenUs
 
 // writeQueryResult 把一次 Query 的终态写回记录：状态、耗时、token 用量、
 // 工具调用明细与结果说明。普通 Query 与主动互动共用，保证两边字段回填一致。
-// stopReason/taskID 仅普通对话回填，其余来源传空。
+// stop_reason 仅普通对话回填，其余来源传空；task_id 属于历史关联字段，
+// 普通回合已不再登记任务，因此这里不改写它（旧记录的值原样保留）。
 func (p *AIChatPlugin) writeQueryResult(r *queryRecorder, usage, extra aichat.TokenUsage, status querylog.Status, reply, note, errText, stopReason string) {
 	toolCalls := r.toolCalls
 	p.queryLogger.Update(r.entry.ID, func(e *querylog.Entry) {
@@ -289,6 +289,5 @@ func (p *AIChatPlugin) writeQueryResult(r *queryRecorder, usage, extra aichat.To
 		e.Note = note
 		e.Error = errText
 		e.StopReason = stopReason
-		e.TaskID = r.taskID
 	})
 }

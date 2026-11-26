@@ -237,7 +237,7 @@
 - 用户命令：`/goal`、`/goal pause`、`/goal resume`、`/goal clear`（群聊需 @）。`/stop` 会暂停目标。
 - **进程重启后目标仍 active 但不会自动续跑**（续跑武装状态不落库），需用户 `/goal resume`；`blocked` 只要 AI 说明原因即可，没有「连续多轮」门槛。
 - 计划模式阻断 `goal_create`/`goal_update`，`goal_status` 放行。
-- 每轮续跑以任务类型 `goal_round` 记入后台任务表；面板「后台任务」页可看进行中的目标。
+- 每轮续跑仍是普通回合（不单独登记任务），面板「后台任务」页下方可看进行中的目标，`/goal` 看轮次与状态。
 
 ### 工作流（workflow）与团队任务板（team_task）
 
@@ -251,7 +251,7 @@
 | --- | --- | --- |
 | `task.retention_days` | `7` | 已结束任务记录保留天数，每 6 小时清理一次；0 不清理 |
 
-任务记录存于 SQL 表 `ania_agent_task`（需要 SQL 持久化，建表失败自动降级为不持久化），`kind` 除回合/子代理/交接/工作流外的团队运行与团队成员（`team_run` / `team_member`）也在这里。进程重启时遗留任务标记 `interrupted`，用户用 `/resume <任务ID>` 恢复；`/tasks` 查看本会话任务，`/stop` 取消当前回合并清空排队，`/stop <任务ID>` 取消指定后台子代理。
+任务记录存于 SQL 表 `ania_agent_task`（需要 SQL 持久化，建表失败自动降级为不持久化），记子代理/交接/工作流/团队任务/团队运行/团队成员（`subagent`/`handoff`/`workflow`/`team_task`/`team_run`/`team_member`）；普通回合不再写任务表（完整过程看 Query 日志），旧库可能残留 `turn` 行。进程重启时遗留任务标记 `interrupted`，用户用 `/resume <任务ID>` 恢复；`/tasks` 查看本会话运行中子代理、最近后台任务与最近回合，`/stop` 取消当前回合并清空排队，`/stop <任务ID>` 取消指定后台子代理。
 
 
 ### 备用识图（主模型不支持多模态时把图片转文字）
@@ -369,6 +369,6 @@ ID 必须带平台前缀（`qq:` / `fs:` / `tg:` / `dc:` / `wx:` / `qo:` / `lil:
 | 外置技能 | `./skills`（可改 `skills_dir`） |
 | 内置技能（只读来源，物化副本） | `<skills_dir>/.builtin/`，每次加载由二进制重写，改这里无效 |
 
-数据表（SQL 后端）：`ania_kv`（配置与 KV）、`ania_chat_session` / `ania_chat_message`（对话历史）、`ania_memory`、`ania_kb_doc`、`ania_intention`（主动互动意图）、`ania_query_log`（含普通对话的 `stop_reason` / `task_id`）、`ania_task_log`、`ania_op_log`、`ania_agent_task`（后台任务注册表：回合/子代理/交接/工作流/团队任务/目标轮次/团队运行/团队成员）、`ania_agent_goal`（长任务目标）。
+数据表（SQL 后端）：`ania_kv`（配置与 KV）、`ania_chat_session` / `ania_chat_message`（对话历史）、`ania_memory`、`ania_kb_doc`、`ania_intention`（主动互动意图）、`ania_query_log`（含普通对话的 `stop_reason` 与历史 `task_id`）、`ania_task_log`、`ania_op_log`、`ania_agent_task`（后台任务注册表：子代理/交接/工作流/团队任务/团队运行/团队成员，历史 `turn` 行仅兼容旧库）、`ania_agent_goal`（长任务目标）。
 
 备份：停掉 Bot 后复制整个 `data/` 目录最稳妥；只想备份配置可用面板「配置管理」页的导出功能，或用「配置预设」把当前配置存成快照后一键回切。恢复时注意 Bot 必须停止，否则 SQLite 可能拿到不一致的副本。

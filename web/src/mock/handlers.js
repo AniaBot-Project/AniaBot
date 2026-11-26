@@ -74,18 +74,19 @@ function rebase(value, key) {
 const now0 = Date.now()
 const bootAt = now0 - (2 * 3600 + 42 * 60) * 1000 // 演示：Bot 已运行 2 小时 42 分
 
-// 后台任务注册表演示数据（时间戳为 unix 秒，与 /api/agent-tasks 返回一致）
+// 后台任务注册表演示数据（时间戳为 unix 秒，与 /api/agent-tasks 返回一致）。
+// turn 为升级前的历史记录（新版本普通回合只写 Query 日志），默认被「仅后台工作」隐藏。
 function buildAgentTasks(nowSec) {
   const t = (delta) => nowSec - delta
   return [
-    { id: 't-m5x1a2-3f9c', session_key: 'g:qq:123456', kind: 'turn', status: 'running', title: '帮我统计本周群里的活跃用户', result: '', error: '', stop_reason: '', meta: '{"step":2}', tokens: 0, created_at: t(35), started_at: t(35), updated_at: t(4), finished_at: 0 },
+    { id: 't-m5x1a2-3f9c', session_key: 'g:qq:123456', kind: 'turn', status: 'completed', title: '帮我统计本周群里的活跃用户', result: '本周活跃用户 18 人，发言最多的是…', error: '', stop_reason: 'completed', meta: '{"step":2}', tokens: 0, created_at: t(35), started_at: t(35), updated_at: t(4), finished_at: t(4) },
     { id: 't-m5x19k-8a1d', session_key: 'g:qq:123456', kind: 'subagent', status: 'running', title: '检索并整理 Vue 3 组合式 API 的迁移要点', result: '', error: '', stop_reason: '', meta: '{"tools":3}', tokens: 1820, created_at: t(120), started_at: t(118), updated_at: t(8), finished_at: 0 },
-    { id: 't-m5x18c-2b7e', session_key: 'f:qq:10000', kind: 'handoff', status: 'waiting', title: '后台运行测试套件并等待结果', result: '', error: '', stop_reason: '', meta: '{"waiting":"bash_job"}', tokens: 640, created_at: t(300), started_at: t(298), updated_at: t(20), finished_at: 0 },
+    { id: 't-m5x18c-2b7e', session_key: 'f:qq:10000', kind: 'handoff', status: 'waiting', title: '后台运行测试套件并等待结果', result: '', error: '', stop_reason: '', meta: '{"waiting":"team_member"}', tokens: 640, created_at: t(300), started_at: t(298), updated_at: t(20), finished_at: 0 },
     { id: 't-m5x0ta-9c4b', session_key: 'g:qq:123456', kind: 'subagent', status: 'completed', title: '总结群聊近 100 条消息的讨论主题', result: '近 100 条消息主要围绕：1. 周末活动安排（约 40%）；2. 新版面板的截图与主题色讨论（约 35%）；3. 代码问题排查（约 25%）。\n活动安排集中在周六下午，有 6 人报名。', error: '', stop_reason: 'completed', meta: '{"tools":4,"iterations":6}', tokens: 5321, created_at: t(900), started_at: t(898), updated_at: t(700), finished_at: t(702) },
-    { id: 't-m5x0aa-1e6f', session_key: 'f:qq:10000', kind: 'bash_job', status: 'failed', title: '在宿主机执行 npm run build', result: '', error: 'exit status 1: vite build failed（详见 tool-output 日志）', stop_reason: 'error', meta: '{"exit_code":1}', tokens: 0, created_at: t(1800), started_at: t(1799), updated_at: t(1730), finished_at: t(1731) },
-    { id: 't-m5wzta-4d2a', session_key: 'g:qq:123456', kind: 'goal_round', status: 'completed', title: '迁移到 Vite 5 并修复构建警告', result: '已完成 vite 5 升级，构建通过；剩余 2 个无害的 chunk size 警告。', error: '', stop_reason: 'completed', meta: '{"round":2}', tokens: 4210, created_at: t(5400), started_at: t(5398), updated_at: t(3600), finished_at: t(3601) },
-    { id: 't-m5wz8s-7b3c', session_key: 'g:qq:123456', kind: 'clock', status: 'timeout', title: '每日 9 点群聊摘要播报', result: '', error: '子任务等待超时', stop_reason: 'timeout', meta: '{}', tokens: 980, created_at: t(7400), started_at: t(7395), updated_at: t(6100), finished_at: t(6101) },
-    { id: 't-m5wy2m-6c0d', session_key: 'f:qq:10000', kind: 'proactive', status: 'interrupted', title: '主动提醒：距离上次对话已过 3 天', result: '', error: '', stop_reason: 'aborted', meta: '{}', tokens: 0, created_at: t(9000), started_at: 0, updated_at: t(8200), finished_at: 0 },
+    { id: 't-m5x0aa-1e6f', session_key: 'f:qq:10000', kind: 'workflow', status: 'failed', title: '多步骤迁移与构建校验', result: '', error: '步骤 build 失败：vite build failed（详见 tool-output 日志）', stop_reason: 'error', meta: '{"steps":3,"done":2}', tokens: 0, created_at: t(1800), started_at: t(1799), updated_at: t(1730), finished_at: t(1731) },
+    { id: 't-m5wzta-4d2a', session_key: 'g:qq:123456', kind: 'team_run', status: 'completed', title: '并行调研三个技术方案', result: '三个方案已汇总：A 方案成本最低…', error: '', stop_reason: 'completed', meta: '{"members":[{"name":"researcher","status":"completed","tokens":2400,"duration_ms":42000},{"name":"writer","status":"completed","tokens":1800,"duration_ms":28000}]}', tokens: 4210, created_at: t(5400), started_at: t(5398), updated_at: t(3600), finished_at: t(3601) },
+    { id: 't-m5wz8s-7b3c', session_key: 'g:qq:123456', kind: 'team_member', parent_id: 't-m5wzta-4d2a', status: 'completed', title: '整理方案对比表的输出', result: '对比表已生成。', error: '', stop_reason: 'completed', meta: '{"iterations":3,"tool_calls":[{"name":"write_file","arguments":"对比表.md","result":"已写入","duration_ms":1200}]}', tokens: 1800, created_at: t(5390), started_at: t(5388), updated_at: t(5000), finished_at: t(5001) },
+    { id: 't-m5wy2m-6c0d', session_key: 'f:qq:10000', kind: 'handoff', status: 'interrupted', title: '交接：继续整理周报数据', result: '', error: '', stop_reason: 'aborted', meta: '{}', tokens: 0, created_at: t(9000), started_at: 0, updated_at: t(8200), finished_at: 0 },
   ]
 }
 const agentGoals = [
@@ -265,10 +266,12 @@ function filterQueryLogs(c) {
   const targetId = c.query.get('target_id')
   const sender = c.query.get('sender')
   const kind = c.query.get('kind')
+  const taskId = c.query.get('task_id')
   if (chatType) list = list.filter((x) => x.chat_type === chatType)
   if (targetId) list = list.filter((x) => x.target_id === targetId)
   if (sender) list = list.filter((x) => (x.senders || []).some((s) => String(s).includes(sender)))
   if (kind) list = list.filter((x) => (x.kind || 'chat') === kind)
+  if (taskId) list = list.filter((x) => x.task_id === taskId)
   return list.filter((x) => inRange(x.time, c.query) && hasKeyword({ q: x.query, r: x.reply, e: x.error }, c.query.get('keyword')))
 }
 

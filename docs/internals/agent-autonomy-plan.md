@@ -523,7 +523,7 @@ CREATE INDEX idx_agent_task_session ON ania_agent_task(session_key, status);
 CREATE INDEX idx_agent_task_status  ON ania_agent_task(status, updated_at);
 ```
 
-（P2 已按方案落地：目标状态建独立表 `ania_agent_goal`（会话唯一目标，`session_key` 主键），每轮续跑另记一行 `kind=goal_round` 任务；`ania_agent_goal` 与任务表共用启动建表/降级路径。）
+（P2 已按方案落地：目标状态建独立表 `ania_agent_goal`（会话唯一目标，`session_key` 主键），`ania_agent_goal` 与任务表共用启动建表/降级路径。后续普通回合不再写入任务表，`goal_round` 类型已移除，目标续跑按普通回合记录在 Query 日志；任务表现在只登记真正的后台工作。）
 
 ### 6.3 新增/调整工具（模型可见）
 

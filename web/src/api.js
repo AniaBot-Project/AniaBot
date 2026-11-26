@@ -218,7 +218,7 @@ export const api = {
   exportTaskLogs: (params = {}) => download(`/api/tasklogs/export${qs(params)}`, 'tasklogs.json'),
   // 清除当前筛选条件下的执行日志（无筛选时清空全部），返回 { ok, removed }
   clearTaskLogs: (params = {}) => request(`/api/tasklogs${qs(params)}`, { method: 'DELETE' }),
-  // Query 日志分页查询：{ chat_type, target_id, sender, start, end, keyword, limit, before }（均可选）
+  // Query 日志分页查询：{ kind, chat_type, target_id, sender, keyword, task_id, start, end, limit, before }（均可选）
   getQueryLogs: (params = {}) => request(`/api/querylogs${qs(params)}`),
   // 按当前筛选条件导出 Query 日志（JSON 文件下载）
   exportQueryLogs: (params = {}) => download(`/api/querylogs/export${qs(params)}`, 'querylogs.json'),
@@ -229,7 +229,7 @@ export const api = {
   // 操作日志分页查询：{ category, start, end, keyword, limit, before }（均可选），返回 { items, has_more }
   getOpLogs: (params = {}) => request(`/api/oplogs${qs(params)}`),
   getClocks: () => request('/api/clocks'),
-  // 后台任务注册表（AI 回合 / 子代理 / 交接 / 后台命令等）：limit 为最近条数（默认 100，最大 500）
+  // 后台任务注册表（子代理 / 交接 / 工作流 / 团队运行等）：limit 为最近条数（默认 100，最大 500）
   getAgentTasks: (limit = 100) => request(`/api/agent-tasks?limit=${limit}`),
   // 当前处于 active 阶段的长任务目标（跨回合自动续跑的会话目标）
   getAgentGoals: () => request('/api/agent-goals'),
