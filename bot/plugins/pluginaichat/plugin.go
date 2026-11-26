@@ -586,11 +586,24 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 		return false
 	}
 
+	// Query 日志：本次触发的原始用户输入与最终响应记录在同一条日志里。提前创建
+	// 记录，使运行中插话在注入时能把文本追加进 Query 字段（面板/导出可审计）。
+	recorder := p.beginQuery(chat, id, isGroup, batch, extraText)
+	// 回合任务 ID 写入 Query 日志（stop_reason 在收尾时按错误原因回填）
+	if recorder != nil {
+		if info := turnInfoFrom(ctx); info != nil {
+			recorder.taskID = info.taskID
+		}
+	}
+
 	chatOpts := p.buildChatOptions()
 	// 运行中插话：本次请求执行期间到达的新消息（含子代理完成等合成消息）在每次
 	// LLM 请求前以 user 消息注入当前工具循环，不再等整轮结束后才排队处理；
-	// 未及时注入的剩余消息仍留在队列里，由运行器作为下一批处理。
-	chatOpts.Steer = p.buildInterjectionSteer(b, id, isGroup, imageReg)
+	// 未及时注入的剩余消息仍留在队列里，由运行器作为下一批处理。注入的文本同时
+	// 追加到本次 Query 日志的 Query 字段，便于面板审计「处理中用户又说了什么」。
+	chatOpts.Steer = p.buildInterjectionSteer(b, id, isGroup, imageReg, func(texts []string) {
+		p.appendInterjectionsToQuery(recorder, texts)
+	})
 	// 请求级工具门禁：计划模式 → PreToolUse 钩子 → 管理员审批 → 工具审批（见 gate.go）。
 	// 审批提示走纯发送闭包，与进行中的流式消息互不干扰。
 	chatOpts.PreToolGate = p.buildPreToolGate(sessionKey(id, isGroup), agenthook.AgentKindMain, lastMsg.Sender.UserId,
@@ -629,14 +642,6 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 		}
 		chatOpts.OnStreamRoundEnd = stream.OnRoundEnd
 		chatOpts.OnStreamRestart = stream.OnRestart
-	}
-
-	recorder := p.beginQuery(chat, id, isGroup, batch, extraText)
-	// 回合任务 ID 写入 Query 日志（stop_reason 在收尾时按错误原因回填）
-	if recorder != nil {
-		if info := turnInfoFrom(ctx); info != nil {
-			recorder.taskID = info.taskID
-		}
 	}
 
 	// 记忆/知识库检索须基于原始用户消息：下面的注入会改写 extraText

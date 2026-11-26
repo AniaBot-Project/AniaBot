@@ -451,11 +451,13 @@ registry and goal continuation, and owns all session-scoped tool registration.
   messages (`interject.go`): user messages get a `【用户插话】` prefix (rendered with the usual
   group sender prefix), synthetic messages (`Sender.UserId=0`, e.g. subagent completion notices)
   get a `【后台消息】` prefix; messages arriving after the batch's last LLM request has started
-  stay queued and are handled as the **next batch** by the same runner. `/stop` cancels the
-  current turn and clears that session's queue (explicit stop); `/stop <任务ID>` cancels only the
-  named background subagent; `/tasks` lists the session's running subagents plus the task
-  registry's recent rows; `/resume <任务ID>` re-queues an `interrupted` subagent/handoff task of
-  this session as a continuation prompt for the main AI.
+  stay queued and are handled as the **next batch** by the same runner. Injected texts are
+  also appended to this turn's Query-log `Query` field (`【处理中插话】` sections, via
+  `appendInterjectionsToQuery`), so the panel/export audit trail includes them. `/stop`
+  cancels the current turn and clears that session's queue (explicit stop); `/stop <任务ID>`
+  cancels only the named background subagent; `/tasks` lists the session's running subagents
+  plus the task registry's recent rows; `/resume <任务ID>` re-queues an `interrupted`
+  subagent/handoff task of this session as a continuation prompt for the main AI.
 - Prompt: main sessions append a dynamic "任务编排与时间预算" guide after the scene description
   (`orchestrationGuide` in `llm.go`): delegate multi-step work to `subagent_run`, launch
   independent subagents in the same reply, never wait/poll after delegating, keep the main

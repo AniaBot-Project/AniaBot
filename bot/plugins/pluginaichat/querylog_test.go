@@ -66,6 +66,52 @@ func TestQueryLogLiveToolCalls(t *testing.T) {
 	}
 }
 
+// TestQueryLogInterjections 运行中插话追加进 Query 日志的 Query 字段：原始输入
+// 保留，插话按注入顺序追加（带【处理中插话】标记），面板关键词筛选可命中；
+// 日志禁用（recorder 为 nil）时安全跳过。
+func TestQueryLogInterjections(t *testing.T) {
+	p := &AIChatPlugin{}
+	p.Logger = slog.Default()
+	p.PersistentStorage = newSQLPFake()
+	p.initQueryLogger()
+	if p.queryLogger == nil {
+		t.Fatal("queryLogger 应已初始化")
+	}
+
+	chat, err := aichat.NewChatBot("http://127.0.0.1", "key", "model", "prompt", 1000, nil, nil)
+	if err != nil {
+		t.Fatalf("创建 ChatBot 失败: %v", err)
+	}
+	r := p.beginQuery(chat, message.FromString("10001"), true, nil, "帮我改一下代码")
+	if r == nil {
+		t.Fatal("beginQuery 应返回 recorder")
+	}
+
+	// 两次插话（分别来自用户与后台合成消息）按注入顺序追加
+	p.appendInterjectionsToQuery(r, []string{"[nickname:小明 id:qq:123]: 顺便加上日志"})
+	p.appendInterjectionsToQuery(r, []string{"【子代理执行完成】状态=completed"})
+
+	e := p.queryLogger.Query(querylog.Filter{Limit: 1})[0]
+	query := e.Query
+	if !strings.Contains(query, "帮我改一下代码") {
+		t.Fatalf("原始输入应保留: %q", query)
+	}
+	first := strings.Index(query, "顺便加上日志")
+	second := strings.Index(query, "子代理执行完成")
+	if first < 0 || second < 0 || first > second {
+		t.Fatalf("插话应按注入顺序追加: %q", query)
+	}
+	if !strings.Contains(query, "【处理中插话】") {
+		t.Fatalf("插话应有可辨识标记: %q", query)
+	}
+	// 关键词筛选命中插话内容（Query 是面板检索字段）
+	if got := p.queryLogger.Query(querylog.Filter{Keyword: "顺便加上日志"}); len(got) != 1 {
+		t.Fatalf("关键词筛选应命中插话, got %d", len(got))
+	}
+	// 日志禁用（recorder 为 nil）时不应 panic
+	p.appendInterjectionsToQuery(nil, []string{"x"})
+}
+
 // TestProactiveQueryLog 主动互动执行写入 Query 日志：Kind 标记、触发说明、
 // 保持安静状态与原因、token 与工具调用均可回填，且能与普通对话区分筛选。
 func TestProactiveQueryLog(t *testing.T) {

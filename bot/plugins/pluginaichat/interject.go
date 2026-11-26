@@ -40,11 +40,12 @@ const (
 //     前缀后作为 user 消息注入（过滤空文本，队列为空时不注入）；
 //   - 用户消息经 extraMsg 渲染（群聊带 [nickname:… id:…] 发送者前缀），其中的
 //     图片登记到本轮请求的图片注册表，使 load_images 能按哈希加载插话里的图片；
-//   - 队列剩余部分不消费，由运行器在本批结束后继续处理（见 drainChatBatches）。
+//   - 队列剩余部分不消费，由运行器在本批结束后继续处理（见 drainChatBatches）；
+//   - onInjected 非空时，以未加插话前缀的渲染文本回调一次（供 Query 日志记录）。
 //
 // reg 为本轮请求的图片注册表（可为 nil，测试/降级场景），b 为事件来源平台
 // 外观（不参与发送，只用于消息渲染与图片登记）。
-func (p *AIChatPlugin) buildInterjectionSteer(b bot.Bot, id message.QID, isGroup bool, reg *imageRegistry) func() []string {
+func (p *AIChatPlugin) buildInterjectionSteer(b bot.Bot, id message.QID, isGroup bool, reg *imageRegistry, onInjected func([]string)) func() []string {
 	return func() []string {
 		if b == nil {
 			return nil
@@ -66,11 +67,13 @@ func (p *AIChatPlugin) buildInterjectionSteer(b bot.Bot, id message.QID, isGroup
 			registerMessageImages(reg, b, msgs...)
 		}
 		out := make([]string, 0, len(msgs))
+		rendered := make([]string, 0, len(msgs))
 		for i := range msgs {
 			text := strings.TrimSpace(p.extraMsg(b, msgs[i]))
 			if text == "" {
 				continue
 			}
+			rendered = append(rendered, text)
 			header := interjectionUserHeader
 			if msgs[i].Sender.UserId == message.FromUint64(0) {
 				header = interjectionSystemHeader
@@ -79,6 +82,9 @@ func (p *AIChatPlugin) buildInterjectionSteer(b bot.Bot, id message.QID, isGroup
 		}
 		if len(out) == 0 {
 			return nil
+		}
+		if onInjected != nil {
+			onInjected(rendered)
 		}
 		if p.Logger != nil {
 			p.Logger.Info("回合运行中收到新消息，以插话注入当前请求", "id", id, "is_group", isGroup, "count", len(out))

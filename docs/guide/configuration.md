@@ -586,7 +586,7 @@ AI 用 `team_task_create` / `team_task_list` / `team_task_claim` / `team_task_co
 
 Query 日志默认开启且无独立配置项，在面板记录每次 AI 回复的完整执行过程。日志全量保留（不做容量淘汰；工具调用明细记录的是统一长度治理后的结果文本，超长结果以预览 + handle 落盘，完整内容可在对话中由 AI 用 `read_tool_output` 读取），由管理员在「Query 日志」页按当前筛选条件**导出**（JSON）或**清除**；前端展示工具结果超过 1000 字符时默认折叠，点击可展开。
 
-每条日志包含：触发会话、发送者、用户输入、LLM 轮数、工具调用明细（名称/参数/结果/耗时）、token 用量与最终回复，状态区分 `running` / `success` / `skipped`（主动互动中 AI 判断无需发言）/ `stopped` / `timeout` / `error`。普通对话回合还会记录**停止原因** `stop_reason`（`completed` 正常完成 / `aborted` 中止 / `max_tokens` 达到输出上限 / `error` 出错 / `watchdog` 循环保护终止 / `timeout` 超时 / `user_stop` 用户停止）与**任务 ID** `task_id`（关联后台任务表 `ania_agent_task` 的 `t-…`）；主动互动与面板试聊不填这两项。两者随 Query 日志 API 返回、导出 JSON 时也会带出（Query 日志列表页暂未单独展示这两列）。面板「Query 日志」页可筛选查看；主动互动的执行（来源标记为「主动互动」）也会记录在这里，以触发说明替代用户输入。
+每条日志包含：触发会话、发送者、用户输入、LLM 轮数、工具调用明细（名称/参数/结果/耗时）、token 用量与最终回复，状态区分 `running` / `success` / `skipped`（主动互动中 AI 判断无需发言）/ `stopped` / `timeout` / `error`。普通对话回合还会记录**停止原因** `stop_reason`（`completed` 正常完成 / `aborted` 中止 / `max_tokens` 达到输出上限 / `error` 出错 / `watchdog` 循环保护终止 / `timeout` 超时 / `user_stop` 用户停止）与**任务 ID** `task_id`（关联后台任务表 `ania_agent_task` 的 `t-…`）；主动互动与面板试聊不填这两项。两者随 Query 日志 API 返回、导出 JSON 时也会带出（Query 日志列表页暂未单独展示这两列）。运行中插话会以 `【处理中插话】` 段落追加在用户输入之后（保留发送者信息，关键词筛选可命中）。面板「Query 日志」页可筛选查看；主动互动的执行（来源标记为「主动互动」）也会记录在这里，以触发说明替代用户输入。
 
 ### 流式回复（stream）
 

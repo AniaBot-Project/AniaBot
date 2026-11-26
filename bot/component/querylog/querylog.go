@@ -85,7 +85,7 @@ type Entry struct {
 	ChatType         string           `json:"chat_type"`      // group / friend / panel
 	TargetID         string           `json:"target_id"`      // 目标会话 ID / 用户 ID（试聊为绑定目标或其会话标题）
 	Senders          []string         `json:"senders,omitempty"`
-	Query            string           `json:"query"` // 合并后的用户输入（可能含排队消息）
+	Query            string           `json:"query"` // 合并后的用户输入（可能含排队消息与处理中插话）
 	Status           Status           `json:"status"`
 	DurationMs       int64            `json:"duration_ms"`
 	Iterations       int              `json:"iterations"` // LLM 调用轮数

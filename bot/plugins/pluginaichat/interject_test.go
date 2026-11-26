@@ -15,7 +15,7 @@ func TestBuildInterjectionSteer(t *testing.T) {
 	id := message.FromUint64(1001)
 	rb := &recordBot{}
 	reg := newImageRegistry()
-	steer := p.buildInterjectionSteer(rb, id, true, reg)
+	steer := p.buildInterjectionSteer(rb, id, true, reg, nil)
 
 	if got := steer(); got != nil {
 		t.Fatalf("队列为空时应返回 nil, got %v", got)
@@ -58,7 +58,7 @@ func TestBuildInterjectionSteer(t *testing.T) {
 func TestBuildInterjectionSteerMultiple(t *testing.T) {
 	p := newRunnerTestPlugin()
 	id := message.FromUint64(1001)
-	steer := p.buildInterjectionSteer(&recordBot{}, id, false, nil)
+	steer := p.buildInterjectionSteer(&recordBot{}, id, false, nil, nil)
 
 	p.enqueuePending(id, false, testGroupMsg(1001, "第一条"))
 	p.enqueuePending(id, false, testGroupMsg(1001, "第二条"))
@@ -77,7 +77,7 @@ func TestBuildInterjectionSteerMultiple(t *testing.T) {
 func TestBuildInterjectionSteerHoldsNewConversation(t *testing.T) {
 	p := newRunnerTestPlugin()
 	id := message.FromUint64(1001)
-	steer := p.buildInterjectionSteer(&recordBot{}, id, true, nil)
+	steer := p.buildInterjectionSteer(&recordBot{}, id, true, nil, nil)
 
 	p.enqueuePending(id, true, testGroupMsg(1001, "补充说明"))
 	p.enqueuePending(id, true, testGroupMsg(1001, "#新对话"))

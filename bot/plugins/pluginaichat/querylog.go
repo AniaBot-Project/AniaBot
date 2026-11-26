@@ -3,6 +3,7 @@ package pluginaichat
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jeanhua/AniaBot/bot/component/aichat"
@@ -141,6 +142,29 @@ func (p *AIChatPlugin) finishQuery(r *queryRecorder, chat *aichat.ChatBot, usage
 	// 见 usageacc.go），使统计反映会话的完整成本（配额在各派生调用点单独累加）
 	extra := p.takeExtraUsage(r.key)
 	p.writeQueryResult(r, usage, extra, status, reply, "", errText, stopReasonFromError(err))
+}
+
+// appendInterjectionsToQuery 把运行中插话追加到 Query 日志的 Query 字段。
+//
+// Query 日志一条记录对应「本次触发 → 最终响应」的完整过程（Entry.Query 的语义
+// 是合并后的用户输入），插话是本次处理期间用户补充的输入，按实际注入顺序追加在
+// 原始输入之后：面板「Query 日志」、导出 JSON 与关键词筛选都能看到「处理中用户
+// 又说了什么」。写入经 Logger.Update（内部串行化），与工具明细的增量落盘互不
+// 覆盖；同一批插话只回调一次（见 buildInterjectionSteer），不会重复追加。
+// r 为 nil（Query 日志禁用）或没有待记录文本时跳过。
+func (p *AIChatPlugin) appendInterjectionsToQuery(r *queryRecorder, texts []string) {
+	if r == nil || p.queryLogger == nil || len(texts) == 0 {
+		return
+	}
+	p.queryLogger.Update(r.entry.ID, func(e *querylog.Entry) {
+		var sb strings.Builder
+		sb.WriteString(e.Query)
+		for _, text := range texts {
+			sb.WriteString("\n\n【处理中插话】\n")
+			sb.WriteString(text)
+		}
+		e.Query = sb.String()
+	})
 }
 
 // beginProactiveQuery 开始记录一次主动互动执行。与普通 Query 的区别：Kind 标记
