@@ -66,9 +66,6 @@ func (t *sendMessageTool) Execute(ctx context.Context, params any, callbacks llm
 	if _, err := callbacks.SendText(text); err != nil {
 		return "", fmt.Errorf("发送失败: %w", err)
 	}
-	// 主动发出的消息同样是可见输出：本回合的长任务受理提示不再补充「正在处理」
-	//（发送失败不算，因此放在成功之后）
-	markTurnVisible(ctx)
 	return "发送成功。注意：这是回合中途的主动消息，请继续完成当前任务，最终回复仍需在回合结束时给出", nil
 }
 

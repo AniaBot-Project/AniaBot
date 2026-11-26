@@ -208,7 +208,6 @@
 | `turn.progress_reminder_after` | `6` | 工具轮数达到该值时提醒模型考虑委派子代理；0 关闭 |
 | `turn.repeat_tool_warn` | `3,5,8` | 相同工具+参数连续重复达到这些次数时各提醒一次；留空关闭 |
 | `turn.no_progress_limit` | `12` | 连续相同工具调用达到该次数时终止回合并回报原因；0 只提醒 |
-| `turn.ack_after_sec` | `20` | 回合运行超过该时长仍无可见输出时先发「正在处理」提示；0 关闭 |
 | `llm.request_timeout_sec` | `600` | 单次 LLM 请求（含流式）总超时，按可重试错误处理；0 不限制 |
 | `llm.stream_idle_timeout_sec` | `120` | 流式响应空闲超时（无新内容），中断并重试；0 不限制 |
 

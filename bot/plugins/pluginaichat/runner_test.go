@@ -76,42 +76,6 @@ func TestNewTurnContextHardTimeout(t *testing.T) {
 	}
 }
 
-// ---- 长任务受理提示 ----
-
-// TestTurnAckSentWhenNoVisibleOutput 回合运行超过阈值且无可见输出时应先发一条受理提示。
-func TestTurnAckSentWhenNoVisibleOutput(t *testing.T) {
-	p := newRunnerTestPlugin()
-	p.taskAckAfter = 20 * time.Millisecond
-	rb := &recordBot{}
-	ctx, act := withTurnActivity(context.Background())
-	_ = ctx
-	stop := p.scheduleTurnAck(act, rb, message.FromUint64(1), false)
-	defer stop()
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && !containsSent(rb, "正在处理") {
-		time.Sleep(5 * time.Millisecond)
-	}
-	if !containsSent(rb, "正在处理") {
-		t.Fatalf("长任务应发送受理提示, got %v", rb.sent())
-	}
-}
-
-// TestTurnAckSuppressedWhenVisible 已有可见输出时不再发受理提示。
-func TestTurnAckSuppressedWhenVisible(t *testing.T) {
-	p := newRunnerTestPlugin()
-	p.taskAckAfter = 20 * time.Millisecond
-	rb := &recordBot{}
-	ctx, act := withTurnActivity(context.Background())
-	markTurnVisible(ctx)
-	stop := p.scheduleTurnAck(act, rb, message.FromUint64(1), false)
-	defer stop()
-	time.Sleep(80 * time.Millisecond)
-	if containsSent(rb, "正在处理") {
-		t.Fatalf("已有可见输出时不应发送受理提示, got %v", rb.sent())
-	}
-}
-
 // containsSent 判断 recordBot 是否发送过包含某子串的消息。
 func containsSent(rb *recordBot, sub string) bool {
 	for _, s := range rb.sent() {

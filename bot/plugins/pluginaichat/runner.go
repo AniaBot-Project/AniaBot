@@ -3,8 +3,6 @@ package pluginaichat
 import (
 	"context"
 	"errors"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jeanhua/AniaBot/bot/component/aichat"
@@ -89,11 +87,6 @@ func (p *AIChatPlugin) runSessionOnce(parent context.Context, b bot.Bot, id mess
 	defer cancelRun()
 	lock.attachCancel(cancelRun)
 
-	// 回合活动标记：长回合在产生可见输出前给用户一条受理提示
-	runCtx, activity := withTurnActivity(runCtx)
-	stopAck := p.scheduleTurnAck(activity, b, id, isGroup)
-	defer stopAck()
-
 	if isGroup {
 		// 未@计数达到阈值时补清（与旧流程一致：会话重建后在本轮开始前处理）
 		p.applyNoMentionClear(runCtx, id, chat)
@@ -157,53 +150,6 @@ func (p *AIChatPlugin) newTurnContext(parent context.Context) (context.Context, 
 		}
 	}
 	return runCtx, cancel
-}
-
-// turnActivityKey / turnActivity 回合活动标记：是否有过可见输出。
-// 通过 context 传递，processChatBatch 在首次产生可见输出时置位；
-// 测试直接调用 processChatBatch 时无该值，标记静默跳过。
-type turnActivityKey struct{}
-
-type turnActivity struct {
-	visible  atomic.Bool
-	notified atomic.Bool
-}
-
-// withTurnActivity 给回合上下文挂上活动标记。
-func withTurnActivity(ctx context.Context) (context.Context, *turnActivity) {
-	act := &turnActivity{}
-	return context.WithValue(ctx, turnActivityKey{}, act), act
-}
-
-// markTurnVisible 标记本回合已产生可见输出（流式首字/最终发送）。
-func markTurnVisible(ctx context.Context) {
-	if act, ok := ctx.Value(turnActivityKey{}).(*turnActivity); ok && act != nil {
-		act.visible.Store(true)
-	}
-}
-
-// scheduleTurnAck 长任务受理提示：回合运行超过 taskAckAfter 仍无可见输出时
-// 发一条"正在处理"提示（每个回合最多一条）。返回停止函数，回合结束时调用。
-func (p *AIChatPlugin) scheduleTurnAck(act *turnActivity, b bot.Bot, id message.QID, isGroup bool) func() {
-	if p.taskAckAfter <= 0 || act == nil {
-		return func() {}
-	}
-	done := make(chan struct{})
-	var once sync.Once
-	timer := time.NewTimer(p.taskAckAfter)
-	go func() {
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-			if act.visible.Load() || act.notified.Swap(true) {
-				return
-			}
-			p.Logger.Info("回合运行较久且暂无输出，发送受理提示", "id", id, "is_group", isGroup, "after", p.taskAckAfter)
-			p.sendPlainText(b, id, isGroup, "收到，正在处理中，请稍候…")
-		case <-done:
-		}
-	}()
-	return func() { once.Do(func() { close(done) }) }
 }
 
 // stopSessionWork 停止会话的当前回合与全部后台子代理，返回（回合是否被停止,

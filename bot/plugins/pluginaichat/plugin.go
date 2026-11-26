@@ -175,9 +175,6 @@ type AIChatPlugin struct {
 	turnSoftTimeout time.Duration
 	// turnHardTimeout 回合硬截止：到时取消当前回合；0=不限制
 	turnHardTimeout time.Duration
-	// taskAckAfter 长任务受理提示阈值：回合运行超过该时长仍无可见输出时先发一条
-	// "正在处理"提示；0=关闭
-	taskAckAfter time.Duration
 
 	// subagentSem 后台子代理全局并发信号量（容量来自 subagent.max_concurrent_global，
 	// nil 表示不限制）；对话回合使用 rateCh，两者互不挤占
@@ -636,8 +633,6 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	stream := p.newStreamReplyFor(b, id, isGroup, batch)
 	if stream != nil {
 		chatOpts.OnStreamDelta = func(delta string) {
-			// 首个流式增量即视为可见输出：长任务受理提示不再发送
-			markTurnVisible(ctx)
 			stream.OnDelta(delta)
 		}
 		chatOpts.OnStreamRoundEnd = stream.OnRoundEnd
@@ -792,7 +787,6 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	// 最终回复片段（流式未生效时才会走到这里，如平台不支持流式或流式已退化）：
 	// AI 用 ||| 指定了消息边界时拆成多条逐条发送，否则整段一条；片段过多
 	//（> forwardSegThreshold）时平台支持合并转发（QQ）则改为一条合并转发，避免刷屏。
-	markTurnVisible(ctx)
 	segments := replySegments(resp)
 	if isGroup {
 		// 群聊中 @ 本批所有发言者（去重），让排队消息的每个人都收到回应；
@@ -941,7 +935,6 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	// 回合预算：软截止只提醒、硬截止才取消；0 表示关闭/不限制（见 turnConfig）
 	p.turnSoftTimeout = secondsDuration(p.cfg.Turn.SoftTimeoutSec)
 	p.turnHardTimeout = secondsDuration(p.cfg.Turn.HardTimeoutSec)
-	p.taskAckAfter = secondsDuration(p.cfg.Turn.AckAfterSec)
 	// 插件生命周期上下文：后台运行器与异步子代理继承，OnUnload 统一取消
 	p.runCtx, p.runCancel = context.WithCancel(context.Background())
 	// 后台子代理全局并发池（与对话回合的 rateCh 分开计算）

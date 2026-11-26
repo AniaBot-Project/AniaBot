@@ -479,7 +479,6 @@ AI 回复不再有"5 分钟一刀切"的总超时：框架的 `bot.msg_event_tim
 | `plugin.ai_chat_bot.turn.progress_reminder_after` | `6` | 同一回合内工具轮数达到该值时提醒模型「可把独立部分交给 `subagent_run`」；`0` 关闭 |
 | `plugin.ai_chat_bot.turn.repeat_tool_warn` | `3,5,8` | 相同工具 + 相同参数连续重复达到这些次数时各提醒一次「换方案/收尾」；留空关闭 |
 | `plugin.ai_chat_bot.turn.no_progress_limit` | `12` | 相同工具 + 相同参数连续重复达到该次数时**终止回合**并回报原因（防死循环烧 token）；`0` 表示只提醒不终止 |
-| `plugin.ai_chat_bot.turn.ack_after_sec` | `20` | 回合运行超过该时长仍无可见输出时，先给用户发一条「正在处理」提示；`0` 关闭 |
 | `plugin.ai_chat_bot.llm.request_timeout_sec` | `600` | 单次 LLM HTTP 请求（含流式）的总超时（秒），每次重试/备用模型切换独立计时；超时按可重试错误处理；`0` 不限制（不推荐） |
 | `plugin.ai_chat_bot.llm.stream_idle_timeout_sec` | `120` | 流式响应超过该时长没有新内容时中断本次请求并重试，防止上游半挂；`0` 不限制 |
 

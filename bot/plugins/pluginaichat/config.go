@@ -311,7 +311,6 @@ type turnConfig struct {
 	ProgressReminderAfter int    `cfg:"progress_reminder_after" label:"委派提醒阈值(轮)" group:"AI 对话 · 回合与任务" help:"同一回合内连续工具调用达到该轮数时提醒模型考虑委派子代理；0 表示关闭" default:"6"`
 	RepeatToolWarn        string `cfg:"repeat_tool_warn" label:"重复调用提醒阈值" group:"AI 对话 · 回合与任务" help:"相同工具+参数重复调用达到这些次数时提醒模型换方案，逗号分隔；留空关闭提醒" default:"3,5,8"`
 	NoProgressLimit       int    `cfg:"no_progress_limit" label:"无进展终止阈值(步)" group:"AI 对话 · 回合与任务" help:"相同工具+参数重复调用达到该次数时终止回合并回报原因，防止死循环烧 token；0 表示只提醒不终止" default:"12"`
-	AckAfterSec           int    `cfg:"ack_after_sec" label:"长任务受理提示(秒)" group:"AI 对话 · 回合与任务" help:"回合运行超过该时长仍无可见输出时，先给用户发一条「正在处理」提示；0 表示关闭" default:"20"`
 }
 
 // llmGuardConfig 单次 LLM 请求的保护：请求总超时 + 流式空闲超时。

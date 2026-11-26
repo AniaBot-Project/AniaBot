@@ -554,8 +554,7 @@ registry and goal continuation, and owns all session-scoped tool registration.
   and starts a `b.Go` runner per session. The runner tries the session lock (one turn at a time
   per session; cross-session concurrency is bounded by `rate_limit`, default 4), creates the
   turn context with `context.WithoutCancel` + a lifecycle link to `p.runCtx` + an optional hard
-  deadline (`turn.hard_timeout_sec`, default 14400 = 4h; 0 = no limit), schedules the long-task
-  ack (`turn.ack_after_sec`, default 20s without visible output), drains queued batches in a
+  deadline (`turn.hard_timeout_sec`, default 14400 = 4h; 0 = no limit), drains queued batches in a
   loop (messages arriving mid-batch are injected by the tool loop before each LLM request — see
   `interject.go` — and leftovers become the next batch) and, after a normally completed turn,
   triggers goal continuation (`maybeDriveGoal`). If the global rate-limit slots are full and the

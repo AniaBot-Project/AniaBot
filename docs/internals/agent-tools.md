@@ -192,7 +192,6 @@ AI 消息入口不再在框架事件 goroutine 里跑完整个回合（`runner.g
 
 - **入口零阻塞**：`submitTurn` 入队后 `b.Go("runner:<session>")` 唤醒运行器；同一会话同一时刻只有一个回合（会话锁），跨会话并发受 `rate_limit`（默认 4）槽位限制。长回合不再占用框架事件 worker，也不受 `bot.msg_event_timeout_sec` 约束。
 - **回合上下文**：`context.WithoutCancel(parent)` 保留 Value（追踪、图片注册表）但丢弃框架 deadline；关联插件生命周期 `p.runCtx`（`OnUnload` 取消）；`turn.hard_timeout_sec`（默认 14400s，0=不限）叠加硬截止。
-- **长任务受理提示**：回合运行超过 `turn.ack_after_sec`（默认 20s）仍无可见输出（流式首字/最终发送）时，先发一条「正在处理」提示，每回合最多一条。
 - **排空循环**：每批处理完继续 drain 队列；批次执行期间到达的消息由工具循环在每次 LLM 请求前经 `ChatOptions.Steer` 注入当前对话（见下节），没来得及注入的剩余消息由运行器作为下一批处理。出错/取消时该批用户消息之外的行为由错误处理决定（`/stop` 是显式停止，会清空该会话排队队列）。一个回合**正常结束**后运行器调用 `maybeDriveGoal` 尝试推进当前会话的长任务目标（无排队消息、无运行中子代理、目标 active 且已武装时才开下一轮）。
 - **任务注册表**（`taskstore.go` + `tasktrack.go` + `teamlog.go`）：回合与异步子代理各写一行 `ania_agent_task`（`id` 形如 `t-<36进制纳秒>-<4位hex>`，含 `session_key/parent_id/kind/status/title/prompt/result/error/stop_reason/tokens/meta/时间戳`），kind 取值 `turn|subagent|handoff|bash_job|clock|proactive|goal_round|workflow|team_task|team_run|team_member`，状态机 `queued → running → completed|failed|timeout|cancelled|interrupted`，停止原因 `completed|aborted|max_tokens|error|watchdog|timeout|user_stop`。任务表写入走 3 秒独立 ctx，DB 卡住不影响回合；建表失败降级为不持久化（不阻断启动）。同一条启动路径还建 `ania_agent_goal`（长任务目标表，`session_key` 主键），建表失败时目标功能同样自动降级。
 - **重启恢复**：启动时 `MarkInterrupted` 把残留的 `queued/running/waiting` 标记为 `interrupted`；默认不自动续跑，用户发 `/resume <任务ID>` 把本会话的 `interrupted` 子代理/交接任务重新入队（任务目标作为系统来源消息），由主 AI 带着会话历史继续。
@@ -209,7 +208,7 @@ AI 消息入口不再在框架事件 goroutine 里跑完整个回合（`runner.g
 - **图片可加载**：插话消息中的图片登记到本轮请求的图片注册表，`load_images` 可按哈希加载。
 - **Query 日志可审计**：注入的插话在注入时追加到本次 Query 日志的 `Query` 字段（原始输入保留，每段以 `【处理中插话】` 开头、带发送者前缀；经 `Logger.Update` 增量落盘，与工具明细的增量写互不覆盖），面板「Query 日志」、导出 JSON 与关键词筛选都能看到。
 - **前缀归属**：`ChatOptions.Steer` 的契约是「回调返回的文本原样作为 user 消息追加」，编排层不再追加 `[追加指令]` 前缀——子代理 steering 的 `[追加指令]` 由 `subagent.go` 的 `steerDrain` 自己加，主会话插话加 `【用户插话】`/`【后台消息】`。
-- **`send_message`**：主会话工具（`sendtool.go`，`getChat` 注册），参数 `text`，经既有 `SendText` 回调发送，因此 `|||` 拆分多条、群聊 @ 发起人、合并转发阈值等语义与普通回复一致；每个回合最多 8 条，超出返回错误结果；发送后 AI 必须继续执行并照常给出最终回复。发送成功才计入「已有可见输出」（长任务受理提示不再补发）；不注册给子代理、定时任务与面板试聊室，计划模式不拦截（不是副作用操作）。
+- **`send_message`**：主会话工具（`sendtool.go`，`getChat` 注册），参数 `text`，经既有 `SendText` 回调发送，因此 `|||` 拆分多条、群聊 @ 发起人、合并转发阈值等语义与普通回复一致；每个回合最多 8 条，超出返回错误结果；发送后 AI 必须继续执行并照常给出最终回复。不注册给子代理、定时任务与面板试聊室，计划模式不拦截（不是副作用操作）。
 
 ## 子代理（subagent）
 
