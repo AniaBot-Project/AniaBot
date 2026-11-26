@@ -197,7 +197,7 @@ AI 消息入口不再在框架事件 goroutine 里跑完整个回合（`runner.g
 - **重启恢复**：启动时 `MarkInterrupted` 把残留的 `queued/running/waiting` 标记为 `interrupted`；默认不自动续跑，用户发 `/resume <任务ID>` 把本会话的 `interrupted` 子代理/交接任务重新入队（任务目标作为系统来源消息），由主 AI 带着会话历史继续。
 - **清理**：按 `task.retention_days`（默认 7 天）每 6 小时删除已结束且过期的任务记录。
 - **用户命令**：`/tasks`（本会话运行中子代理 + 最近后台任务 + 最近回合，含状态/耗时/类型/停止原因/token）、`/stop`（取消当前回合并清空本会话排队、暂停自动续跑目标）、`/stop <任务ID 或名字>`（只取消指定后台子代理）、`/resume <任务ID>`、`/goal [status|pause|resume|clear]`。
-- **面板**：`taskpanel.go` 实现 `adminpanel.TaskSource` / `GoalSource`，只读展示最近后台任务（`GET /api/agent-tasks`，默认 100 条、上限 500；返回 `parent_id` 与 `prompt`）与 active 目标（`GET /api/agent-goals`），对应面板「后台任务」页；页面默认开启「仅后台工作」隐藏历史 `turn` 行，并支持 `?task=` 深链定位。团队运行（`team_run` 父记录）、团队成员（`team_member` 子记录）与异步子代理的详情里可直接看到任务指令、成员产出摘要与工具调用步骤（`meta.tool_calls`，单条最多 50 步、参数/结果按 `tasklog` 上限截断）；工具步骤在执行中即按约 3 秒节流增量落盘（`taskStore.UpdateProgress` 只改 `meta`/`updated_at`，`finished_at = 0` 保证迟到的进度写不会覆盖终态），面板轮询即可看到进度，收尾时再写全量。任务行点击弹出详情窗（与 Query 日志一致，避免就地展开占高度），历史 `turn` 行在详情里提供跳转到对应 Query 日志（`/#/querylogs?task_id=…`），Query 日志详情里的 `task_id` 也可反向跳回本页。
+- **面板**：`taskpanel.go` 实现 `adminpanel.TaskSource` / `GoalSource`，只读展示最近后台任务（`GET /api/agent-tasks`，默认 100 条、上限 500；返回 `parent_id` 与 `prompt`）与 active 目标（`GET /api/agent-goals`），对应面板「后台任务」页。`AgentTasks` 的 SQL 用 `kind <> 'turn'` 排除升级前的历史回合行（普通回合的完整过程在 Query 日志），并支持 `?task=` 深链定位。团队运行（`team_run` 父记录）、团队成员（`team_member` 子记录）与异步子代理的详情里可直接看到任务指令、成员产出摘要与工具调用步骤（`meta.tool_calls`，单条最多 50 步、参数/结果按 `tasklog` 上限截断）；工具步骤在执行中即按约 3 秒节流增量落盘（`taskStore.UpdateProgress` 只改 `meta`/`updated_at`，`finished_at = 0` 保证迟到的进度写不会覆盖终态），面板轮询即可看到进度，收尾时再写全量。任务行点击弹出详情窗（与 Query 日志一致，避免就地展开占高度），Query 日志详情里的 `task_id` 可跳回本页。
 
 ### 运行中插话（next-step 注入）与 send_message
 

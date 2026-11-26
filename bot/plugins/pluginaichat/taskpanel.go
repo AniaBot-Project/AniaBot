@@ -28,6 +28,8 @@ const taskPanelColumns = `id, session_key, parent_id, kind, status, title, promp
 // AgentTasks 返回最近的后台任务（updated_at 倒序），实现 adminpanel.TaskSource。
 // 后台任务表没有「全局最近 N 条」的 store 方法，这里直接走一条只读 SQL：
 // 两侧数据库方言通用，只用到 ? 占位符与 LIMIT，无需方言分支。
+// 升级前遗留的 turn 行不返回：普通回合的完整过程在 Query 日志里，面板不再展示
+// 这类历史行（任务表里仍保留到保留期结束，供 /tasks 兼容旧数据）。
 func (p *AIChatPlugin) AgentTasks(limit int) []plugininfo.AgentTaskView {
 	empty := []plugininfo.AgentTaskView{}
 	if p.taskStore == nil || p.historyDB == nil {
@@ -39,7 +41,8 @@ func (p *AIChatPlugin) AgentTasks(limit int) []plugininfo.AgentTaskView {
 	ctx, cancel := p.taskDB()
 	defer cancel()
 	rows, err := p.historyDB.QueryContext(ctx,
-		`SELECT `+taskPanelColumns+` FROM ania_agent_task ORDER BY updated_at DESC, id DESC LIMIT ?`, limit)
+		`SELECT `+taskPanelColumns+` FROM ania_agent_task WHERE kind <> ? `+
+			`ORDER BY updated_at DESC, id DESC LIMIT ?`, taskKindTurn, limit)
 	if err != nil {
 		p.taskPanelLogger().Warn("面板读取后台任务失败", "error", err.Error())
 		return empty

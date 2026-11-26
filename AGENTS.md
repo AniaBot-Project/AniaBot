@@ -554,11 +554,10 @@ registry and goal continuation, and owns all session-scoped tool registration.
   `parent_id` and `prompt`, so team runs / members and subagents can be inspected with their task
   instructions, member summaries and tool-call steps;
   `AgentGoals()` lists `active` rows from `ania_agent_goal` (`GET /api/agent-goals`). Missing SQL
-  backend or query failure returns an empty slice. The page defaults to 「仅后台工作」 (hides the
-  legacy `turn` rows a long-running bot may still have); clicking a row opens a detail modal
-  (matching the Query-log page), a `turn` row links to the matching Query-log entries
-  (`/#/querylogs?task_id=…`), and Query-log rows with `task_id` link back to
-  `/#/agent-tasks?task=…`. Subagent / team-member tool steps are also
+  backend or query failure returns an empty slice. `AgentTasks` excludes legacy `turn` rows
+  (their canonical record is the Query log), so the page only lists real background work;
+  clicking a row opens a detail modal (matching the Query-log page), and Query-log rows with
+  `task_id` link back to `/#/agent-tasks?task=…`. Subagent / team-member tool steps are also
   written **while running**: `taskStore.UpdateProgress` (meta + `updated_at` only,
   `WHERE finished_at = 0` so a late progress write can never overwrite a terminal state) is fed by
   `subagentTrace.flushProgress`, throttled by `subagentProgressInterval` (3s; the first tool call

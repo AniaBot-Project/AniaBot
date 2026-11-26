@@ -34,13 +34,6 @@
           />
         </label>
         <div class="flex items-center gap-3 pb-0.5">
-          <label
-            class="flex items-center gap-1.5 text-xs text-slate-500 select-none cursor-pointer"
-            title="隐藏升级前遗留的普通回合记录（turn）；普通回合的完整过程请到「Query 日志」查看"
-          >
-            <Switch v-model="backgroundOnly" size="small" />
-            仅后台工作
-          </label>
           <label class="flex items-center gap-1.5 text-xs text-slate-500 select-none cursor-pointer">
             <Switch v-model="autoRefresh" size="small" />
             自动刷新（10s）
@@ -81,7 +74,7 @@
       <div class="px-6 py-4 border-b border-zinc-100 flex items-center justify-between gap-3">
         <div class="min-w-0">
           <h2 class="text-[10px] tracking-[0.15em] uppercase text-zinc-800 font-medium">后台任务</h2>
-          <p class="text-[11px] text-zinc-400 mt-1">子代理 / 交接 / 工作流 / 团队运行等后台工作的完整执行记录都在这里；普通回合改由 Query 日志记录，历史回合默认隐藏（可关闭「仅后台工作」或筛选类型查看）</p>
+          <p class="text-[11px] text-zinc-400 mt-1">子代理 / 交接 / 工作流 / 团队运行等后台工作的完整执行记录都在这里；普通回合的完整过程请到「Query 日志」查看</p>
         </div>
         <span class="text-[11px] text-zinc-400 shrink-0">
           最近 {{ tasks.length }} 条<template v-if="filtered.length !== tasks.length"> · 筛选后 {{ filtered.length }} 条</template>
@@ -171,17 +164,6 @@
           <dd class="text-zinc-700">{{ fmtTimeFull(detail.created_at) }} → {{ fmtTimeFull(detail.started_at) }} → {{ fmtTimeFull(detail.finished_at) }}</dd>
           <dt class="task-dt">状态 / 停止原因</dt>
           <dd class="text-zinc-700">{{ statusText(detail.status) }} / {{ stopText(detail.stop_reason) }}</dd>
-          <template v-if="detail.kind === 'turn'">
-            <dt class="task-dt">Query 日志</dt>
-            <dd>
-              <RouterLink
-                class="text-[#0071e3] hover:underline"
-                :to="{ path: '/querylogs', query: { task_id: detail.id } }"
-              >
-                查看本次回合的完整执行过程 →
-              </RouterLink>
-            </dd>
-          </template>
           <template v-if="detail.prompt">
             <dt class="task-dt">任务指令</dt>
             <dd><pre class="task-pre task-pre-open">{{ detail.prompt }}</pre></dd>
@@ -311,9 +293,8 @@ const router = useRouter()
 const REFRESH_MS = 10000
 
 // 后台任务类型：与插件 taskstore.go 的 taskKind* 常量保持一致。
-// turn 是升级前的历史类型（普通回合曾写入任务表），新记录不会再出现。
+// 普通回合（历史 turn）不再由接口返回，这里只列当前会产生的后台工作类型。
 const kindLabels = {
-  turn: '会话回合（历史）',
   subagent: '子代理',
   handoff: '交接',
   workflow: '后台工作流',
@@ -369,8 +350,6 @@ const goals = ref([])
 const loading = ref(true)
 const loadError = ref('')
 const autoRefresh = ref(true)
-// 默认只看真正的后台工作：历史 turn 行与 Query 日志重复，关闭开关才显示
-const backgroundOnly = ref(true)
 // 从 Query 日志跳转时定位的任务 ID（URL query.task）
 const linkedTaskID = ref('')
 // 深链只在首次加载/路由变化后自动打开一次，避免自动刷新把用户关掉的弹窗又弹开
@@ -389,13 +368,10 @@ function openDetail(record) {
   detail.value = record
 }
 
-// 显式选择「会话回合（历史）」时不受开关影响，否则该筛选项永远为空
-const showTurn = computed(() => !backgroundOnly.value || filters.kind === 'turn')
-
+// 显式选择具体类型时按类型筛选
 const filtered = computed(() => {
   const kw = filters.keyword.toLowerCase()
   return tasks.value.filter((t) => {
-    if (!showTurn.value && t.kind === 'turn') return false
     if (filters.status && t.status !== filters.status) return false
     if (filters.kind && t.kind !== filters.kind) return false
     if (!kw) return true
@@ -411,13 +387,9 @@ const deepLinkMissing = computed(() =>
   !tasks.value.some((t) => t.id === linkedTaskID.value),
 )
 
-// 统计卡只看当前范围（仅后台工作时排除历史回合；显式选历史回合时只看回合），
-// 不受状态/关键词筛选影响
+// 统计卡只看当前后台任务，不受状态/关键词筛选影响
 const stats = computed(() => {
-  const scoped = filters.kind === 'turn'
-    ? tasks.value.filter((t) => t.kind === 'turn')
-    : backgroundOnly.value ? tasks.value.filter((t) => t.kind !== 'turn') : tasks.value
-  const count = (...states) => scoped.filter((t) => states.includes(t.status)).length
+  const count = (...states) => tasks.value.filter((t) => states.includes(t.status)).length
   return [
     { key: 'running', label: '运行中', ink: 'text-[#0071e3]', value: count('running'), hint: 'running' },
     { key: 'waiting', label: '等待', ink: 'text-[#ff9f0a]', value: count('queued', 'waiting'), hint: 'queued / waiting' },
@@ -435,7 +407,8 @@ async function load() {
   loading.value = true
   try {
     const [taskList, goalList] = await Promise.all([api.getAgentTasks(taskLimit()), api.getAgentGoals()])
-    tasks.value = Array.isArray(taskList) ? taskList : []
+    // 面板数据源已排除历史 turn；前端再防御一次，避免旧接口/自定义数据源把回合混进来
+    tasks.value = (Array.isArray(taskList) ? taskList : []).filter((t) => t.kind !== 'turn')
     goals.value = Array.isArray(goalList) ? goalList : []
     loadError.value = ''
     // 弹窗内容随轮询更新（执行中进度、状态变化）
@@ -473,8 +446,6 @@ function applyDeepLink() {
   filters.status = ''
   filters.kind = ''
   filters.keyword = id
-  // 深链可能是历史回合，先关闭「仅后台工作」再展示
-  backgroundOnly.value = false
 }
 
 // 清除定位：恢复默认范围与关键词，并去掉 URL 参数
@@ -482,7 +453,6 @@ function clearDeepLink() {
   linkedTaskID.value = ''
   deepLinkOpened = false
   filters.keyword = ''
-  backgroundOnly.value = true
   if (route.query.task) {
     const query = { ...route.query }
     delete query.task
