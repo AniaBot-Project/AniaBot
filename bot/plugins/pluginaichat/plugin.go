@@ -121,6 +121,10 @@ type AIChatPlugin struct {
 	// queryLogger Query 日志记录器（面板「Query 日志」页数据源）；为 nil 表示功能未启用
 	queryLogger *querylog.Logger
 
+	// recentTurns 本进程内最近完成的回合摘要（/tasks 展示用）。普通回合不再
+	// 写入任务表（避免与 Query 日志重复），完整明细与持久记录以 Query 日志为准。
+	recentTurns *recentTurnLog
+
 	// extraUsage 会话级派生 LLM 用量暂存（异步子代理 / team_run 成员 / 备用图片
 	// 识别等主请求循环之外的消耗），finishQuery 时并入该会话的 Query 日志；
 	// 键为 sessionKey（见 usageacc.go）
@@ -586,12 +590,6 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	// Query 日志：本次触发的原始用户输入与最终响应记录在同一条日志里。提前创建
 	// 记录，使运行中插话在注入时能把文本追加进 Query 字段（面板/导出可审计）。
 	recorder := p.beginQuery(chat, id, isGroup, batch, extraText)
-	// 回合任务 ID 写入 Query 日志（stop_reason 在收尾时按错误原因回填）
-	if recorder != nil {
-		if info := turnInfoFrom(ctx); info != nil {
-			recorder.taskID = info.taskID
-		}
-	}
 
 	chatOpts := p.buildChatOptions()
 	// 运行中插话：本次请求执行期间到达的新消息（含子代理完成等合成消息）在每次
@@ -1249,6 +1247,8 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 
 	// Query 日志：记录每次 AI 回复的完整执行过程（面板「Query 日志」页数据源）
 	p.initQueryLogger()
+	// 最近回合摘要：普通回合不再写入任务表，/tasks 的「最近回合」由内存保留
+	p.recentTurns = newRecentTurnLog()
 
 	// 对话历史行级化：按行存于 ania_chat_session/ania_chat_message
 	// （增量追加只插入新行，避免整段 JSON 反复全量重写）；探测或建表失败时

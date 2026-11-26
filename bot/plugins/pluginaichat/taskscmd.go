@@ -46,11 +46,20 @@ func (p *AIChatPlugin) renderTasks(id message.QID, isGroup bool) string {
 		cancel()
 		if err == nil && len(tasks) > 0 {
 			sort.SliceStable(tasks, func(i, j int) bool { return tasks[i].CreatedAt > tasks[j].CreatedAt })
-			sb.WriteString("\n最近任务：\n")
+			sb.WriteString("\n最近后台任务：\n")
 			for _, t := range tasks {
 				sb.WriteString(renderTaskLine(t))
 				sb.WriteString("\n")
 			}
+		}
+	}
+
+	// 最近回合（进程内内存摘要）：普通回合不再写入任务表，完整明细见面板 Query 日志
+	if turns := p.recentTurns.list(sessionKey(id, isGroup)); len(turns) > 0 {
+		sb.WriteString("\n最近回合：\n")
+		for _, t := range turns {
+			sb.WriteString(renderRecentTurnLine(t))
+			sb.WriteString("\n")
 		}
 	}
 
@@ -72,12 +81,12 @@ func renderTaskLine(t *agentTask) string {
 		kind = "子代理"
 	case taskKindHandoff:
 		kind = "交接"
-	case taskKindBashJob:
-		kind = "后台命令"
 	case taskKindTurn:
-		kind = "回合"
-	case taskKindClock:
-		kind = "定时"
+		kind = "回合（历史）"
+	case taskKindWorkflow:
+		kind = "工作流"
+	case taskKindTeamTask:
+		kind = "任务板"
 	case taskKindTeamRun:
 		kind = "团队"
 	case taskKindTeamMember:
@@ -102,6 +111,19 @@ func renderTaskLine(t *agentTask) string {
 		tokens = fmt.Sprintf(" · %d tok", t.Tokens)
 	}
 	return fmt.Sprintf("- %s [%s]%s %s%s%s", t.ID, taskStatusLabel(t.Status), dur, kind, reason, tokens+"："+truncateTaskTitle(t.Title))
+}
+
+// renderRecentTurnLine 单条最近回合摘要（内存态，无任务 ID）。
+func renderRecentTurnLine(t recentTurn) string {
+	dur := ""
+	if t.StartedAt > 0 && t.FinishedAt >= t.StartedAt {
+		dur = " " + formatStatusDuration(time.Duration(t.FinishedAt-t.StartedAt)*time.Second)
+	}
+	reason := ""
+	if t.StopReason != "" && t.StopReason != taskStopCompleted {
+		reason = "（" + t.StopReason + "）"
+	}
+	return fmt.Sprintf("- [%s]%s %s%s", taskStatusLabel(t.Status), dur, truncateTaskTitle(t.Title), reason)
 }
 
 // taskStatusLabel 任务状态的中文展示。

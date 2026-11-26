@@ -269,6 +269,16 @@ export function buildQueryLogs(now) {
     if (proactive) item.kind = 'proactive'
     if (panel) item.note = '面板试聊会话「通用试聊」'
     else item.senders = [pick(MEMBERS).id]
+    // 普通回合的停止原因（面板列表/详情展示；主动互动与试聊不记录）
+    if (!proactive && !panel) {
+      item.stop_reason = {
+        success: 'completed',
+        running: '',
+        error: 'error',
+        timeout: 'timeout',
+        interrupted: 'user_stop',
+      }[status] || ''
+    }
     if (q.tools.length) {
       item.tool_calls = q.tools.map(([name, args]) => ({
         name, arguments: args,
@@ -288,7 +298,14 @@ export function buildQueryLogs(now) {
     n++
     t += ri(4, 9) * 60 * 1000
   }
-  return items.reverse()
+  items.reverse()
+  // 演示「历史回合 ↔ Query 日志」互跳：给一条群聊记录关联后台任务页的历史 turn
+  const linked = items.find((x) => !x.kind && x.chat_type === 'group')
+  if (linked) {
+    linked.task_id = 't-m5x1a2-3f9c'
+    linked.stop_reason = 'completed'
+  }
+  return items
 }
 
 //  定时任务日志（tasklog.Entry 形状，围绕 3 个真实任务）

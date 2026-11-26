@@ -31,12 +31,12 @@ func TestQueryLogsExport(t *testing.T) {
 		},
 	}}
 	rec := httptest.NewRecorder()
-	s.handleQueryLogsExport(rec, httptest.NewRequest("GET", "/api/querylogs/export?chat_type=group&kind=proactive", nil))
+	s.handleQueryLogsExport(rec, httptest.NewRequest("GET", "/api/querylogs/export?chat_type=group&kind=proactive&task_id=t-abc", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if got.ChatType != "group" || got.Kind != querylog.KindProactive {
+	if got.ChatType != "group" || got.Kind != querylog.KindProactive || got.TaskID != "t-abc" {
 		t.Fatalf("筛选条件未传给数据源: %+v", got)
 	}
 	if got.Limit != 0 {
@@ -72,11 +72,11 @@ func TestQueryLogsClear(t *testing.T) {
 		},
 	}}
 	rec := httptest.NewRecorder()
-	s.handleQueryLogsClear(rec, httptest.NewRequest("DELETE", "/api/querylogs?keyword=天气&chat_type=group", nil))
+	s.handleQueryLogsClear(rec, httptest.NewRequest("DELETE", "/api/querylogs?keyword=天气&chat_type=group&task_id=t-abc", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if got.Keyword != "天气" || got.ChatType != "group" {
+	if got.Keyword != "天气" || got.ChatType != "group" || got.TaskID != "t-abc" {
 		t.Fatalf("筛选条件未透传: %+v", got)
 	}
 	var out struct {

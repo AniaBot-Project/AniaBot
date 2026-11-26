@@ -102,8 +102,9 @@ type Entry struct {
 	// completed / aborted / max_tokens / error / watchdog / timeout / user_stop，
 	// 但按普通字符串存储（不强制枚举）；空表示未记录（历史记录或非普通对话）。
 	StopReason string `json:"stop_reason"`
-	// TaskID 本次 Query 关联的后台任务 ID（任务表 ania_agent_task 的 t-...），
-	// 空表示没有关联任务（如主动互动、面板试聊）。
+	// TaskID 本次 Query 关联的后台任务 ID（任务表 ania_agent_task 的 t-...）。
+	// 空表示没有关联任务：普通回合已不再登记为任务，主动互动与面板试聊同样留空；
+	// 仅升级前的历史记录可能带值（面板据此提供到「后台任务」页的跳转）。
 	TaskID string `json:"task_id"`
 }
 
@@ -286,6 +287,7 @@ type Filter struct {
 	Start    time.Time // 起始时间（含），零值不限
 	End      time.Time // 截止时间（含），零值不限
 	Keyword  string    // 用户输入内容包含的关键词（不区分大小写）
+	TaskID   string    // 关联的后台任务 ID（精确匹配，供面板从任务页跳转时定位）
 	Before   string    // 分页游标：仅返回比该日志 ID 更旧的记录（空为从最新开始）
 	Limit    int       // 返回条数上限，<=0 返回全部（导出用）
 }
@@ -314,6 +316,9 @@ func (f Filter) match(e Entry) bool {
 		return false
 	}
 	if f.Keyword != "" && !strings.Contains(strings.ToLower(e.Query), strings.ToLower(f.Keyword)) {
+		return false
+	}
+	if f.TaskID != "" && e.TaskID != f.TaskID {
 		return false
 	}
 	return true

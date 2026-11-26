@@ -178,8 +178,8 @@ func TestTruncate(t *testing.T) {
 func TestQueryFilter(t *testing.T) {
 	l, _ := newSQLLogger(t)
 	base := time.Date(2026, 7, 26, 12, 0, 0, 0, time.Local)
-	l.Record(Entry{Time: base.Add(-2 * time.Hour), ChatType: "group", TargetID: "10001", Senders: []string{"111"}, Query: "今天天气怎么样"})
-	l.Record(Entry{Time: base.Add(-1 * time.Hour), ChatType: "group", TargetID: "10001", Senders: []string{"222", "111"}, Query: "帮我看看新闻"})
+	l.Record(Entry{Time: base.Add(-2 * time.Hour), ChatType: "group", TargetID: "10001", Senders: []string{"111"}, Query: "今天天气怎么样", TaskID: "t-aaa"})
+	l.Record(Entry{Time: base.Add(-1 * time.Hour), ChatType: "group", TargetID: "10001", Senders: []string{"222", "111"}, Query: "帮我看看新闻", TaskID: "t-bbb"})
 	l.Record(Entry{Time: base, ChatType: "friend", TargetID: "333", Senders: []string{"333"}, Query: "天气如何"})
 
 	cases := []struct {
@@ -198,6 +198,8 @@ func TestQueryFilter(t *testing.T) {
 		{"按时间区间", Filter{Start: base.Add(-2 * time.Hour), End: base.Add(-1 * time.Hour)}, 2},
 		{"按关键词", Filter{Keyword: "天气"}, 2},
 		{"关键词不区分大小写", Filter{Keyword: "NEWS"}, 0},
+		{"按任务 ID", Filter{TaskID: "t-bbb"}, 1},
+		{"任务 ID 无命中", Filter{TaskID: "t-zzz"}, 0},
 		{"组合条件", Filter{ChatType: "group", Sender: "111", Keyword: "新闻"}, 1},
 		{"无命中", Filter{Sender: "999"}, 0},
 		{"limit 截断", Filter{Limit: 1}, 1},

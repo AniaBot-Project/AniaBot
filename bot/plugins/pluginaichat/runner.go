@@ -94,13 +94,7 @@ func (p *AIChatPlugin) runSessionOnce(parent context.Context, b bot.Bot, id mess
 
 	start := time.Now()
 	batch := p.drainPending(id, isGroup)
-	turnTask := p.beginTurnTask(id, isGroup, turnTaskTitle(batch))
-	taskID := ""
-	if turnTask != nil {
-		taskID = turnTask.ID
-	}
-	// 把任务 ID 传给 processChatBatch → Query 日志（stop_reason/task_id）
-	runCtx = withTurnInfo(runCtx, taskID)
+	title := turnTaskTitle(batch)
 	for len(batch) > 0 {
 		p.setActiveContext(id, isGroup, newActiveRequest(cancelRun, batchRequester(batch), start))
 		next, ok := p.drainChatBatches(runCtx, b, id, isGroup, chat, batch)
@@ -110,12 +104,12 @@ func (p *AIChatPlugin) runSessionOnce(parent context.Context, b bot.Bot, id mess
 			if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 				status, reason = taskStatusTimeout, taskStopTimeout
 			}
-			p.finishTurnTask(turnTask, status, reason, "")
+			p.rememberTurn(id, isGroup, title, status, reason, start)
 			return true
 		}
 		batch = next
 	}
-	p.finishTurnTask(turnTask, taskStatusCompleted, taskStopCompleted, "")
+	p.rememberTurn(id, isGroup, title, taskStatusCompleted, taskStopCompleted, start)
 	// 长任务目标续跑：会话空闲且目标已武装时，自动开启下一轮
 	p.maybeDriveGoal(b, id, isGroup)
 	return true
@@ -175,26 +169,7 @@ func (p *AIChatPlugin) stopSessionWork(id message.QID, isGroup bool, by message.
 	return stopped, subagents, ""
 }
 
-// turnInfoKey / turnInfo 回合元信息：写入 Query 日志的任务 ID 等。通过
-// context 传递，测试直接调用 processChatBatch 时无该值（字段留空）。
-type turnInfoKey struct{}
-
-type turnInfo struct {
-	taskID string
-}
-
-// withTurnInfo 给回合上下文挂上任务 ID。
-func withTurnInfo(ctx context.Context, taskID string) context.Context {
-	return context.WithValue(ctx, turnInfoKey{}, &turnInfo{taskID: taskID})
-}
-
-// turnInfoFrom 读取回合元信息（不存在返回 nil）。
-func turnInfoFrom(ctx context.Context) *turnInfo {
-	info, _ := ctx.Value(turnInfoKey{}).(*turnInfo)
-	return info
-}
-
-// stopReasonFromError 把一次请求的结束错误映射为任务/Query 日志的停止原因。
+// stopReasonFromError 把一次请求的结束错误映射为 Query 日志/任务的停止原因。
 func stopReasonFromError(err error) string {
 	if err == nil {
 		return taskStopCompleted

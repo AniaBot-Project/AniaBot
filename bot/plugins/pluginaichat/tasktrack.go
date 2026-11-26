@@ -19,49 +19,6 @@ func (p *AIChatPlugin) taskDB() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), taskDBTimeout)
 }
 
-// beginTurnTask 记录一次主回合任务（taskStore 未启用时返回 nil，静默降级）。
-func (p *AIChatPlugin) beginTurnTask(id message.QID, isGroup bool, title string) *agentTask {
-	if p.taskStore == nil {
-		return nil
-	}
-	now := time.Now().Unix()
-	t := &agentTask{
-		ID:         newTaskID(),
-		SessionKey: sessionKey(id, isGroup),
-		Kind:       taskKindTurn,
-		Status:     taskStatusRunning,
-		Title:      truncateTaskTitle(title),
-		CreatedAt:  now,
-		StartedAt:  now,
-		UpdatedAt:  now,
-	}
-	ctx, cancel := p.taskDB()
-	defer cancel()
-	if err := p.taskStore.Create(ctx, t); err != nil {
-		p.Logger.Warn("记录主回合任务失败", "error", err.Error())
-		return nil
-	}
-	return t
-}
-
-// finishTurnTask 更新主回合任务的终态（task 为 nil 时静默忽略）。
-func (p *AIChatPlugin) finishTurnTask(t *agentTask, status, stopReason, errText string) {
-	if p.taskStore == nil || t == nil {
-		return
-	}
-	now := time.Now().Unix()
-	t.Status = status
-	t.StopReason = stopReason
-	t.Error = errText
-	t.FinishedAt = now
-	t.UpdatedAt = now
-	ctx, cancel := p.taskDB()
-	defer cancel()
-	if err := p.taskStore.Update(ctx, t); err != nil {
-		p.Logger.Warn("更新主回合任务失败", "task", t.ID, "error", err.Error())
-	}
-}
-
 // beginSubagentTask 为一次异步子代理创建任务记录（taskStore 未启用时返回 nil）。
 // kind 为 taskKindSubagent / taskKindHandoff。
 func (p *AIChatPlugin) beginSubagentTask(taskID string, id message.QID, isGroup bool, task, kind string) *agentTask {
@@ -275,7 +232,8 @@ func (p *AIChatPlugin) handleResumeCommand(b bot.Bot, msg message.Message, taskI
 	return false, nil
 }
 
-// turnTaskTitle 从一批消息生成任务标题：取最后一条消息的文本段（rune 安全）。
+// turnTaskTitle 从一批消息生成回合标题：取最后一条消息的文本段（rune 安全），
+// 供 /tasks 的「最近回合」摘要展示。
 func turnTaskTitle(batch []message.Message) string {
 	for i := len(batch) - 1; i >= 0; i-- {
 		var sb strings.Builder

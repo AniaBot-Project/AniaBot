@@ -133,6 +133,9 @@ func (p *AIChatPlugin) evictOneChat(key string, e *chatEntry) {
 		if p.todoManager != nil {
 			p.todoManager.clear(key)
 		}
+		if p.recentTurns != nil {
+			p.recentTurns.remove(key)
+		}
 		p.sessionBots.Delete(key)
 		// 历史消息工具名随会话销毁（下次重建时 registerPlatformTools 重新登记）
 		p.historyTools.Delete(key)

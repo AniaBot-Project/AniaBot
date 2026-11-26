@@ -17,9 +17,10 @@ import (
 )
 
 // 后台任务注册表的行级存储 schema：所有「离开当前回合继续存在的工作」
-// （回合 / 子代理 / 交接 / 后台命令 / 定时 / 主动互动 / 目标轮次 / 工作流 /
-// 团队运行与团队成员）统一落一行，按 id 主键读写，session_key/status 只用于
-// 收窄查询。时间戳统一 unix 秒（INTEGER/BIGINT），不用 CURRENT_TIMESTAMP：
+// （子代理 / 交接 / 工作流 / 团队运行与团队成员 / 团队任务板）统一落一行，
+// 按 id 主键读写，session_key/status 只用于收窄查询。普通回合已不再写入
+// （其完整过程由 Query 日志记录，避免两套表重复），turn 仅为旧记录兼容。
+// 时间戳统一 unix 秒（INTEGER/BIGINT），不用 CURRENT_TIMESTAMP：
 // 任务状态机在 Go 侧推进，数据库只做持久化，时间由调用方掌握便于测试与恢复判断。
 //
 // 与对话历史/知识库的取舍一致：任务需要按 id 单行更新状态、按会话倒序列出、
@@ -28,13 +29,12 @@ import (
 
 const (
 	// 任务种类：一条任务记录描述哪种后台工作。
-	taskKindTurn       = "turn"        // 会话回合
+	//
+	// turn 是升级前遗留的类型：普通回合曾与 Query 日志一起各写一行，现已不再
+	// 写入任务表（避免重复），面板仅在读取旧记录时识别它。
+	taskKindTurn       = "turn"        // 历史遗留的会话回合记录
 	taskKindSubagent   = "subagent"    // 子代理
 	taskKindHandoff    = "handoff"     // 回合交接出的后台任务
-	taskKindBashJob    = "bash_job"    // 后台命令
-	taskKindClock      = "clock"       // 定时任务触发
-	taskKindProactive  = "proactive"   // 主动互动
-	taskKindGoalRound  = "goal_round"  // 目标续跑轮次
 	taskKindWorkflow   = "workflow"    // 后台工作流（DAG 多子代理编排）
 	taskKindTeamTask   = "team_task"   // 团队任务板条目
 	taskKindTeamRun    = "team_run"    // Agent 团队一次并行执行（父记录）
@@ -73,12 +73,12 @@ const (
 	taskIDRandomBytes = 2
 )
 
-// agentTask 一条后台任务记录（回合/子代理/handoff/后台命令/定时/主动/目标轮次）。
+// agentTask 一条后台任务记录（子代理/交接/工作流/团队/任务板；turn 为旧记录）。
 type agentTask struct {
 	ID         string // "t-<unixnano 36 进制>-<4 位随机 hex>"
 	SessionKey string // "g:<id>" / "f:<id>"
 	ParentID   string // 父任务 ID，可为空
-	Kind       string // turn|subagent|handoff|bash_job|clock|proactive|goal_round
+	Kind       string // turn|subagent|handoff|workflow|team_task|team_run|team_member
 	Status     string // queued|running|waiting|completed|failed|timeout|cancelled|interrupted
 	Title      string
 	Prompt     string // 任务指令/摘要（可为空）

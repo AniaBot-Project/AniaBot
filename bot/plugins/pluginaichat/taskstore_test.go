@@ -262,7 +262,7 @@ func TestTaskCreateFillsDefaultsAndEmptyFields(t *testing.T) {
 	before := time.Now().Unix()
 	task := &agentTask{
 		SessionKey: "f:42",
-		Kind:       taskKindClock,
+		Kind:       taskKindSubagent,
 		Status:     taskStatusQueued,
 	}
 	if err := s.Create(ctx, task); err != nil {
