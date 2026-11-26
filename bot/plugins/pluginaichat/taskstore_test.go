@@ -188,6 +188,66 @@ func TestTaskCreateGetUpdateRoundTrip(t *testing.T) {
 	assertTaskFieldsEqual(t, got, updated)
 }
 
+// TestTaskUpdateProgress 执行中进度增量更新只改 meta/updated_at：状态、结果、
+// token 等字段保持不动；任务收尾（finished_at 非 0）后进度写不再生效，
+// 迟到的进度不会把终态覆盖回「运行中」。
+func TestTaskUpdateProgress(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newTaskTestStore(t)
+
+	if _, err := s.UpdateProgress(ctx, "", `{"tool_calls_total":0}`); err == nil {
+		t.Fatal("空任务 ID 的 UpdateProgress 应返回错误")
+	}
+
+	task := taskFixture("g:1001", 1_700_000_000)
+	if err := s.Create(ctx, task); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	before := time.Now().Unix()
+	n, err := s.UpdateProgress(ctx, task.ID, `{"tool_calls_total":1}`)
+	if err != nil || n != 1 {
+		t.Fatalf("UpdateProgress = (%d, %v), want (1, nil)", n, err)
+	}
+
+	got, ok, err := s.Get(ctx, task.ID)
+	if err != nil || !ok {
+		t.Fatalf("Get = (%v, %v, %v)", got, ok, err)
+	}
+	if got.Meta != `{"tool_calls_total":1}` {
+		t.Fatalf("进度写后 Meta = %q, want 进度 JSON", got.Meta)
+	}
+	if got.Status != taskStatusRunning || got.Result != task.Result || got.Tokens != task.Tokens ||
+		got.StopReason != "" || got.Error != "" || got.FinishedAt != 0 {
+		t.Fatalf("进度写不应改动其它字段: %+v", got)
+	}
+	if got.UpdatedAt < before {
+		t.Fatalf("进度写后 UpdatedAt = %d, want >= %d", got.UpdatedAt, before)
+	}
+
+	// 收尾：状态、结果、token 与 finished_at 落库
+	task.Status = taskStatusCompleted
+	task.StopReason = taskStopCompleted
+	task.Result = "调研结论"
+	task.Tokens = 120
+	task.Meta = `{"iterations":2}`
+	task.FinishedAt = time.Now().Unix()
+	if err := s.Update(ctx, task); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	n, err = s.UpdateProgress(ctx, task.ID, `{"tool_calls_total":9}`)
+	if err != nil || n != 0 {
+		t.Fatalf("收尾后的 UpdateProgress = (%d, %v), want (0, nil)", n, err)
+	}
+	final, ok, err := s.Get(ctx, task.ID)
+	if err != nil || !ok {
+		t.Fatalf("收尾后 Get = (%v, %v, %v)", final, ok, err)
+	}
+	if final.Status != taskStatusCompleted || final.Meta != `{"iterations":2}` || final.Result != "调研结论" {
+		t.Fatalf("迟到的进度写覆盖了终态: %+v", final)
+	}
+}
+
 // TestTaskCreateFillsDefaultsAndEmptyFields Create 为空 ID 自动生成 ID、
 // CreatedAt/UpdatedAt 为 0 时填 now；未提供的文本字段落盘为空串、数值为 0，
 // 读取时不会变成 NULL 扫描错误。

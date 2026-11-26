@@ -29,6 +29,12 @@ import (
 // 反而撑大响应体积，因此单独限制得比定时任务日志（200 条）更小。
 const subagentTraceMaxCalls = 50
 
+// subagentProgressInterval 执行中增量落盘的最小间隔。工具观察回调是串行的，每次
+// 工具完成都整行写一次 DB（最多 50 条参数/结果）代价偏高；按 3 秒节流后，面板
+// 「后台任务」页 10 秒轮询仍能近乎实时地看到进度，写入量则封顶为每任务每 3 秒一次。
+// 首次工具调用不等间隔、立即落一次，保证任务启动后很快能看到第一步。
+const subagentProgressInterval = 3 * time.Second
+
 // teamRunMeta team_run 父记录 Meta JSON 的约定：整体耗时与成员摘要，面板无需
 // 关联子记录即可展示「每个成员是否成功、用了多少 token、耗时多久」。
 type teamRunMeta struct {
@@ -65,32 +71,66 @@ type subagentRunMeta struct {
 type subagentTrace struct {
 	calls []tasklog.ToolCallRecord
 	total int
+
+	// progress 执行中增量落盘回调（nil 表示不落盘）：按 flushEvery 节流，把
+	// 「已完成的工具步骤 + 总数 + 已耗时」交给调用方写进任务行 Meta。与 Query
+	// 日志的 onToolCall 增量写同一思路，只是多了时间节流以控制写放大。
+	progress   func(calls []tasklog.ToolCallRecord, total int, elapsed time.Duration)
+	flushEvery time.Duration
+	lastFlush  time.Time
+	start      time.Time
+	now        func() time.Time // 测试可注入；nil 用 time.Now
 }
 
 // newSubagentTrace 创建一个空的执行步骤收集器（nil 表示不收集）。
+// 开始时间在此记录，执行中增量落盘用它算已耗时（与终态 Meta 的 duration_ms 同口径）。
 func newSubagentTrace() *subagentTrace {
-	return &subagentTrace{}
+	return &subagentTrace{flushEvery: subagentProgressInterval, start: time.Now()}
 }
 
-// observe 工具调用观察回调：追加一条执行记录，明细最多保留 subagentTraceMaxCalls 条。
+// observe 工具调用观察回调：追加一条执行记录（明细最多保留 subagentTraceMaxCalls
+// 条），并按节流间隔把已有进度增量写进任务行。
 func (t *subagentTrace) observe(info aichat.ToolCallInfo) {
 	if t == nil {
 		return
 	}
 	t.total++
-	if len(t.calls) >= subagentTraceMaxCalls {
+	if len(t.calls) < subagentTraceMaxCalls {
+		rec := tasklog.ToolCallRecord{
+			Name:       info.Name,
+			Arguments:  tasklog.Truncate(info.Arguments, tasklog.MaxArgsRunes),
+			Result:     tasklog.Truncate(info.Result, tasklog.MaxResultRunes),
+			DurationMs: info.DurationMs,
+		}
+		if info.Err != nil {
+			rec.Error = info.Err.Error()
+		}
+		t.calls = append(t.calls, rec)
+	}
+	t.flushProgress()
+}
+
+// flushProgress 按 flushEvery 节流，把已完成步骤增量写进任务行（无 progress 回调
+// 时是空操作）。写入由回调同步完成（3 秒独立上下文），因此进度写严格有序，不存在
+// 「旧快照覆盖新快照」；回调拿到切片副本，不会被后续 append 改写。
+func (t *subagentTrace) flushProgress() {
+	if t == nil || t.progress == nil {
 		return
 	}
-	rec := tasklog.ToolCallRecord{
-		Name:       info.Name,
-		Arguments:  tasklog.Truncate(info.Arguments, tasklog.MaxArgsRunes),
-		Result:     tasklog.Truncate(info.Result, tasklog.MaxResultRunes),
-		DurationMs: info.DurationMs,
+	now := time.Now()
+	if t.now != nil {
+		now = t.now()
 	}
-	if info.Err != nil {
-		rec.Error = info.Err.Error()
+	if !t.lastFlush.IsZero() && now.Sub(t.lastFlush) < t.flushEvery {
+		return
 	}
-	t.calls = append(t.calls, rec)
+	t.lastFlush = now
+	calls, total := t.snapshot()
+	var elapsed time.Duration
+	if !t.start.IsZero() {
+		elapsed = now.Sub(t.start)
+	}
+	t.progress(append([]tasklog.ToolCallRecord(nil), calls...), total, elapsed)
 }
 
 // snapshot 返回收集到的明细与总调用数（含被上限丢弃的）；nil 收集器返回空。
@@ -99,6 +139,36 @@ func (t *subagentTrace) snapshot() ([]tasklog.ToolCallRecord, int) {
 		return nil, 0
 	}
 	return t.calls, t.total
+}
+
+// subagentProgressMeta 构造执行中的进度 Meta JSON（已耗时 + 已完成的工具步骤）。
+// LLM 轮数只有收尾时才知道，进度里留空，面板按 duration_ms 展示「执行中」。
+func subagentProgressMeta(elapsed time.Duration, calls []tasklog.ToolCallRecord, total int) string {
+	return encodeRunMeta(subagentRunMeta{
+		DurationMs:     elapsed.Milliseconds(),
+		ToolCalls:      calls,
+		ToolCallsTotal: total,
+	})
+}
+
+// trackProgress 返回子代理/团队成员执行中的进度落盘回调（挂到 subagentTrace.progress），
+// 把已完成的工具步骤与已耗时写进任务行 Meta。taskStore 不可用或任务行未建成（nil）
+// 时返回 nil，trace 侧自动跳过。
+//
+// 与终态写入同一约定：走 taskDB 的 3 秒独立上下文，DB 卡住不阻塞工具循环；
+// UpdateProgress 只改 meta/updated_at 且带 finished_at = 0 条件，任务收尾后迟到的
+// 进度写不会覆盖终态（面板不会看到「已完成的任务又变回运行中」）。
+func (p *AIChatPlugin) trackProgress(task *agentTask) func(calls []tasklog.ToolCallRecord, total int, elapsed time.Duration) {
+	if p.taskStore == nil || task == nil {
+		return nil
+	}
+	return func(calls []tasklog.ToolCallRecord, total int, elapsed time.Duration) {
+		ctx, cancel := p.taskDB()
+		defer cancel()
+		if _, err := p.taskStore.UpdateProgress(ctx, task.ID, subagentProgressMeta(elapsed, calls, total)); err != nil {
+			p.Logger.Debug("写入子代理执行进度失败", "task", task.ID, "error", err.Error())
+		}
+	}
 }
 
 // encodeRunMeta 编码运行记录 Meta JSON；结构不可能编码失败，失败时返回空串

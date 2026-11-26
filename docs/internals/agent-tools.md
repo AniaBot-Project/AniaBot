@@ -197,7 +197,7 @@ AI 消息入口不再在框架事件 goroutine 里跑完整个回合（`runner.g
 - **重启恢复**：启动时 `MarkInterrupted` 把残留的 `queued/running/waiting` 标记为 `interrupted`；默认不自动续跑，用户发 `/resume <任务ID>` 把本会话的 `interrupted` 子代理/交接任务重新入队（任务目标作为系统来源消息），由主 AI 带着会话历史继续。
 - **清理**：按 `task.retention_days`（默认 7 天）每 6 小时删除已结束且过期的任务记录。
 - **用户命令**：`/tasks`（本会话运行中子代理 + 最近任务，含状态/耗时/类型/停止原因/token）、`/stop`（取消当前回合并清空本会话排队、暂停自动续跑目标）、`/stop <任务ID 或名字>`（只取消指定后台子代理）、`/resume <任务ID>`、`/goal [status|pause|resume|clear]`。
-- **面板**：`taskpanel.go` 实现 `adminpanel.TaskSource` / `GoalSource`，只读展示最近任务（`GET /api/agent-tasks`，默认 100 条、上限 500；返回 `parent_id` 与 `prompt`）与 active 目标（`GET /api/agent-goals`），对应面板「后台任务」页。团队运行（`team_run` 父记录）、团队成员（`team_member` 子记录）与异步子代理的详情里可直接看到任务指令、成员产出摘要与工具调用步骤（`meta.tool_calls`，单条最多 50 步、参数/结果按 `tasklog` 上限截断）。
+- **面板**：`taskpanel.go` 实现 `adminpanel.TaskSource` / `GoalSource`，只读展示最近任务（`GET /api/agent-tasks`，默认 100 条、上限 500；返回 `parent_id` 与 `prompt`）与 active 目标（`GET /api/agent-goals`），对应面板「后台任务」页。团队运行（`team_run` 父记录）、团队成员（`team_member` 子记录）与异步子代理的详情里可直接看到任务指令、成员产出摘要与工具调用步骤（`meta.tool_calls`，单条最多 50 步、参数/结果按 `tasklog` 上限截断）；工具步骤在执行中即按约 3 秒节流增量落盘（`taskStore.UpdateProgress` 只改 `meta`/`updated_at`，`finished_at = 0` 保证迟到的进度写不会覆盖终态），面板轮询即可看到进度，收尾时再写全量。
 
 ### 运行中插话（next-step 注入）与 send_message
 
@@ -281,7 +281,7 @@ clock 任务里注册的是**异步**子代理变体（`clocksubagent.go`）：�
 - 团队按 scope（`g:` / `f:` / 全局 `global`）隔离，`team:` 命名空间 KV 存取；团队名严格校验（中文/字母/数字/下划线/连字符）
 - `team_run` 让多个成员**并行**执行（上限 `teamMaxMembers`=5，防并发风暴），每个成员复用 `runSubagentWithOptions` 并只传角色提示词——模型与执行参数（超时/轮数）全部与普通子代理一致（即跟随主模型）
 - 成员结果汇总返回主 AI；团队定义可保存复用（`team_create/list/delete`），面板提供管理页
-- **运行记录**：每次 `team_run` 写一条 `kind=team_run` 父记录（总体任务、汇总报告、成员合计 token/耗时、成员摘要），每个成员写一条 `kind=team_member` 子记录（`parent_id` 指向父记录，含任务指令、成员产出、状态、耗时与工具调用步骤），面板「后台任务」页可展开查看；taskStore 不可用时整体降级为不记录
+- **运行记录**：每次 `team_run` 写一条 `kind=team_run` 父记录（总体任务、汇总报告、成员合计 token/耗时、成员摘要），每个成员写一条 `kind=team_member` 子记录（`parent_id` 指向父记录，含任务指令、成员产出、状态、耗时与工具调用步骤；执行中按约 3 秒增量刷新），面板「后台任务」页可展开查看；taskStore 不可用时整体降级为不记录
 - 团队成员的一次性会话不注册团队工具（防递归组建团队）
 
 ## 知识库（knowledge）

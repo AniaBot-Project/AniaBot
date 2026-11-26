@@ -374,6 +374,8 @@ func (p *AIChatPlugin) runTeamMember(ctx context.Context, b bot.Bot, id message.
 
 	memberTask := p.beginTeamMemberTask(runTask, id, isGroup, spec)
 	trace := newSubagentTrace()
+	// 执行中增量回写工具步骤，面板「后台任务」页可在成员跑完前就看到进度
+	trace.progress = p.trackProgress(memberTask)
 	start := time.Now()
 	resp, usage, err := p.runSubagentWithOptions(ctx, b, id, isGroup, spec.task, subagentRunOptions{
 		prompt:     spec.prompt,

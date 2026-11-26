@@ -95,6 +95,134 @@ func TestSubagentTraceNilSafe(t *testing.T) {
 	}
 }
 
+// flushRecord 一次执行中进度落盘回调的记录（测试用）。
+type flushRecord struct {
+	calls   []tasklog.ToolCallRecord
+	total   int
+	elapsed time.Duration
+}
+
+// TestSubagentTraceProgressThrottle 首次工具调用立即落盘（面板很快能看到进展），
+// 间隔内的调用被节流，超过间隔后再次落盘；回调拿到的切片是副本。
+func TestSubagentTraceProgressThrottle(t *testing.T) {
+	base := time.Now()
+	now := base
+	var writes []flushRecord
+	tr := newSubagentTrace()
+	tr.start = base
+	tr.now = func() time.Time { return now }
+	tr.progress = func(calls []tasklog.ToolCallRecord, total int, elapsed time.Duration) {
+		writes = append(writes, flushRecord{calls: calls, total: total, elapsed: elapsed})
+	}
+
+	tr.observe(aichat.ToolCallInfo{Name: "bash", Arguments: "ls", Result: "ok"})
+	if len(writes) != 1 {
+		t.Fatalf("首次调用应立即落盘, 实际 %d 次", len(writes))
+	}
+	if writes[0].total != 1 || len(writes[0].calls) != 1 || writes[0].calls[0].Name != "bash" {
+		t.Fatalf("首次进度 = %+v, want 1 条 bash", writes[0])
+	}
+
+	now = base.Add(subagentProgressInterval - time.Millisecond)
+	tr.observe(aichat.ToolCallInfo{Name: "bash"})
+	if len(writes) != 1 {
+		t.Fatalf("间隔内的调用应被节流, 实际落盘 %d 次", len(writes))
+	}
+
+	now = base.Add(subagentProgressInterval)
+	tr.observe(aichat.ToolCallInfo{Name: "web_search"})
+	if len(writes) != 2 {
+		t.Fatalf("超过间隔应再次落盘, 实际 %d 次", len(writes))
+	}
+	if writes[1].total != 3 || len(writes[1].calls) != 3 || writes[1].elapsed != subagentProgressInterval {
+		t.Fatalf("第二次进度 = %+v, want total=3 calls=3 elapsed=%s", writes[1], subagentProgressInterval)
+	}
+	// 副本：首次回调持有的切片不随后续 observe 增长
+	if len(writes[0].calls) != 1 {
+		t.Fatalf("进度回调拿到的是共享切片: 首次记录变成 %d 条", len(writes[0].calls))
+	}
+}
+
+// TestSubagentProgressWrittenToTaskRow 执行中把工具步骤增量写进任务行 Meta：
+// 面板轮询即可看到进度（状态仍 running、token 尚未回填）；收尾后终态覆盖，
+// 迟到的进度写被 finished_at 条件拦下，不会把任务打回「运行中」。
+func TestSubagentProgressWrittenToTaskRow(t *testing.T) {
+	p := newTeamLogTestPlugin(t)
+	qid := message.FromUint64(4004)
+	task := p.beginSubagentTask(newTaskID(), qid, true, "调研任务", taskKindSubagent)
+	if task == nil {
+		t.Fatal("子代理任务行应已创建")
+	}
+
+	tr := newSubagentTrace()
+	tr.progress = p.trackProgress(task)
+	tr.observe(aichat.ToolCallInfo{Name: "web_search", Arguments: `{"q":"x"}`, Result: "命中 2 条", DurationMs: 12})
+
+	ctx, cancel := p.taskDB()
+	got, ok, err := p.taskStore.Get(ctx, task.ID)
+	cancel()
+	if err != nil || !ok {
+		t.Fatalf("读回执行中任务失败: ok=%v err=%v", ok, err)
+	}
+	if got.Status != taskStatusRunning || got.Tokens != 0 || got.FinishedAt != 0 {
+		t.Fatalf("执行中任务行状态异常: %+v", got)
+	}
+	var progress subagentRunMeta
+	if err := json.Unmarshal([]byte(got.Meta), &progress); err != nil {
+		t.Fatalf("进度 Meta 解析失败: %v (%q)", err, got.Meta)
+	}
+	if len(progress.ToolCalls) != 1 || progress.ToolCalls[0].Name != "web_search" || progress.ToolCallsTotal != 1 {
+		t.Fatalf("执行中工具步骤 = %+v, want 1 条 web_search", progress)
+	}
+
+	// 面板查询路径（taskpanel.go 的 AgentTasks）同样能看到执行中的进度
+	views := p.AgentTasks(10)
+	var view *plugininfo.AgentTaskView
+	for i := range views {
+		if views[i].ID == task.ID {
+			view = &views[i]
+			break
+		}
+	}
+	if view == nil {
+		t.Fatalf("面板视图缺少执行中任务 %s", task.ID)
+	}
+	if view.Status != taskStatusRunning {
+		t.Fatalf("面板视图状态 = %s, want running", view.Status)
+	}
+	var viewMeta subagentRunMeta
+	if err := json.Unmarshal([]byte(view.Meta), &viewMeta); err != nil {
+		t.Fatalf("面板视图 Meta 解析失败: %v (%q)", err, view.Meta)
+	}
+	if len(viewMeta.ToolCalls) != 1 || viewMeta.ToolCalls[0].Name != "web_search" {
+		t.Fatalf("面板视图工具步骤 = %+v, want 1 条 web_search", viewMeta.ToolCalls)
+	}
+
+	// 收尾：终态写全量步骤与结果
+	usage := aichat.TokenUsage{TotalTokens: 12, Iterations: 2}
+	p.finishSubagentTaskMeta(task, "调研结论", usage, nil, subagentTraceMeta(usage, 2*time.Second, tr))
+
+	// 迟到的进度写（收尾后仍有一次 flush）不得覆盖终态
+	tr.progress([]tasklog.ToolCallRecord{{Name: "late"}}, 9, time.Minute)
+
+	ctx, cancel = p.taskDB()
+	final, ok, err := p.taskStore.Get(ctx, task.ID)
+	cancel()
+	if err != nil || !ok {
+		t.Fatalf("读回终态任务失败: ok=%v err=%v", ok, err)
+	}
+	if final.Status != taskStatusCompleted || final.Result != "调研结论" || final.Tokens != 12 || final.FinishedAt == 0 {
+		t.Fatalf("终态记录异常: %+v", final)
+	}
+	var finalMeta subagentRunMeta
+	if err := json.Unmarshal([]byte(final.Meta), &finalMeta); err != nil {
+		t.Fatalf("终态 Meta 解析失败: %v (%q)", err, final.Meta)
+	}
+	if len(finalMeta.ToolCalls) != 1 || finalMeta.ToolCalls[0].Name != "web_search" || finalMeta.Iterations != 2 {
+		t.Fatalf("终态 Meta = %+v, want 1 条 web_search + iterations=2", finalMeta)
+	}
+}
+
 // ---- 团队运行记录落库 ----
 
 func TestTeamRunRecording(t *testing.T) {

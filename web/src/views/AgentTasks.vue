@@ -133,9 +133,12 @@
                         </template>
                       </dl>
 
-                      <!-- 子代理/成员执行概况（Meta 的 LLM 轮数与毫秒级耗时） -->
+                      <!-- 子代理/成员执行概况（Meta 的 LLM 轮数与毫秒级耗时；执行中只有耗时） -->
                       <p v-if="metaOf(record).iterations || metaOf(record).duration_ms" class="text-[11px] text-zinc-500">
-                        LLM 轮数 {{ metaOf(record).iterations || 0 }}<template v-if="metaOf(record).duration_ms"> · 耗时 {{ fmtMs(metaOf(record).duration_ms) }}</template>
+                        <template v-if="metaOf(record).iterations">LLM 轮数 {{ metaOf(record).iterations }}</template>
+                        <template v-if="metaOf(record).iterations && metaOf(record).duration_ms"> · </template>
+                        <template v-if="metaOf(record).duration_ms">耗时 {{ fmtMs(metaOf(record).duration_ms) }}</template>
+                        <template v-if="record.status === 'running'"> · 执行中</template>
                       </p>
 
                       <!-- 团队成员摘要（team_run 的 Meta.members）：成员产出在该成员的子记录行里 -->
@@ -159,7 +162,11 @@
                       <div v-if="metaOf(record).tool_calls?.length" class="space-y-2">
                         <h3 class="task-subtitle">
                           工具调用
-                          <span v-if="metaOf(record).tool_calls_total > metaOf(record).tool_calls.length" class="normal-case tracking-normal text-zinc-300">
+                          <!-- 执行中：步骤按约 3 秒增量落盘，面板 10 秒轮询即可看到进展 -->
+                          <span v-if="record.status === 'running'" class="normal-case tracking-normal text-zinc-400">
+                            （执行中，已完成 {{ metaOf(record).tool_calls_total }} 步）
+                          </span>
+                          <span v-else-if="metaOf(record).tool_calls_total > metaOf(record).tool_calls.length" class="normal-case tracking-normal text-zinc-300">
                             （共 {{ metaOf(record).tool_calls_total }} 次，仅保留前 {{ metaOf(record).tool_calls.length }} 条）
                           </span>
                         </h3>

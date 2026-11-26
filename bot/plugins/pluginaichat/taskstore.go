@@ -241,6 +241,13 @@ const taskUpdateSQL = `UPDATE ania_agent_task SET ` +
 	`result = ?, error = ?, stop_reason = ?, tokens = ?, meta = ?, ` +
 	`started_at = ?, finished_at = ?, updated_at = ? WHERE id = ?`
 
+// taskProgressSQL 执行中的进度增量更新：只写 meta 与 updated_at，其余字段保持
+// 不动（子代理每完成几步工具调用就回写一次，整行覆盖会把并发推进的字段写回旧值）。
+// 条件 finished_at = 0 是竞态护栏：任务收尾（Update 写入 finished_at）之后迟到的
+// 进度写自动失效，绝不会用「运行中」的快照覆盖终态。
+const taskProgressSQL = `UPDATE ania_agent_task SET meta = ?, updated_at = ? ` +
+	`WHERE id = ? AND finished_at = 0`
+
 // taskRowScanner 同时适配 *sql.Row 与 *sql.Rows（避免依赖其他文件的同名接口）。
 type taskRowScanner interface {
 	Scan(dest ...any) error
@@ -322,6 +329,25 @@ func (s *taskStore) Update(ctx context.Context, t *agentTask) error {
 		return err
 	}
 	return nil
+}
+
+// UpdateProgress 增量更新一条未结束任务的执行进度（仅 meta 与 updated_at），
+// 返回实际更新行数；任务已收尾（finished_at 非 0）或不存在时返回 0（不是错误）。
+//
+// 用于子代理/团队成员执行中按间隔回写工具步骤（见 subagentTrace.flushProgress）：
+// 面板「后台任务」页轮询时即可看到进度，不必等整个任务结束。只改 meta 是有意的
+// ——状态、结果、token 等字段仍由终态写入独占，进度写永远不会让它们回退。
+func (s *taskStore) UpdateProgress(ctx context.Context, id, meta string) (int64, error) {
+	if id == "" {
+		return 0, fmt.Errorf("更新后台任务进度失败：任务 ID 为空")
+	}
+	res, err := s.db.ExecContext(ctx, taskProgressSQL, meta, time.Now().Unix(), id)
+	if err != nil {
+		s.logger.Error("更新后台任务进度失败", "id", id, "error", err)
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
 // Get 按 ID 读取一条任务；不存在返回 (nil, false, nil)。

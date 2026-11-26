@@ -313,8 +313,10 @@ func (p *AIChatPlugin) launchAsyncSubagent(
 			defer func() { <-p.subagentSem }()
 		}
 		defer p.removeAsyncSubagent(id, isGroup, launchID)
-		// 执行步骤观测：子代理的工具调用随任务记录落库，面板「后台任务」页可展开查看
+		// 执行步骤观测：子代理的工具调用随任务记录落库，面板「后台任务」页可展开查看。
+		// 执行中按 3 秒节流增量回写（面板轮询即可看到进度），结束时再写终态全量。
 		trace := newSubagentTrace()
+		trace.progress = p.trackProgress(subTask)
 		started := time.Now()
 		result, usage, runErr := p.runSubagentWithOptions(asyncCtx, b, id, isGroup, task,
 			subagentRunOptions{timeoutSec: opts.TimeoutSec, steer: steer, trace: trace}, opts.Callbacks)

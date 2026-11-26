@@ -548,7 +548,11 @@ registry and goal continuation, and owns all session-scoped tool registration.
   `parent_id` and `prompt`, so team runs / members and subagents can be inspected with their task
   instructions, member summaries and tool-call steps;
   `AgentGoals()` lists `active` rows from `ania_agent_goal` (`GET /api/agent-goals`). Missing SQL
-  backend or query failure returns an empty slice.
+  backend or query failure returns an empty slice. Subagent / team-member tool steps are also
+  written **while running**: `taskStore.UpdateProgress` (meta + `updated_at` only,
+  `WHERE finished_at = 0` so a late progress write can never overwrite a terminal state) is fed by
+  `subagentTrace.flushProgress`, throttled by `subagentProgressInterval` (3s; the first tool call
+  flushes immediately), so the 10s panel poll shows steps as they happen.
 - **Session runner & task registry** (`runner.go`, `taskstore.go`, `tasktrack.go`, `taskscmd.go`):
   `OnGroupMsg`/`OnFriendMsg` only gate/command/enqueue and return at once; `submitTurn` enqueues
   and starts a `b.Go` runner per session. The runner tries the session lock (one turn at a time
