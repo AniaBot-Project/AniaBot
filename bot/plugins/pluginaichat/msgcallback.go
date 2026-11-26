@@ -30,7 +30,9 @@ func MakeGroupCallback(bot bot.Bot, groupId, userId, selfId message.QID, logger 
 			}
 			for i, seg := range segments {
 				builder := msgchain.Builder().Group()
-				if i == 0 {
+				if i == 0 && userId != message.FromUint64(0) {
+					// 合成消息批次可能以 Sender.UserId=0 结尾（如子代理结果），
+					// 此时不 @ 任何无效用户
 					builder.Mention(userId)
 					builder.Text(" " + seg)
 				} else {

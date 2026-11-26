@@ -549,6 +549,8 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	// 平台历史消息工具（aitool）执行时经它登记拉取到的历史消息图片
 	imageReg := newImageRegistry()
 	ctx = context.WithValue(ctx, imageRegistryKey{}, imageReg)
+	// 主动发消息配额（send_message 工具）：随本次回合重置，防止长任务刷屏
+	ctx = withSendMessageBudget(ctx, sendMessageMaxPerTurn)
 	var msgFuncs llmtool.CallBackFuncs
 	if isGroup {
 		msgFuncs = MakeGroupCallback(b, id, lastMsg.Sender.UserId, batchSelfID(batch), p.Logger)
@@ -585,6 +587,10 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	}
 
 	chatOpts := p.buildChatOptions()
+	// 运行中插话：本次请求执行期间到达的新消息（含子代理完成等合成消息）在每次
+	// LLM 请求前以 user 消息注入当前工具循环，不再等整轮结束后才排队处理；
+	// 未及时注入的剩余消息仍留在队列里，由运行器作为下一批处理。
+	chatOpts.Steer = p.buildInterjectionSteer(b, id, isGroup, imageReg)
 	// 请求级工具门禁：计划模式 → PreToolUse 钩子 → 管理员审批 → 工具审批（见 gate.go）。
 	// 审批提示走纯发送闭包，与进行中的流式消息互不干扰。
 	chatOpts.PreToolGate = p.buildPreToolGate(sessionKey(id, isGroup), agenthook.AgentKindMain, lastMsg.Sender.UserId,

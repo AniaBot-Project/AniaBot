@@ -266,7 +266,7 @@ bot.luckylilia.http.target_url    = http://localhost:6690 # LLBot HTTP 服务端
 | `plugin.ai_chat_bot.api_key` | 空（必填） | API 密钥 |
 | `plugin.ai_chat_bot.model` | `deepseek-chat` | 主模型名称 |
 | `plugin.ai_chat_bot.multimodal` | `false` | 主模型是否支持图片输入 |
-| `plugin.ai_chat_bot.rate_limit` | `4` | 同时执行的 AI **对话回合**上限，超出后直接拒绝并清空该会话排队消息；后台任务（子代理/交接）使用独立并发池，不占该名额 |
+| `plugin.ai_chat_bot.rate_limit` | `4` | 同时执行的 AI **对话回合**上限，超出后直接拒绝；会话本身空闲时清空该会话排队消息，会话自己的回合正在运行则消息保留、由插话注入消费；后台任务（子代理/交接）使用独立并发池，不占该名额 |
 | `plugin.ai_chat_bot.headers` | `[]` | 自定义请求头，附加到全部 LLM 请求（主对话 / 子代理 / 定时任务 / 压缩器 / 备用识图 / 备用模型，以及启用向量检索时的 embedding 请求）；每行一个，格式 `Name: Value` 或 `Name=Value`，同名覆盖默认头（含 `User-Agent`），适合自建网关鉴权、路由标记等场景；值中支持 `${session}` / `${session_id}` / `${session_type}` 会话占位符；非法行跳过并记日志 |
 
 ::: tip 关于自定义请求头

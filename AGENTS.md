@@ -446,12 +446,16 @@ registry and goal continuation, and owns all session-scoped tool registration.
 - Message pipeline: self-filter → approval-reply intercept → (group) record proactive scene →
   mention gate → commands (`/proactive`, `/clock`, `/tasks`, `/resume`, `/stop`, `/plan`, `/cmd`,
   `/status`, `/goal`, `#新对话` handling) → **enqueue and return immediately** (`runner.go`). The
-  background session runner executes turns; further messages are silently queued per session
-  (`pendingqueue.go`) and processed in batches. `/stop` cancels the current turn and clears that
-  session's queue (explicit stop); `/stop <任务ID>` cancels only the named background subagent;
-  `/tasks` lists the session's running subagents plus the task registry's recent rows; `/resume
-  <任务ID>` re-queues an `interrupted` subagent/handoff task of this session as a continuation
-  prompt for the main AI.
+  background session runner executes turns. Messages arriving while a turn is running are drained
+  by its tool loop before each LLM request and injected into the in-flight conversation as user
+  messages (`interject.go`): user messages get a `【用户插话】` prefix (rendered with the usual
+  group sender prefix), synthetic messages (`Sender.UserId=0`, e.g. subagent completion notices)
+  get a `【后台消息】` prefix; messages arriving after the batch's last LLM request has started
+  stay queued and are handled as the **next batch** by the same runner. `/stop` cancels the
+  current turn and clears that session's queue (explicit stop); `/stop <任务ID>` cancels only the
+  named background subagent; `/tasks` lists the session's running subagents plus the task
+  registry's recent rows; `/resume <任务ID>` re-queues an `interrupted` subagent/handoff task of
+  this session as a continuation prompt for the main AI.
 - Prompt: main sessions append a dynamic "任务编排与时间预算" guide after the scene description
   (`orchestrationGuide` in `llm.go`): delegate multi-step work to `subagent_run`, launch
   independent subagents in the same reply, never wait/poll after delegating, keep the main
@@ -480,7 +484,8 @@ registry and goal continuation, and owns all session-scoped tool registration.
   key). Session runs are **asynchronous**: the tool starts a tracked goroutine (`b.Go`) and
   returns immediately; on completion a structured result is enqueued as a synthetic message in
   the session's pending queue and the session is kicked, so the main AI picks it up in a
-  follow-up turn. The notification's first line is machine-readable — `【子代理执行完成】
+  follow-up turn (or, when a turn is already running, as a `【后台消息】` injection before its
+  next LLM request). The notification's first line is machine-readable — `【子代理执行完成】
   状态=completed` / `【子代理执行结束】状态=failed|timeout`, followed by `任务ID` and (when
   named) `名称`; `/stop`-cancelled runs are not injected. `subagent_run` accepts an optional
   `name` (1–32 chars, lowercase letter first, only lowercase letters/digits/hyphens; unique
@@ -549,8 +554,12 @@ registry and goal continuation, and owns all session-scoped tool registration.
   turn context with `context.WithoutCancel` + a lifecycle link to `p.runCtx` + an optional hard
   deadline (`turn.hard_timeout_sec`, default 14400 = 4h; 0 = no limit), schedules the long-task
   ack (`turn.ack_after_sec`, default 20s without visible output), drains queued batches in a
-  loop and, after a normally completed turn, triggers goal continuation (`maybeDriveGoal`). If
-  the global rate-limit slots are full, the queue is dropped with a "too many requests" reply.
+  loop (messages arriving mid-batch are injected by the tool loop before each LLM request — see
+  `interject.go` — and leftovers become the next batch) and, after a normally completed turn,
+  triggers goal continuation (`maybeDriveGoal`). If the global rate-limit slots are full and the
+  session itself is idle (no active turn that could inject queued messages), the queue is
+  dropped with a "too many requests" reply; when the session's own turn is running, the queue
+  is kept for interjection.
   `OnUnload` cancels `runCtx` (all runners/subagents) and every async subagent group. Every turn
   and async subagent writes a row to `ania_agent_task` (kind
   `turn|subagent|handoff|bash_job|clock|proactive|goal_round|workflow|team_task|team_run|team_member`,
@@ -693,12 +702,13 @@ Registration hierarchy:
    gets `clock_*`, `memory_*`, `kb_*`, `proactive_*`, platform-injected tools, and — when
    enabled — `skill_*` management (`skill_tool.enable`) and `mcp_*` management
    (`mcp_tool.enable`, persists to `files.mcp_json` and hot-registers/unregisters). Main sessions
-   additionally get `todo_write` (`todo.enable`), `subagent_run/list/send/cancel`,
-   `task_handoff`, `team_run/create/list/delete` (the first two only when
-   `subagent.enable=true`), `goal_create/update/status` (SQL + `goal.enable`), `workflow_run`
-   (`subagent.enable`), and `team_task_create/list/claim/complete` (task store available);
-   clock sessions get `skip_output` plus their own async `subagent_*` set; chat-console sessions
-   register only the shared scoped tools. Each session
+   additionally get `todo_write` (`todo.enable`), `send_message` (mid-turn proactive message to
+   the user; max 8 per turn, keeps working afterwards and still gives the final reply),
+   `subagent_run/list/send/cancel`, `task_handoff`, `team_run/create/list/delete` (the first two
+   only when `subagent.enable=true`), `goal_create/update/status` (SQL + `goal.enable`),
+   `workflow_run` (`subagent.enable`), and `team_task_create/list/claim/complete` (task store
+   available); clock sessions get `skip_output` plus their own async `subagent_*` set;
+   chat-console sessions register only the shared scoped tools. Each session
    gets its own `SessionToolExecutor`; MCP tools loaded via `mcp_load` are per-session.
 6. **Config tools** (`config_tool.enable`, default off): `config_get`/`config_set` (registered
    keys only, sensitive fields masked, admin approval, restart needed) and

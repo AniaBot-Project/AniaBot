@@ -896,9 +896,9 @@ func (m *clockManager) makeClockCallback(ctx context.Context, task *ClockTask, u
 
 	qid := parseQID(targetIDStr)
 	cbs := llmtool.CallBackFuncs{
-		// SendText 供工具显式发消息：定时任务不自动回显——数字人要主动发消息
-		// 必须显式调用 send_message 工具；这里仅记录日志并丢弃文本，避免触发
-		// 对象收到非预期的多条消息。
+		// SendText 供工具显式发消息；定时任务不自动回显中间轮，工具显式发送
+		// 的文本也一律丢弃（只记日志），最终回复由编排层统一推送，避免目标
+		// 收到非预期的多条消息。
 		SendText: func(s string) (string, error) {
 			logger.Info("定时任务丢弃中间轮文本（未主动发送）", "task", task.ID, "text", s)
 			return "已记录，未发送", nil

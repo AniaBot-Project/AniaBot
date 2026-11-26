@@ -9,7 +9,11 @@ import (
 // maxPendingMessages 每个会话的排队消息上限，防止 AI 响应期间消息无限堆积
 const maxPendingMessages = 20
 
-// pendingQueue 单会话的排队消息队列，存放 AI 响应期间到达的消息
+// pendingQueue 单会话的待处理消息队列，存放 AI 响应期间到达的消息。
+// 与旧行为（整轮结束后才消费）不同，运行中的回合会在每次 LLM 请求前经
+// ChatOptions.Steer 排空并作为插话注入（见 interject.go）；排空后剩余的消息
+// 由运行器在本批结束后作为下一批处理。两条消费路径互斥，同一消息只会被其中
+// 一条消费（不会重复处理）；/stop、取消与错误路径维持旧行为清空队列。
 type pendingQueue struct {
 	mu    sync.Mutex
 	items []message.Message
@@ -65,6 +69,20 @@ func (p *AIChatPlugin) drainPending(id message.QID, isGroup bool) []message.Mess
 	items := q.items
 	q.items = nil
 	return items
+}
+
+// prependPending 把一批消息放回队列头部（保持传入顺序），用于把当前不能消费的
+// 消息暂缓到下一批：运行中插话遇到 #新对话 时，清空历史是批次级语义（在途请求
+// 仍带着旧历史，不能中途清），必须把 #新对话 及其之后的消息留到下一批开始前处理。
+// 容量按软上限处理（暂缓消息来自刚 drain 的同一批，允许与并发入队短暂叠加）。
+func (p *AIChatPlugin) prependPending(id message.QID, isGroup bool, msgs []message.Message) {
+	if len(msgs) == 0 {
+		return
+	}
+	q := p.getPendingQueue(id, isGroup)
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.items = append(append([]message.Message(nil), msgs...), q.items...)
 }
 
 // pendingCount 只读统计会话排队消息数（不创建队列，供 /status 展示）。

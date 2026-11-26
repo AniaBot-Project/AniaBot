@@ -15,7 +15,8 @@ import (
 // 回合运行器（Session Runner）：消息事件只做去重/自过滤/命令/mention 门，
 // 然后把消息入队并立即返回；实际回合在后台 goroutine 中串行执行。这样：
 //   - 长回合不再占用框架事件 goroutine，也不受 bot.msg_event_timeout_sec 约束；
-//   - 回合进行中到达的消息进入队列（不丢弃），结束后按批合并处理；
+//   - 回合进行中到达的消息进入队列（不丢弃），下一次 LLM 请求前以「插话」注入
+//     当前工具循环（见 interject.go）；没来得及注入的由本批结束后的 drain 继续处理；
 //   - 同一会话由会话锁串行，跨会话并发受 rate_limit 槽位约束；
 //   - /stop 取消活跃回合并清理队列，/status 依赖 activeContexts 展示进度。
 //
@@ -23,6 +24,8 @@ import (
 // 0=不限制）；软截止由 aichat 编排层的看门狗注入提醒，不在这里取消。
 
 // submitTurn 把一条消息加入会话队列并唤醒运行器。队列满时直接提示用户。
+// 会话已有回合在跑时不需要额外唤醒：运行中的请求会在下一次 LLM 请求前把队列
+// 作为插话注入；会话空闲时本函数拉起的运行器会开新回合消费队列。
 func (p *AIChatPlugin) submitTurn(b bot.Bot, id message.QID, isGroup bool, msg message.Message) {
 	key := sessionKey(id, isGroup)
 	p.touchChat(key)
@@ -58,8 +61,13 @@ func (p *AIChatPlugin) runSessionOnce(parent context.Context, b bot.Bot, id mess
 	lock, fail := p.tryLockDetailed(id, isGroup)
 	if lock == nil {
 		if fail == lockRateLimited {
-			// 全局对话并发槽已满：没有消费者会处理排队消息，直接拒绝并清空，
-			// 让用户重发（与旧行为一致；后台任务使用独立并发池，不占该槽）
+			// 全局对话并发槽已满：可能是其他会话占满（本会话空闲，没有消费者，
+			// 排队只会沉淀 → 直接拒绝并清空，让用户重发）；也可能是本会话自己的
+			// 回合正在运行、只是槽位恰好占满——此时消息必须保留，由运行中回合的
+			// 工具循环在下一次 LLM 请求前作为插话注入，不能丢弃。
+			if p.sessionLockHeld(key) {
+				return true
+			}
 			p.drainPending(id, isGroup)
 			p.sendPlainText(b, id, isGroup, "当前请求太多啦，请稍后再试~")
 			return true

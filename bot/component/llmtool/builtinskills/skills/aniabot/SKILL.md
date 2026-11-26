@@ -28,7 +28,7 @@ AniaBot 是一个用 Go 写的插件驱动型多平台机器人框架，**你自
   | `dc:` 前缀 | Discord |
   | `wx:` 前缀 | 微信 |
 - **插件**：内置「系统 / 日志 / 请求拦截 / 复读机 / 每日新闻 / AI 对话」六个；第三方插件从面板「插件市场」安装（自动下载源码 → 编译 → 重启）。
-- **AI 对话能力**：三种 LLM API 格式（`chat_completions` / `responses` / `anthropic`）、工具调用、MCP、技能（skill）、长期记忆、知识库、定时任务、主动互动、子代理（异步委派 + 命名 + 运行中追加指令 + 后台交接）、Agent 团队、工作流（workflow DAG）、团队任务板、长任务目标续跑（goal）、工具审批、计划模式、上下文压缩、任务编排与配额限制。
+- **AI 对话能力**：三种 LLM API 格式（`chat_completions` / `responses` / `anthropic`）、工具调用、MCP、技能（skill）、长期记忆、知识库、定时任务、主动互动、子代理（异步委派 + 命名 + 运行中追加指令 + 后台交接）、用户运行中插话注入与 `send_message` 执行中主动发消息、Agent 团队、工作流（workflow DAG）、团队任务板、长任务目标续跑（goal）、工具审批、计划模式、上下文压缩、任务编排与配额限制。
 - **数据落点**：SQLite `./data/aniabot.db`（可用环境变量换 MySQL）；微信登录凭据在 `./data/weixin/`；市场插件在 `./data/plugins/`；技能目录默认 `./skills`（配置项 `plugin.ai_chat_bot.skills_dir`）。
 
 ## 三、要查/改配置，按这个顺序走

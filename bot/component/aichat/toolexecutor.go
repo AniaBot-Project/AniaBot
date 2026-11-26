@@ -120,6 +120,22 @@ func appendTruncationNote(content string) string {
 	return content + truncationNote
 }
 
+// collectSteerMessages 排空运行中追加输入，返回应追加到对话尾部的 user 消息。
+// 文本由调用方自行加前缀（子代理「[追加指令]」/ 主会话「【用户插话】」），这里
+// 只做去空白与去空项；Steer 为 nil 或未返回内容时返回 nil。
+func collectSteerMessages(opts ChatOptions) []Message {
+	if opts.Steer == nil {
+		return nil
+	}
+	var out []Message
+	for _, steer := range opts.Steer() {
+		if steer = strings.TrimSpace(steer); steer != "" {
+			out = append(out, TextMessage(RoleUser, steer))
+		}
+	}
+	return out
+}
+
 // appendAIMessage 把一次 LLM 响应作为 assistant 消息追加到消息数组，并回传
 // 应当采用的内容（content 由调用方算好：被截断时含截断说明，落盘/回放与
 // 真正展示给用户的那一份保持一致）。
@@ -172,15 +188,9 @@ func (o *ToolOrchestrator) ExecuteWithTools(
 	// maxIterations <= 0 表示不设上限：循环只能由模型给出最终回复、无进展
 	// 看门狗终止或上层 ctx 取消结束；有上限时才保留「末轮强制无工具收尾」。
 	for i := 0; ; i++ {
-		// 运行中追加指令（子代理 steering）：在每次 LLM 请求前把已到达的追加
-		// 输入作为 user 消息追加到尾部，下一步立即生效，不打断当前工具批。
-		if opts.Steer != nil {
-			for _, steer := range opts.Steer() {
-				if steer = strings.TrimSpace(steer); steer != "" {
-					messages = append(messages, TextMessage(RoleUser, "[追加指令] "+steer))
-				}
-			}
-		}
+		// 运行中追加输入（子代理 steering / 主会话插话）：在每次 LLM 请求前把
+		// 已到达的输入作为 user 消息追加到尾部，下一步立即生效，不打断当前工具批。
+		messages = append(messages, collectSteerMessages(opts)...)
 		tools := o.executor.Tools()
 
 		opts.Tools = tools

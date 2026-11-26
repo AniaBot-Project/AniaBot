@@ -291,6 +291,51 @@ func TestStopReasonFromError(t *testing.T) {
 	}
 }
 
+// ---- 并发槽位 / 运行中插话 ----
+
+// TestRunSessionOnceRateLimitedKeepsQueueForActiveTurn 全局并发槽满时，若本会话
+// 自己的回合仍在运行（持有会话锁），消息必须保留给运行中回合作为插话注入，不能
+// 被当成「没有消费者」清空并误报并发拒绝；会话空闲时才维持旧的拒绝+清空行为。
+func TestRunSessionOnceRateLimitedKeepsQueueForActiveTurn(t *testing.T) {
+	p := newEvictTestPlugin()
+	p.rateCh = make(chan struct{}, 1)
+	id := message.FromUint64(3001)
+	key := sessionKey(id, true)
+
+	// 模拟本会话回合正在运行：持有会话锁并占用唯一并发槽
+	lock, fail := p.tryLockDetailed(id, true)
+	if lock == nil || fail != lockOK {
+		t.Fatalf("预取会话锁失败: lock=%v fail=%v", lock, fail)
+	}
+	p.enqueuePending(id, true, testGroupMsg(3001, "运行中插话"))
+	rb := &recordBot{}
+	if ok := p.runSessionOnce(context.Background(), rb, id, true); !ok {
+		t.Fatal("rateLimited 分支应返回 true（本次接管结束）")
+	}
+	if !p.hasPending(key) {
+		t.Fatal("会话自身回合在跑时，排队消息应保留等待插话注入")
+	}
+	if containsSent(rb, "太多") {
+		t.Fatal("不应向用户误报并发拒绝")
+	}
+
+	// 会话锁释放、并发槽仍被其他会话占满：没有消费者，维持旧行为清空并提示
+	lock.release()
+	p.rateCh <- struct{}{}
+	defer func() { <-p.rateCh }()
+	p.enqueuePending(id, true, testGroupMsg(3001, "无消费者消息"))
+	rb2 := &recordBot{}
+	if ok := p.runSessionOnce(context.Background(), rb2, id, true); !ok {
+		t.Fatal("rateLimited 分支应返回 true")
+	}
+	if p.hasPending(key) {
+		t.Fatal("会话空闲且并发槽满时应清空排队消息")
+	}
+	if !containsSent(rb2, "太多") {
+		t.Fatalf("会话空闲且无消费者时应提示稍后重试, got %v", rb2.sent())
+	}
+}
+
 // ---- 子代理命名 / steering / 结构化结果 ----
 
 func TestValidSubagentName(t *testing.T) {

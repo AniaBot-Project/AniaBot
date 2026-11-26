@@ -109,7 +109,8 @@ type subagentRunOptions struct {
 }
 
 // steerDrain 返回 ChatOptions.Steer 回调：非阻塞排空追加指令通道。
-// 通道关闭或空时返回 nil；每条指令由编排层以 [追加指令] 用户消息注入。
+// 通道关闭或空时返回 nil；每条指令带 [追加指令] 前缀，由编排层原样作为
+// user 消息注入（编排层不再自动加前缀，主会话插话自带【用户插话】前缀）。
 func steerDrain(ch <-chan string) func() []string {
 	if ch == nil {
 		return nil
@@ -122,7 +123,11 @@ func steerDrain(ch <-chan string) func() []string {
 				if !ok {
 					return out
 				}
-				out = append(out, msg)
+				// 空指令丢弃（与旧行为一致：编排层加前缀前会 TrimSpace 去空）
+				if msg = strings.TrimSpace(msg); msg == "" {
+					continue
+				}
+				out = append(out, "[追加指令] "+msg)
 			default:
 				return out
 			}
