@@ -234,7 +234,7 @@ func (p *AIChatPlugin) renderGoalStatus(key string) string {
 	armed := p.goalIsArmed(key)
 	var sb strings.Builder
 	sb.WriteString("【长任务目标】\n")
-	fmt.Fprintf(&sb, "目标：%s\n", truncateTaskPrompt(g.Objective))
+	fmt.Fprintf(&sb, "目标：%s\n", g.Objective)
 	fmt.Fprintf(&sb, "状态：%s（已续跑 %d/%d 轮）\n", goalPhaseLabel(g.Phase), g.RoundsStarted, g.MaxRounds)
 	if g.BlockedCode != "" {
 		fmt.Fprintf(&sb, "阻塞原因：%s\n", g.BlockedMessage)

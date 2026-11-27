@@ -24,15 +24,10 @@ import (
 // 这是「旁路观测」：taskStore 未启用（SQL 不可用）时所有 helper 返回 nil 并静默跳过，
 // 不影响团队/子代理执行；写入走 tasktrack.go 的 3 秒独立上下文，DB 卡住不阻塞回合。
 
-// subagentTraceMaxCalls 单条运行记录保留的工具调用明细上限。后台任务接口一次返回
-// 最近 100 行、Meta 随行返回，而面板展开详情时逐条渲染：步骤再多也不会提高可诊断性，
-// 反而撑大响应体积，因此单独限制得比定时任务日志（200 条）更小。
-const subagentTraceMaxCalls = 50
-
 // subagentProgressInterval 执行中增量落盘的最小间隔。工具观察回调是串行的，每次
-// 工具完成都整行写一次 DB（最多 50 条参数/结果）代价偏高；按 3 秒节流后，面板
-// 「后台任务」页 10 秒轮询仍能近乎实时地看到进度，写入量则封顶为每任务每 3 秒一次。
-// 首次工具调用不等间隔、立即落一次，保证任务启动后很快能看到第一步。
+// 工具完成都整行写一次 DB 代价偏高；按 3 秒节流后，面板「后台任务」页 10 秒轮询
+// 仍能近乎实时地看到进度，写入量则封顶为每任务每 3 秒一次。首次工具调用不等间隔、
+// 立即落一次，保证任务启动后很快能看到第一步。
 const subagentProgressInterval = 3 * time.Second
 
 // teamRunMeta team_run 父记录 Meta JSON 的约定：整体耗时与成员摘要，面板无需
@@ -51,18 +46,19 @@ type teamMemberSummary struct {
 	Tokens     int64  `json:"tokens,omitempty"`
 	DurationMs int64  `json:"duration_ms,omitempty"`
 	Degraded   string `json:"degraded,omitempty"` // 角色解析降级说明
-	Error      string `json:"error,omitempty"`    // 失败/超时的可读原因（截断）
+	Error      string `json:"error,omitempty"`    // 失败/超时的可读原因（完整记录）
 }
 
 // subagentRunMeta 子代理/团队成员的 Meta JSON 约定：执行细节与工具调用步骤。
-// 工具参数/结果按 tasklog 的字段上限截断（与定时任务执行日志保持一致）。
+// 与 Query 日志口径一致：工具参数/结果完整记录，不做长度截断（面板前端负责折叠
+// 与按需展开），保证后台任务详情可以作为完整执行日志复核。
 type subagentRunMeta struct {
 	Name           string                   `json:"name,omitempty"` // 团队成员名（普通子代理为空）
 	Degraded       string                   `json:"degraded,omitempty"`
 	Iterations     int                      `json:"iterations,omitempty"`
 	DurationMs     int64                    `json:"duration_ms,omitempty"`
 	ToolCalls      []tasklog.ToolCallRecord `json:"tool_calls,omitempty"`
-	ToolCallsTotal int                      `json:"tool_calls_total,omitempty"` // 明细被上限截断时大于 len(ToolCalls)
+	ToolCallsTotal int                      `json:"tool_calls_total,omitempty"` // 兼容旧记录：历史数据可能因上限截断而大于 len(ToolCalls)
 }
 
 // subagentTrace 收集一次子代理执行期间的工具调用明细。工具观察者由编排层串行
@@ -88,25 +84,23 @@ func newSubagentTrace() *subagentTrace {
 	return &subagentTrace{flushEvery: subagentProgressInterval, start: time.Now()}
 }
 
-// observe 工具调用观察回调：追加一条执行记录（明细最多保留 subagentTraceMaxCalls
-// 条），并按节流间隔把已有进度增量写进任务行。
+// observe 工具调用观察回调：追加一条执行记录（参数/结果完整保留，与 Query 日志
+// 一致，不做截断），并按节流间隔把已有进度增量写进任务行。
 func (t *subagentTrace) observe(info aichat.ToolCallInfo) {
 	if t == nil {
 		return
 	}
 	t.total++
-	if len(t.calls) < subagentTraceMaxCalls {
-		rec := tasklog.ToolCallRecord{
-			Name:       info.Name,
-			Arguments:  tasklog.Truncate(info.Arguments, tasklog.MaxArgsRunes),
-			Result:     tasklog.Truncate(info.Result, tasklog.MaxResultRunes),
-			DurationMs: info.DurationMs,
-		}
-		if info.Err != nil {
-			rec.Error = info.Err.Error()
-		}
-		t.calls = append(t.calls, rec)
+	rec := tasklog.ToolCallRecord{
+		Name:       info.Name,
+		Arguments:  info.Arguments,
+		Result:     info.Result,
+		DurationMs: info.DurationMs,
 	}
+	if info.Err != nil {
+		rec.Error = info.Err.Error()
+	}
+	t.calls = append(t.calls, rec)
 	t.flushProgress()
 }
 
@@ -194,7 +188,7 @@ func (p *AIChatPlugin) beginTeamRunTask(id message.QID, isGroup bool, task strin
 		Kind:       taskKindTeamRun,
 		Status:     taskStatusRunning,
 		Title:      truncateTaskTitle(task),
-		Prompt:     truncateTaskPrompt(task),
+		Prompt:     task,
 		CreatedAt:  now,
 		StartedAt:  now,
 		UpdatedAt:  now,
@@ -216,7 +210,7 @@ func (p *AIChatPlugin) finishTeamRunTask(t *agentTask, report string, results []
 	}
 	now := time.Now().Unix()
 	t.Status, t.StopReason = teamRunOutcome(results, ctxErr)
-	t.Result = truncateTaskResult(report)
+	t.Result = report
 	t.Tokens = teamRunTokens(results)
 	t.Meta = encodeRunMeta(teamRunMetaFrom(results, duration))
 	t.FinishedAt = now
@@ -242,7 +236,7 @@ func (p *AIChatPlugin) beginTeamMemberTask(parent *agentTask, id message.QID, is
 		Kind:       taskKindTeamMember,
 		Status:     taskStatusRunning,
 		Title:      truncateTaskTitle(spec.label),
-		Prompt:     truncateTaskPrompt(spec.task),
+		Prompt:     spec.task,
 		CreatedAt:  now,
 		StartedAt:  now,
 		UpdatedAt:  now,
@@ -267,11 +261,11 @@ func (p *AIChatPlugin) finishTeamMemberTask(t *agentTask, spec teamMemberSpec, r
 	t.Status, t.StopReason = taskRunStatus(runErr)
 	switch {
 	case runErr == nil:
-		t.Result = truncateTaskResult(result)
+		t.Result = result
 	case t.Status == taskStatusTimeout:
 		t.Error = runErr.Error()
 	case t.Status == taskStatusFailed:
-		t.Error = truncateTaskTitle(runErr.Error())
+		t.Error = runErr.Error()
 	}
 	calls, total := trace.snapshot()
 	t.Meta = encodeRunMeta(subagentRunMeta{
@@ -332,7 +326,7 @@ func teamRunMetaFrom(results []teamMemberResult, duration time.Duration) teamRun
 			Degraded:   r.degraded,
 		}
 		if r.err != nil {
-			sum.Error = truncateTaskTitle(r.err.Error())
+			sum.Error = r.err.Error()
 		}
 		meta.Members = append(meta.Members, sum)
 	}

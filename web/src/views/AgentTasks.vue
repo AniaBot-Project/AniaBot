@@ -38,6 +38,8 @@
             <Switch v-model="autoRefresh" size="small" />
             自动刷新（10s）
           </label>
+          <Button type="text" size="small" :disabled="exporting" @click="exportLogs">导出日志</Button>
+          <Button type="default" size="small" danger :disabled="clearing" @click="clearLogs">清除日志</Button>
           <Button type="text" size="small" :disabled="loading" @click="load">刷新</Button>
         </div>
       </div>
@@ -319,8 +321,9 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { Button, Card, Input, Modal, Select, Switch, Tag } from 'animal-island-vue'
+import { Button, Card, Input, Modal, Notification, Select, Switch, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
+import { confirmAction } from '../ui/confirm'
 import LoadingState from '../components/LoadingState.vue'
 
 const route = useRoute()
@@ -386,6 +389,8 @@ const goals = ref([])
 const loading = ref(true)
 const loadError = ref('')
 const autoRefresh = ref(true)
+const exporting = ref(false)
+const clearing = ref(false)
 // 从 Query 日志跳转时定位的任务 ID（URL query.task）
 const linkedTaskID = ref('')
 // 深链只在首次加载/路由变化后自动打开一次，避免自动刷新把用户关掉的弹窗又弹开
@@ -510,6 +515,45 @@ function toggleField(t, name) {
   if (s.has(key)) s.delete(key)
   else s.add(key)
   openFields.value = s
+}
+
+// 导出/清除使用与列表相同的筛选口径（后端按条件过滤，可覆盖列表未加载的更早记录）
+const hasFilter = computed(() => !!(filters.status || filters.kind || filters.keyword))
+
+function filterParams() {
+  return { status: filters.status, kind: filters.kind, keyword: filters.keyword }
+}
+
+// 按当前筛选条件导出后台任务日志（JSON 附件，含完整任务指令 / 结果 / 工具步骤）
+async function exportLogs() {
+  if (exporting.value) return
+  exporting.value = true
+  try {
+    await api.exportAgentTasks(filterParams())
+  } catch (e) {
+    Notification.error({ message: e.message || '导出失败' })
+  } finally {
+    exporting.value = false
+  }
+}
+
+// 清除当前筛选条件下已结束的后台任务日志（运行中/排队中的任务保留），不可恢复
+async function clearLogs() {
+  if (clearing.value) return
+  const scope = hasFilter.value ? '当前筛选条件下的' : '全部'
+  if (!await confirmAction(`确定清除${scope}后台任务日志吗？只会删除已结束的任务（运行中/排队中的任务保留），清除后不可恢复，建议先导出备份。`)) return
+  clearing.value = true
+  try {
+    const res = await api.clearAgentTasks(filterParams())
+    await load()
+    // 详情弹窗对应的任务已被清除时关闭弹窗
+    if (detail.value && !tasks.value.some((t) => t.id === detail.value.id)) detail.value = null
+    Notification.success({ message: `已清除 ${res.removed ?? 0} 条后台任务日志` })
+  } catch (e) {
+    Notification.error({ message: e.message || '清除失败' })
+  } finally {
+    clearing.value = false
+  }
 }
 
 function kindText(k) {

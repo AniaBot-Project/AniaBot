@@ -60,6 +60,10 @@ type AIChatPlugin struct {
 
 	// asyncSubagents 异步子代理管理，按会话（群/好友）隔离
 	asyncSubagents sync.Map
+	// teamRuns 运行中的 Agent 团队执行，键为会话键（团队运行是同步工具调用，
+	// 同一会话同一时刻最多一个）。#新对话 需要立即中止它们，避免旧任务的
+	// 结果与消耗继续落到新对话上。
+	teamRuns sync.Map
 
 	// pendingMsgs AI 响应期间到达的消息排队队列，按会话（群/好友）隔离
 	pendingMsgs sync.Map
@@ -549,6 +553,9 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 		if cleared := chat.ClearDynamicTools(); cleared > 0 {
 			p.Logger.Info("清理动态加载的 MCP 工具", "count", cleared)
 		}
+		// 兜底再停一次后台工作：正常路径在消息到达时（submitTurn）已经停过，
+		// 这里覆盖「#新对话 被插话逻辑暂缓到下一批」与取消/入队的竞态窗口。
+		p.stopSessionBackground(id, isGroup)
 	}
 
 	// 请求级图片哈希→URL 注册表：当前消息、历史消息记录、合并转发中的图片都会登记，
@@ -1390,8 +1397,9 @@ func (p *AIChatPlugin) getPromptForID(id message.QID, isGroup bool) string {
 	return p.cfg.Prompt
 }
 
-// OnUnload 插件卸载收尾：取消插件生命周期上下文，中止回合运行器与全部异步
-// 子代理，避免进程重启/插件被卸载后仍有后台 goroutine 在跑（b.Go 本身不接 ctx）。
+// OnUnload 插件卸载收尾：取消插件生命周期上下文，中止回合运行器、全部异步
+// 子代理与团队运行，避免进程重启/插件被卸载后仍有后台 goroutine 在跑
+// （b.Go 本身不接 ctx）。
 func (p *AIChatPlugin) OnUnload(ctx context.Context, reason plugin.UnloadReason) error {
 	if p.runCancel != nil {
 		p.runCancel()
@@ -1403,6 +1411,13 @@ func (p *AIChatPlugin) OnUnload(ctx context.Context, reason plugin.UnloadReason)
 		return true
 	})
 	p.asyncSubagents.Clear()
-	p.Logger.Info("AI 对话插件卸载：已取消后台运行器与子代理", "reason", string(reason))
+	p.teamRuns.Range(func(_, v any) bool {
+		if g, ok := v.(*teamRunGroup); ok && g != nil {
+			g.cancelAll()
+		}
+		return true
+	})
+	p.teamRuns.Clear()
+	p.Logger.Info("AI 对话插件卸载：已取消后台运行器、子代理与团队运行", "reason", string(reason))
 	return nil
 }

@@ -24,8 +24,8 @@ func testLogger() *slog.Logger {
 // ---- 执行参数跟随主模型 ----
 
 // TestSubagentTimeoutFromConfig 子代理默认超时来自独立配置
-// （plugin.ai_chat_bot.subagent.default_timeout_sec，默认 1800 秒），
-// 不再从框架消息处理预算派生；未配置（0）表示不限制。
+// （plugin.ai_chat_bot.subagent.default_timeout_sec，默认 0 = 不限制），
+// 不再从框架消息处理预算派生。
 func TestSubagentTimeoutFromConfig(t *testing.T) {
 	p := &AIChatPlugin{}
 	if got := p.subagentTimeout(); got != 0 {

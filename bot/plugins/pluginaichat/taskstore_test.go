@@ -547,7 +547,144 @@ func TestTaskDeleteFinishedBefore(t *testing.T) {
 	}
 }
 
-// ---- ID 生成 ----
+// ---- 面板导出/清除 ----
+
+// TestTaskListFiltered 筛选：status/kind 精确匹配、keyword 命中标题/ID/会话键/指令
+// （不区分大小写），turn 历史行不出现，结果按 updated_at 倒序。
+func TestTaskListFiltered(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newTaskTestStore(t)
+
+	add := func(session, kind, status, title, prompt string, updated int64) *agentTask {
+		t.Helper()
+		task := taskFixture(session, updated-10)
+		task.Kind = kind
+		task.Status = status
+		task.Title = title
+		task.Prompt = prompt
+		task.UpdatedAt = updated
+		if err := s.Create(ctx, task); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		return task
+	}
+	add("g:1", taskKindSubagent, taskStatusCompleted, "调研 Go 并发", "整理 goroutine 调度资料", 100)
+	add("g:1", taskKindSubagent, taskStatusRunning, "汇总周报", "把本周变更写成周报", 200)
+	add("f:2", taskKindTeamRun, taskStatusCompleted, "团队并行调研", "调研三种方案", 300)
+	add("g:3", taskKindTurn, taskStatusCompleted, "旧回合", "历史遗留行", 400) // 面板不返回
+	add("g:1", taskKindHandoff, taskStatusFailed, "构建失败", "排查 vite build", 500)
+
+	cases := []struct {
+		name string
+		f    taskFilter
+		want []string // 期望命中的 ID（按 updated_at 倒序）
+	}{
+		{"无条件", taskFilter{}, []string{"构建失败", "团队并行调研", "汇总周报", "调研 Go 并发"}},
+		{"按状态", taskFilter{Status: taskStatusCompleted}, []string{"团队并行调研", "调研 Go 并发"}},
+		{"按类型", taskFilter{Kind: taskKindSubagent}, []string{"汇总周报", "调研 Go 并发"}},
+		{"标题关键词", taskFilter{Keyword: "调研"}, []string{"团队并行调研", "调研 Go 并发"}},
+		{"指令关键词（大小写不敏感）", taskFilter{Keyword: "VITE"}, []string{"构建失败"}},
+		{"组合条件", taskFilter{Status: taskStatusCompleted, Kind: taskKindSubagent, Keyword: "go"}, []string{"调研 Go 并发"}},
+		{"无命中", taskFilter{Keyword: "不存在的词"}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := s.ListFiltered(ctx, c.f, 0)
+			if err != nil {
+				t.Fatalf("ListFiltered: %v", err)
+			}
+			if len(got) != len(c.want) {
+				t.Fatalf("命中 %d 条, want %d: %+v", len(got), len(c.want), got)
+			}
+			for i, wantTitle := range c.want {
+				if got[i].Title != wantTitle {
+					t.Fatalf("第 %d 条 = %q, want %q", i, got[i].Title, wantTitle)
+				}
+			}
+		})
+	}
+
+	// 带关键词时 limit 只截断命中结果（先在 Go 侧过滤，再取前 N 条）
+	limited, err := s.ListFiltered(ctx, taskFilter{Keyword: "调研"}, 1)
+	if err != nil {
+		t.Fatalf("ListFiltered limit: %v", err)
+	}
+	if len(limited) != 1 || limited[0].Title != "团队并行调研" {
+		t.Fatalf("limit=1 应返回最新的命中项, got %+v", limited)
+	}
+
+}
+
+// TestTaskDeleteFinishedFiltered 清除：只删除已结束且命中的任务，运行中/排队中的
+// 任务与 turn 历史行保留；返回实际删除条数。
+func TestTaskDeleteFinishedFiltered(t *testing.T) {
+	ctx := context.Background()
+	s, db := newTaskTestStore(t)
+
+	add := func(session, kind, status, title string, updated int64) *agentTask {
+		t.Helper()
+		task := taskFixture(session, updated-10)
+		task.Kind = kind
+		task.Status = status
+		task.Title = title
+		task.Prompt = ""
+		task.UpdatedAt = updated
+		if err := s.Create(ctx, task); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		return task
+	}
+	done := add("g:1", taskKindSubagent, taskStatusCompleted, "已完成的调研", 100)
+	failed := add("g:1", taskKindSubagent, taskStatusFailed, "失败的调研", 200)
+	running := add("g:1", taskKindSubagent, taskStatusRunning, "运行中的调研", 300)
+	queued := add("g:1", taskKindSubagent, taskStatusQueued, "排队的调研", 400)
+	turn := add("g:1", taskKindTurn, taskStatusCompleted, "旧回合调研", 500)
+	other := add("g:1", taskKindHandoff, taskStatusCompleted, "交接任务", 600)
+
+	// 按状态过滤 + 关键词：只删「已结束 + 命中关键词」的行
+	n, err := s.DeleteFinishedFiltered(ctx, taskFilter{Status: taskStatusCompleted, Keyword: "调研"})
+	if err != nil {
+		t.Fatalf("DeleteFinishedFiltered: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("删除行数 = %d, want 1", n)
+	}
+	if _, ok, _ := s.Get(ctx, done.ID); ok {
+		t.Fatalf("任务 %q 应被删除", done.Title)
+	}
+	for _, task := range []*agentTask{failed, queued, other} {
+		if _, ok, _ := s.Get(ctx, task.ID); !ok {
+			t.Fatalf("任务 %q 不应被删除", task.Title)
+		}
+	}
+	if _, ok, _ := s.Get(ctx, running.ID); !ok {
+		t.Fatal("运行中的任务不能被清除")
+	}
+	if _, ok, _ := s.Get(ctx, turn.ID); !ok {
+		t.Fatal("turn 历史行不属于面板日志，不能被清除")
+	}
+
+	// 不带筛选：清除全部已结束任务（运行中/排队中的保留）
+	n, err = s.DeleteFinishedFiltered(ctx, taskFilter{})
+	if err != nil {
+		t.Fatalf("DeleteFinishedFiltered all: %v", err)
+	}
+	if n != 2 { // failed + other
+		t.Fatalf("无条件删除行数 = %d, want 2", n)
+	}
+	var remain int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM ania_agent_task`).Scan(&remain); err != nil {
+		t.Fatalf("统计剩余任务: %v", err)
+	}
+	if remain != 3 { // running + queued + turn
+		t.Fatalf("剩余任务数 = %d, want 3", remain)
+	}
+
+	// 只匹配运行中状态时返回 0（不能删运行时仍在写的任务行）
+	if n, err := s.DeleteFinishedFiltered(ctx, taskFilter{Status: taskStatusRunning}); err != nil || n != 0 {
+		t.Fatalf("运行中状态删除 = (%d, %v), want (0, nil)", n, err)
+	}
+}
 
 // TestTaskNewID ID 非空、格式为 t-<36 进制纳秒>-<4 位 hex>，1000 次无重复。
 func TestTaskNewID(t *testing.T) {

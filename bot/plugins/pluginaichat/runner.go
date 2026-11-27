@@ -26,6 +26,9 @@ import (
 // 作为插话注入；会话空闲时本函数拉起的运行器会开新回合消费队列。
 func (p *AIChatPlugin) submitTurn(b bot.Bot, id message.QID, isGroup bool, msg message.Message) {
 	key := sessionKey(id, isGroup)
+	// #新对话 表示立即开新话题：消息一到达就停止旧的后台工作（子代理/工作流/
+	// 团队运行），避免它们的结果回灌到新对话；历史清空仍在下一次批次开始时执行。
+	p.noteNewConversationRequest(id, isGroup, msg)
 	p.touchChat(key)
 	p.sessionBots.Store(key, b)
 	if _, ok := p.enqueuePending(id, isGroup, msg); !ok {

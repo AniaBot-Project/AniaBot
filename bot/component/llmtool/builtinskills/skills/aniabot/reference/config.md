@@ -216,7 +216,7 @@
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
 | `subagent.enable` | `true` | 启用子代理；关闭后不注册 `subagent_run/list/send/cancel`、`task_handoff` 与 `workflow_run` |
-| `subagent.default_timeout_sec` | `1800` | 子代理单次执行默认超时（30 分钟）；0 表示不限制。不再跟随 `bot.msg_event_timeout_sec` |
+| `subagent.default_timeout_sec` | `0` | 子代理单次执行默认超时；`0`（默认）表示不限制，不再跟随 `bot.msg_event_timeout_sec` |
 | `subagent.max_timeout_sec` | `0` | 模型单次 `timeout_sec` 的业务上限；0 不限 |
 | `subagent.max_concurrent_per_session` | `4` | 每会话同时运行的后台子代理上限，超出直接拒绝 |
 | `subagent.max_concurrent_global` | `8` | 全局后台子代理并发上限，与对话回合的 `rate_limit` 分开计算 |
@@ -243,7 +243,7 @@
 
 - **工作流** `workflow_run(goal?, steps=[{id,task,depends_on}], concurrency?)`：1~8 个步骤、ID 唯一、依赖无环；并发 1~4（默认 2）；后台执行（每步一个子代理，按依赖调度，失败后继 `skipped`），全部结束后汇总结果回灌会话；任务类型 `workflow`，`/stop` 可取消；仅 `subagent.enable=true` 时注册；计划模式阻断。无独立配置项。
 - **团队任务板** `team_task_create/list/claim/complete`：会话级持久任务清单，`blocked_by` 依赖未完成不能认领，`write_scopes` 仅建议不做锁；每会话最多 20 个未完成任务；复用任务表（类型 `team_task`），需要 SQL 持久化；计划模式阻断 create/claim/complete、放行 list。无独立配置项。
-- 两者都可以在面板「后台任务」页（只读）或 `/tasks` 里观察。
+- 两者都可以在面板「后台任务」页或 `/tasks` 里观察（面板可导出/清除日志）。
 
 ### 任务记录（task）
 
@@ -251,7 +251,7 @@
 | --- | --- | --- |
 | `task.retention_days` | `7` | 已结束任务记录保留天数，每 6 小时清理一次；0 不清理 |
 
-任务记录存于 SQL 表 `ania_agent_task`（需要 SQL 持久化，建表失败自动降级为不持久化），记子代理/交接/工作流/团队任务/团队运行/团队成员（`subagent`/`handoff`/`workflow`/`team_task`/`team_run`/`team_member`）；普通回合不再写任务表（完整过程看 Query 日志），旧库可能残留 `turn` 行。进程重启时遗留任务标记 `interrupted`，用户用 `/resume <任务ID>` 恢复；`/tasks` 查看本会话运行中子代理、最近后台任务与最近回合，`/stop` 取消当前回合并清空排队，`/stop <任务ID>` 取消指定后台子代理。
+任务记录存于 SQL 表 `ania_agent_task`（需要 SQL 持久化，建表失败自动降级为不持久化），记子代理/交接/工作流/团队任务/团队运行/团队成员（`subagent`/`handoff`/`workflow`/`team_task`/`team_run`/`team_member`）；普通回合不再写任务表（完整过程看 Query 日志），旧库可能残留 `turn` 行。进程重启时遗留任务标记 `interrupted`，用户用 `/resume <任务ID>` 恢复；`/tasks` 查看本会话运行中子代理、最近后台任务与最近回合，`/stop` 取消当前回合并清空排队，`/stop <任务ID>` 取消指定后台子代理。面板「后台任务」页可按筛选条件导出 JSON 或清除已结束记录（运行中/排队中的任务保留），任务指令、结果、错误与工具步骤完整保存、不截断。`#新对话` 会先停止本会话运行中的子代理/工作流与团队运行、暂停长任务目标（`/goal resume` 可恢复），再清空上下文。
 
 
 ### 备用识图（主模型不支持多模态时把图片转文字）

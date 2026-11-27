@@ -112,6 +112,39 @@ func TestQueryLogInterjections(t *testing.T) {
 	p.appendInterjectionsToQuery(nil, []string{"x"})
 }
 
+// TestQueryLogSyntheticSenderFallsBackToTarget 纯合成消息（子代理完成通知等）触发
+// 的回合不再记录占位「qq:0」：回退为会话目标真实 ID；混合批次只记录真实用户。
+func TestQueryLogSyntheticSenderFallsBackToTarget(t *testing.T) {
+	p := &AIChatPlugin{}
+	p.Logger = slog.Default()
+	p.PersistentStorage = newSQLPFake()
+	p.initQueryLogger()
+
+	chat, err := aichat.NewChatBot("http://127.0.0.1", "key", "model", "prompt", 1000, nil, nil)
+	if err != nil {
+		t.Fatalf("创建 ChatBot 失败: %v", err)
+	}
+	target := message.FromString("20001")
+	synthetic := message.Message{Sender: message.MessageSender{Nickname: "子代理", UserId: message.FromUint64(0)}}
+
+	r := p.beginQuery(chat, target, true, []message.Message{synthetic}, "【子代理执行完成】状态=completed")
+	if r == nil {
+		t.Fatal("beginQuery 应返回 recorder")
+	}
+	e := p.queryLogger.Query(querylog.Filter{Limit: 1})[0]
+	if len(e.Senders) != 1 || e.Senders[0] != target.String() {
+		t.Fatalf("合成消息应回退为会话目标 %q, got %v", target.String(), e.Senders)
+	}
+
+	// 混合批次：真实用户保留，合成消息的 qq:0 被忽略
+	real := message.Message{Sender: message.MessageSender{Nickname: "小明", UserId: message.FromString("12345")}}
+	p.beginQuery(chat, target, true, []message.Message{real, synthetic}, "你好")
+	e = p.queryLogger.Query(querylog.Filter{Limit: 1})[0]
+	if len(e.Senders) != 1 || e.Senders[0] != "qq:12345" {
+		t.Fatalf("混合批次应只记录真实用户, got %v", e.Senders)
+	}
+}
+
 // TestProactiveQueryLog 主动互动执行写入 Query 日志：Kind 标记、触发说明、
 // 保持安静状态与原因、token 与工具调用均可回填，且能与普通对话区分筛选。
 func TestProactiveQueryLog(t *testing.T) {

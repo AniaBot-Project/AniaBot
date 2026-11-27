@@ -78,7 +78,7 @@ type teamMemberParam struct {
 type teamRunParams struct {
 	Task       string            `json:"task" desc:"团队总体任务/背景（必填）：作为共享背景发给所有成员；成员未填专属任务时即为其执行内容。作为 leader 分工时，可在成员各自的 task 字段给出具体分工"`
 	Members    []teamMemberParam `json:"members" desc:"要并行执行的成员列表（1 至上限个，上限见工具描述）"`
-	TimeoutSec int               `json:"timeout_sec,omitempty" desc:"本次执行的超时秒数（上限 1800），不填用默认值"`
+	TimeoutSec int               `json:"timeout_sec,omitempty" desc:"本次执行的超时秒数，不填用默认值（subagent.default_timeout_sec，0 表示不限制）；受 subagent.max_timeout_sec 约束"`
 }
 
 type teamRunTool struct {

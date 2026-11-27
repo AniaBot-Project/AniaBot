@@ -27,8 +27,8 @@ const (
 )
 
 // subagentTimeout 子代理默认执行超时：独立配置 subagent.default_timeout_sec
-// （默认 1800 秒 = 30 分钟），0 表示不限制。不再从框架消息事件超时派生——
-// 后台任务生命周期与对话回合预算是两件不同的事。
+// （默认 0 = 不限制），不再从框架消息事件超时派生——后台任务生命周期与对话
+// 回合预算是两件不同的事。
 func (p *AIChatPlugin) subagentTimeout() time.Duration {
 	return secondsDuration(p.cfg.Subagent.DefaultTimeoutSec)
 }

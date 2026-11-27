@@ -231,6 +231,10 @@ export const api = {
   getClocks: () => request('/api/clocks'),
   // 后台任务注册表（子代理 / 交接 / 工作流 / 团队运行等）：limit 为最近条数（默认 100，最大 500）
   getAgentTasks: (limit = 100) => request(`/api/agent-tasks?limit=${limit}`),
+  // 按当前筛选条件导出后台任务日志（JSON 文件下载，含完整任务指令 / 结果 / 工具步骤）
+  exportAgentTasks: (params = {}) => download(`/api/agent-tasks/export${qs(params)}`, 'agent-tasks.json'),
+  // 清除当前筛选条件下**已结束**的后台任务日志（运行中/排队中的任务保留），返回 { ok, removed }
+  clearAgentTasks: (params = {}) => request(`/api/agent-tasks${qs(params)}`, { method: 'DELETE' }),
   // 当前处于 active 阶段的长任务目标（跨回合自动续跑的会话目标）
   getAgentGoals: () => request('/api/agent-goals'),
   // token 消耗监控指标：{ summary, today, daily[] }，含缓存命中率

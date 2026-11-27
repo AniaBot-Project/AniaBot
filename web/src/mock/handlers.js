@@ -285,6 +285,22 @@ function filterTaskLogs(c) {
   return list.filter((x) => inRange(x.trigger_time, c.query) && hasKeyword(x, c.query.get('keyword')))
 }
 
+// 后台任务日志筛选（列表与导出/清除共用）：与面板列表的本地筛选口径一致，
+// 关键词不区分大小写匹配标题 / 任务 ID / 会话键 / 任务指令。
+function filterAgentTasks(c) {
+  let list = state.agentTasks.filter((x) => x.kind !== 'turn')
+  const status = c.query.get('status')
+  const kind = c.query.get('kind')
+  const keyword = (c.query.get('keyword') || '').toLowerCase()
+  if (status) list = list.filter((x) => x.status === status)
+  if (kind) list = list.filter((x) => x.kind === kind)
+  if (keyword) {
+    list = list.filter((x) =>
+      [x.title, x.id, x.session_key, x.prompt].some((s) => (s || '').toLowerCase().includes(keyword)))
+  }
+  return list
+}
+
 const scopeCounts = (entries) => {
   const map = new Map()
   for (const e of entries) {
@@ -597,6 +613,24 @@ const routes = [
       const raw = parseInt(c.query.get('limit') || '100', 10)
       const limit = Math.max(1, Math.min(500, Number.isFinite(raw) ? raw : 100))
       return state.agentTasks.slice(0, limit)
+    },
+  },
+  {
+    m: 'GET', re: /^\/api\/agent-tasks\/export$/, h: (c) => {
+      const items = filterAgentTasks(c)
+      return { exported_at: new Date().toISOString(), total: items.length, items }
+    },
+  },
+  {
+    m: 'DELETE', re: /^\/api\/agent-tasks$/, h: (c) => {
+      // 与真实后端一致：只清除已结束的任务，运行中/排队中的任务保留
+      const finished = new Set(['completed', 'failed', 'timeout', 'cancelled', 'interrupted'])
+      const drop = new Set(filterAgentTasks(c).filter((x) => finished.has(x.status)).map((x) => x.id))
+      const before = state.agentTasks.length
+      state.agentTasks = state.agentTasks.filter((x) => !drop.has(x.id))
+      const removed = before - state.agentTasks.length
+      addOpLog('system', 'agent_task_clear', `面板清除后台任务日志 ${removed} 条`)
+      return { ok: true, removed }
     },
   },
   { m: 'GET', re: /^\/api\/agent-goals$/, h: () => state.agentGoals },
