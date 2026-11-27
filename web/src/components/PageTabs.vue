@@ -38,19 +38,25 @@ function isActive(to) {
 </script>
 
 <style scoped>
+/* 页签切换器：凹槽式分段控件——两个页签在同一个「凹槽」里，当前项是实心主题色药丸，
+   一眼能看出「这里可以切换页面」。说明文字靠右对齐，不和页签读成一句话。 */
 .page-tabs {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 12px;
+  gap: 8px 14px;
 }
 
-/* 页签条：无外框、只保留页签本身，和页面里的筛选分段按钮（有奶油小框）区分开 */
 .page-tabs-bar {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   max-width: 100%;
+  padding: 3px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-2);
+  box-shadow: inset 0 1px 2px rgb(61 52 40 / 0.08);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -61,36 +67,45 @@ function isActive(to) {
 .page-tab {
   display: inline-flex;
   align-items: center;
-  padding: 4px 14px;
+  padding: 5px 18px;
   border-radius: 999px;
-  font-size: 12.5px;
-  font-weight: 700;
+  font-size: 13.5px;
+  font-weight: 800;
   line-height: 1.5;
+  letter-spacing: 0.01em;
   white-space: nowrap;
-  color: var(--ink-muted);
+  color: var(--ink-soft);
   transition: background-color 0.15s, color 0.15s, box-shadow 0.15s;
 }
 .page-tab:hover {
-  color: var(--ink-body);
-  background: var(--fill-hover);
+  color: var(--ink);
+  background: var(--surface);
 }
 
-/* 当前页签：与侧边栏选中项同一套主题色 pill */
+/* 当前页签：实心主题色药丸 + 抬起一档（与侧边栏选中项同一套观感） */
 .page-tab-active,
 .page-tab-active:hover {
   color: var(--nav-active-ink);
   background: var(--accent);
-  box-shadow: 0 2px 0 0 var(--accent-strong);
+  box-shadow: 0 2px 0 0 var(--accent-strong), inset 0 1px 0 rgb(255 255 255 / 0.35);
 }
 
 .page-tabs-hint {
   min-width: 0;
+  margin-left: auto;
   font-size: 11px;
   line-height: 1.4;
+  text-align: right;
   color: var(--ink-muted);
 }
 
-@media (max-width: 640px) {
+@media (max-width: 767px) {
+  .page-tabs {
+    gap: 6px;
+  }
+  .page-tab {
+    padding: 5px 14px;
+  }
   .page-tabs-hint {
     display: none;
   }
