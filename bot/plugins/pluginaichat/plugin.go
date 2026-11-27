@@ -60,9 +60,9 @@ type AIChatPlugin struct {
 
 	// asyncSubagents 异步子代理管理，按会话（群/好友）隔离
 	asyncSubagents sync.Map
-	// teamRuns 运行中的 Agent 团队执行，键为会话键（团队运行是同步工具调用，
-	// 同一会话同一时刻最多一个）。#新对话 需要立即中止它们，避免旧任务的
-	// 结果与消耗继续落到新对话上。
+	// teamRuns 运行中的 Agent 团队执行，键为会话键。团队运行自异步化后在后台
+	// 执行，与异步子代理一样会跨回合存活；#新对话 / 面板清空上下文 / /stop 需要
+	// 立即中止整队，避免旧任务的结果与消耗继续落到新对话上。
 	teamRuns sync.Map
 
 	// pendingMsgs AI 响应期间到达的消息排队队列，按会话（群/好友）隔离
@@ -1250,9 +1250,10 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 		"timeout_sec", int(p.subagentTimeout().Seconds()),
 		"max_iterations", p.mainMaxIterations())
 
-	// Agent 团队：主 AI 通过 team_run 组建多代理团队并行执行子任务。
-	// 团队成员为带角色提示词的一次性子代理，复用子代理执行引擎；
-	// 团队定义持久化到 PersistentStorage（team: 命名空间，按会话 scope 隔离）
+	// Agent 团队：主 AI 通过 team_run 异步组建多代理团队并行执行子任务，立即返回
+	// 团队任务 ID 与成员可寻址 ID；团队成员为带角色提示词的一次性子代理，复用
+	// 子代理执行引擎。团队定义持久化到 PersistentStorage（team: 命名空间，按会话
+	// scope 隔离）
 	p.teamManager = newTeamManager(p.PersistentStorage, p.Logger.WithGroup("team"))
 	p.Logger.Info("已启用Agent团队功能", "max_members", teamMaxMembers)
 
@@ -1337,6 +1338,10 @@ func (p *AIChatPlugin) Start(ctx context.Context, cfg *viper.Viper) error {
 	// 都可能让消息错过所有消费者，由周期扫描接管（队列为空时零开销）
 	p.startPendingSweeper()
 
+	// 已完成后台工作清理器：按 subagent.finished_ttl_min 清理追问窗口过期条目，
+	// 避免已结束的子代理/团队成员结果长期占用内存
+	p.startAsyncSubagentJanitor()
+
 	// 任务记录清理器：按 task.retention_days 删除过期已结束任务
 	p.startTaskJanitor()
 
@@ -1396,8 +1401,8 @@ func (p *AIChatPlugin) getPromptForID(id message.QID, isGroup bool) string {
 }
 
 // OnUnload 插件卸载收尾：取消插件生命周期上下文，中止回合运行器、全部异步
-// 子代理与团队运行，避免进程重启/插件被卸载后仍有后台 goroutine 在跑
-// （b.Go 本身不接 ctx）。
+// 子代理与团队运行（含已完成、仍在追问窗口内的条目），避免进程重启/插件被
+// 卸载后仍有后台 goroutine 在跑（b.Go 本身不接 ctx）。
 func (p *AIChatPlugin) OnUnload(ctx context.Context, reason plugin.UnloadReason) error {
 	if p.runCancel != nil {
 		p.runCancel()

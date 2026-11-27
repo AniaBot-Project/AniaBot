@@ -454,10 +454,11 @@ rebuilds the system prompt from current config (group name is degraded away when
 facade is known). `GET /api/contexts` lists the union of persisted sessions and the resident
 cache, `GET /api/contexts/detail?key=`, `GET /api/contexts/export?keys=a,b` (no keys = all).
 Clear/delete first cancel the active turn when `terminate=1` (otherwise a busy session returns
-`plugininfo.ErrContextBusy` → 409), stop the session's background subagents/team runs, poll the
-session lock (15s cap), then wipe the memory window + SQL history, dynamic MCP tools, spilled
-tool outputs, todo list and pending queue, renew the session token and drop the resident chat
-object. Delete additionally clears the goal row and plan mode; clear only pauses the goal.
+`plugininfo.ErrContextBusy` → 409), stop the session's background subagents/team runs **and drop
+the finished-followup window**, poll the session lock (15s cap), then wipe the memory window +
+SQL history, dynamic MCP tools, spilled tool outputs, todo list and pending queue, renew the
+session token and drop the resident chat object. Delete additionally clears the goal row and
+plan mode; clear only pauses the goal.
 Per-turn injections (memory/KB/todo/plan notes) never enter history and therefore never show
 up in a snapshot. Tests: `contextpanel_test.go`, `adminpanel/contexts_test.go`.
 
@@ -475,12 +476,15 @@ up in a snapshot. Tests: `contextpanel_test.go`, `adminpanel/contexts_test.go`.
   also appended to this turn's Query-log `Query` field (`【处理中插话】` sections, via
   `appendInterjectionsToQuery`), so the panel/export audit trail includes them. `/stop`
   cancels the current turn and clears that session's queue (explicit stop); `/stop <任务ID>`
-  cancels only the named background subagent; `/tasks` lists the session's running subagents
-  plus the task registry's recent rows; `/resume <任务ID>` re-queues an `interrupted`
-  subagent/handoff task of this session as a continuation prompt for the main AI.
+  cancels only the named background work (a team member ID cancels that member, a team-run ID
+  cancels the whole run); `/tasks` lists the session's running background work (subagents,
+  workflows, team runs/members) plus the task registry's recent rows; `/resume <任务ID>`
+  re-queues an `interrupted` subagent/handoff task of this session as a continuation prompt for
+  the main AI.
 - `#新对话` is batch-level (detected from a message's **own** text segments, quoted/forwarded
   content is ignored). On submit it immediately cancels the session's running async
-  subagents/workflows and `team_run` members (`stopSessionBackground`) and pauses an active
+  subagents/workflows and team runs, clears the finished-followup window
+  (`stopSessionBackground`) and pauses an active
   goal (recoverable with `/goal resume`) so old work cannot report back into the new
   conversation; at batch start the runner clears persisted history, dynamic MCP tools, spilled
   tool outputs, renews the session token and cancels background work once more as a
@@ -506,22 +510,30 @@ up in a snapshot. Tests: `contextpanel_test.go`, `adminpanel/contexts_test.go`.
 **Sub-agents, teams, todo, plan, approval, hooks**
 
 - **Sub-agents** (`subagent.go`, `subagent_async.go`, `subagenttool.go`): `subagent_run` /
-  `subagent_list` / `subagent_send` / `subagent_cancel` are registered on main sessions only and
-  only when `subagent.enable=true`. A sub-agent is an ephemeral `ChatBot` (nil history store) with
-  its own `SessionToolExecutor` and scoped tools but no `subagent_run`, no team tools and no
-  parent image callbacks, so runs cannot recurse (depth is inherently 1; there is no `max_depth`
-  key). Session runs are **asynchronous**: the tool starts a tracked goroutine (`b.Go`) and
-  returns immediately; on completion a structured result is enqueued as a synthetic message in
-  the session's pending queue and the session is kicked, so the main AI picks it up in a
-  follow-up turn (or, when a turn is already running, as a `【后台消息】` injection before its
-  next LLM request). The notification's first line is machine-readable — `【子代理执行完成】
-  状态=completed` / `【子代理执行结束】状态=failed|timeout`, followed by `任务ID` and (when
-  named) `名称`; `/stop`-cancelled runs are not injected. `subagent_run` accepts an optional
-  `name` (1–32 chars, lowercase letter first, only lowercase letters/digits/hyphens; unique
-  among the session's running subagents). `subagent_send(id|name, message)` appends guidance to
-  a running subagent: it is drained before the subagent's next LLM request and injected as a
-  `[追加指令]` user message (never interrupts a running tool batch; the steer buffer holds 8).
-  `subagent_cancel` and `/stop <ID|name>` accept the ID or the name. Timeout is independent from
+  `subagent_list` / `subagent_followup` / `subagent_send` / `subagent_cancel` are registered on
+  main sessions only and only when `subagent.enable=true`. A sub-agent is an ephemeral `ChatBot`
+  (nil history store) with its own `SessionToolExecutor` and scoped tools but no `subagent_run`,
+  no team tools and no parent image callbacks, so runs cannot recurse (depth is inherently 1;
+  there is no `max_depth` key). Session runs are **asynchronous**: the tool starts a tracked
+  goroutine (`b.Go`) and returns immediately; on completion a structured result is enqueued as a
+  synthetic message in the session's pending queue and the session is kicked, so the main AI picks
+  it up in a follow-up turn (or, when a turn is already running, as a `【后台消息】` injection
+  before its next LLM request). The notification's first line is machine-readable — `【子代理执行
+  完成】状态=completed` / `【子代理执行结束】状态=failed|timeout`, followed by `任务ID`, optional
+  `名称` and (`父任务ID` for follow-ups); `/stop`-cancelled runs are not injected. `subagent_run`
+  accepts an optional `name` (1–32 chars, lowercase letter first, only lowercase
+  letters/digits/hyphens; unique among the session's running subagents).
+  `subagent_send(id|name, message)` appends guidance to a running subagent: it is drained before
+  the subagent's next LLM request and injected as a `[追加指令]` user message (never interrupts a
+  running tool batch; the steer buffer holds 8). `subagent_cancel` and `/stop <ID|name>` accept
+  the ID or the name. **Completed runs are retained in memory for
+  `subagent.finished_ttl_min` (default 30; 0 disables)**: the entry keeps task/result/error/role
+  prompt/parent chain but loses its cancel/steer handles, `subagent_list(include_finished=true)`
+  shows it with the remaining window, and `subagent_followup(id, message, timeout_sec?)` restarts
+  a fresh sub-agent from `original task + previous result + question` (`kind=followup`,
+  `parent_id` = original task row) instead of re-delegating the whole job. `subagent_send` on a
+  completed entry degrades to the same followup semantics. `subagent.max_followups_per_task`
+  (default 3; 0 = unlimited) caps the follow-up chain per root task. Timeout is independent from
   the framework event budget: `subagent.default_timeout_sec` (default 0 = unlimited; a positive
   value caps each run), a per-call `timeout_sec` overrides it, and `subagent.max_timeout_sec`
   (default 0 = unlimited) caps the model-supplied value; if the parent turn really has a deadline
@@ -530,11 +542,12 @@ up in a snapshot. Tests: `contextpanel_test.go`, `adminpanel/contexts_test.go`.
   `subagent.max_concurrent_global` (8, a separate pool from the `rate_limit` chat slots). Async
   results are length-governed: `subagent.result_inline_runes` (default 8000) — longer results are
   spilled to a per-session file and the synthetic message carries a preview + handle for
-  `read_tool_output`. The UI path is `/stop <ID>` / `/tasks`; the agent path is
-  `subagent_list` / `subagent_send` / `subagent_cancel`. Clock tasks get their own async variant
-  that drains all runs at wrap-up instead of enqueuing; agent-team members reuse the synchronous
-  `runSubagentWithOptions` (its result is still untruncated head-wise and goes through the
-  central tool-result limiter).
+  `read_tool_output`; the retained copy stays complete until expiry. The UI path is `/stop <ID>` /
+  `/tasks`; the agent path is `subagent_list` / `subagent_followup` / `subagent_send` /
+  `subagent_cancel`. Clock tasks get their own async variant that drains all runs at wrap-up
+  instead of enqueuing; agent-team members are async background entries too (see the team bullet).
+  `#新对话` and the panel's context clear/delete cancel all runs **and drop the finished-followup
+  window** for that session (`stopSessionBackground` → `cancelAsyncSubagents`).
 - **Goal continuation** (`goaltool.go`, `goalstore.go`, `goal_test.go`): cross-turn long
   objectives. Tools `goal_create(objective, max_rounds?)` / `goal_update(action=
   complete|blocked|pause|resume|clear, reason?, evidence?)` / `goal_status`, registered on main
@@ -585,7 +598,8 @@ up in a snapshot. Tests: `contextpanel_test.go`, `adminpanel/contexts_test.go`.
   (`GET /api/agent-goals`). Missing SQL backend or query failure returns an empty slice.
   `AgentTasks` excludes legacy `turn` rows (their canonical record is the Query log), so the page
   only lists real background work; clicking a row opens a detail modal (matching the Query-log
-  page), and Query-log rows with `task_id` link back to `/#/agent-tasks?task=…`. Task `prompt`,
+  page), the detail resolves `parent_id` and child rows into a clickable follow-up/task chain, and
+  Query-log rows with `task_id` link back to `/#/agent-tasks?task=…`. Task `prompt`,
   `result`, `error` and the `meta.tool_calls` steps are stored **untruncated** (same policy as the
   Query log; the panel folds long text), and the page can export the full log as JSON or clear
   finished rows. Subagent / team-member tool steps are also written **while running**:
@@ -608,8 +622,8 @@ up in a snapshot. Tests: `contextpanel_test.go`, `adminpanel/contexts_test.go`.
   `OnUnload` cancels `runCtx` (all runners/subagents) and every async subagent group. A normal
   turn is **not** written to `ania_agent_task` (its canonical record is the Query-log row, which
   carries stop reason, tool calls, tokens and reply); only background work writes a task row —
-  kinds `subagent|handoff|workflow|team_task|team_run|team_member` (`turn` is a legacy kind read
-  from older databases), status
+  kinds `subagent|handoff|workflow|followup|team_task|team_run|team_member` (`turn` is a legacy
+  kind read from older databases), status
   `queued|running|waiting|completed|failed|timeout|cancelled|interrupted`, stop reason
   `completed|aborted|max_tokens|error|watchdog|timeout|user_stop`, plus tokens/meta/timestamps.
   Task DB writes use short standalone contexts (3s) so a stuck DB never blocks a turn. Startup
@@ -625,10 +639,19 @@ up in a snapshot. Tests: `contextpanel_test.go`, `adminpanel/contexts_test.go`.
   the same way.
 - **Agent teams** (`team.go`, `teamroles.go`, `teamtool.go`, `teamlog.go`): persistent teams per
   scope (`g:`/`f:` in KV, `global` managed from the panel only), each member = name + role
-  prompt. `team_run` runs members in parallel as ephemeral agents and synthesizes their outputs;
-  each run also writes a `team_run` parent row plus one `team_member` child row per member
-  (task instruction, output, status, tokens, duration and capped tool-call steps in `meta`), so
-  the panel 后台任务 tab is the run log for both teams and subagents.
+  prompt. `team_run` is **asynchronous**: it registers one `team_run` parent entry and one
+  `team_member` entry per member (`<runID>-m1`, `<runID>-m2`, …) in the session work table, starts
+  a tracked goroutine and immediately returns the run ID plus every member ID. Members run in
+  parallel as ephemeral agents; each member can be steered by ID while running (the run ID
+  broadcasts to all members) and followed up by ID after completion (`subagent_followup`), while
+  the run ID can be followed up against the whole report. The run also writes a `team_run` parent
+  row plus one `team_member` child row per member **using the same `<runID>-mN` IDs** (task
+  instruction, output, status, tokens, duration and capped tool-call steps in `meta`), so the
+  panel 后台任务 tab shows the run as a parent/child chain and follow-up rows link back to
+  their source. When all members settle, a synthetic `【Agent 团队执行完成】状态=completed|failed`
+  message (run ID, member IDs, length-governed report) is enqueued and the session is kicked.
+  `#新对话`, the panel's context clear/delete, `/stop` and `OnUnload` cancel the whole run through
+  the same work table and the `teamRuns` registry.
   `team_create`/`team_list`/`team_delete` manage teams; caps: 20 teams/scope, 10 stored
   members, 5 concurrent members, name ≤20 runes, role ≤500 runes.
 - **Todo list** (`todo.go`): `todo_write` (main sessions, `todo.enable`, default on) replaces the
@@ -636,7 +659,8 @@ up in a snapshot. Tests: `contextpanel_test.go`, `adminpanel/contexts_test.go`.
 - **Plan mode** (`plan.go`, `plancmd.go`): `/plan on|off`. `planBlockedTools` plus dynamic legs
   block side-effect tools — `bash`, `file`, `write_file`/`edit_file`, `config_set`/
   `config_file_set`, memory/KB writes, clock writes, skill install/remove, MCP management and
-  discovery, loaded MCP tools, `subagent_run`, team mutations, `goal_create`/`goal_update`,
+  discovery, loaded MCP tools, `subagent_run`, `subagent_followup`, `subagent_send`, team
+  mutations, `goal_create`/`goal_update`,
   `workflow_run`, `team_task_create`/`team_task_claim`/`team_task_complete`, computer-use input,
   and platform tools declaring `aitool.SideEffector` (voice/poke/sign) — while read-only tools
   (screenshots, `config_get`, searches, lists, `goal_status`, `team_task_list`) stay available.
@@ -758,8 +782,9 @@ Registration hierarchy:
    additionally get `todo_write` (`todo.enable`), `send_message` (mid-turn proactive message to
    the user at real progress milestones; no per-turn cap — the tool description sets the semantics:
    sync milestones only, never replace the final reply — and it keeps working afterwards),
-   `subagent_run/list/send/cancel`, `task_handoff`, `team_run/create/list/delete` (the first two
-   only when `subagent.enable=true`), `goal_create/update/status` (SQL + `goal.enable`),
+   `subagent_run/list/followup/send/cancel`, `task_handoff`, `team_run/create/list/delete` (the
+   subagent tools and handoff only when `subagent.enable=true`; `team_run` is async and exposes
+   member IDs for steering/follow-up), `goal_create/update/status` (SQL + `goal.enable`),
    `workflow_run` (`subagent.enable`), and `team_task_create/list/claim/complete` (task store
    available); clock sessions get `skip_output` plus their own async `subagent_*` set;
    chat-console sessions register only the shared scoped tools. Each session
@@ -790,7 +815,8 @@ degradation must never block startup, and plugin-created tables must follow the 
 Use the `ania_` prefix. Existing tables: `ania_kv` (config/KV), `ania_chat_session`,
 `ania_chat_message`, `ania_memory`, `ania_kb_doc`, `ania_intention`, `ania_query_log`,
 `ania_task_log`, `ania_op_log`, `ania_agent_task` (background-work registry: subagent/handoff/
-workflow/team-run/team-member/team-task; legacy `turn` rows only, with `(session_key,status)` and
+workflow/followup/team-run/team-member/team-task; legacy `turn` rows only, with
+`(session_key,status)` and
 `(status,updated_at)` indexes),
 `ania_agent_goal` (`session_key` PK; cross-turn goal state). Conventions: MySQL string keys `VARCHAR(255) COLLATE
 utf8mb4_bin`, large payloads `MEDIUMTEXT`, timestamps as INTEGER unix seconds or fixed-width UTC

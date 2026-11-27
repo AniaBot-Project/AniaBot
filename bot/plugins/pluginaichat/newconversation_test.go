@@ -26,10 +26,13 @@ func registerTeamRunForTest(p *AIChatPlugin, id message.QID, isGroup bool) (canc
 // 没有后台工作时是空操作。
 func TestStopSessionBackgroundCancelsWork(t *testing.T) {
 	p := newRunnerTestPlugin()
+	p.cfg.Subagent.FinishedTTLMin = 30
 	id := message.FromString("2001")
 
 	subCanceled := make(chan struct{})
 	p.getAsyncGroup(id, true).add("t-sub-1", func() { close(subCanceled) }, "调研")
+	// 已完成的追问窗口也属于旧对话：开新对话必须一并清空
+	addFinishedForTest(p, id, true, asyncSubagentEntry{id: "t-finished", task: "旧任务"}, "旧结果", nil)
 	team1, unregister1 := registerTeamRunForTest(p, id, true)
 	team2, unregister2 := registerTeamRunForTest(p, id, true)
 	defer unregister1()
@@ -43,7 +46,7 @@ func TestStopSessionBackgroundCancelsWork(t *testing.T) {
 	<-team1
 	<-team2
 	if _, ok := p.asyncSubagents.Load(sessionKey(id, true)); ok {
-		t.Fatal("取消后异步子代理组应被清理")
+		t.Fatal("取消后异步子代理组（含完成条目）应被清理")
 	}
 	if _, ok := p.teamRuns.Load(sessionKey(id, true)); ok {
 		t.Fatal("取消后团队运行登记应被清理")

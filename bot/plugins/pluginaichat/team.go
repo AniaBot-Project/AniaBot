@@ -263,8 +263,10 @@ type teamMemberSpec struct {
 }
 
 // teamMemberResult 单成员执行结果。成功时 result 含 runSubagent 的元信息前缀，
-// 失败时 err 为分类后的错误；usage/duration 供 team_run 父记录汇总成员消耗与耗时。
+// 失败时 err 为分类后的错误；usage/duration 供 team_run 父记录汇总成员消耗与耗时，
+// id 为该成员的可寻址 ID（报告、后台工作表与追问都靠它定位）。
 type teamMemberResult struct {
+	id       string
 	label    string
 	result   string
 	err      error
@@ -326,12 +328,13 @@ func teamEffectiveTask(base, memberTask string) string {
 	return base + "\n\n" + memberTask
 }
 
-// runningTeamRun 一次正在执行的团队运行（#新对话 据此取消）。
+// runningTeamRun 一次正在执行的团队运行（#新对话 / 面板清空上下文据此取消）。
+// 团队运行自异步化后与异步子代理一样在后台执行，完成前主回合已结束。
 type runningTeamRun struct {
 	cancel context.CancelFunc
 }
 
-// teamRunGroup 一个会话正在执行的团队运行集合。同一轮的多个工具调用并行执行，
+// teamRunGroup 一个会话正在执行的团队运行集合。同一轮的多个工具调用可并行执行，
 // AI 可能同时发起多个 team_run，因此按会话记录全部运行而不是单个取消函数。
 type teamRunGroup struct {
 	mu   sync.Mutex
@@ -369,7 +372,7 @@ func (g *teamRunGroup) cancelAll() int {
 
 // registerTeamRun 把一次团队运行登记到会话后台工作表，返回派生上下文与注销函数。
 // 上下文被 #新对话（cancelTeamRuns）或 /stop（父上下文取消）中止时，成员子代理
-// 随之取消，runTeam 会尽快收敛并写入 cancelled 终态。
+// 随之取消，runAsyncTeam 会尽快收敛并写入 cancelled 终态。
 func (p *AIChatPlugin) registerTeamRun(ctx context.Context, id message.QID, isGroup bool) (context.Context, func()) {
 	key := sessionKey(id, isGroup)
 	teamCtx, cancel := context.WithCancel(ctx)
@@ -398,56 +401,242 @@ func (p *AIChatPlugin) cancelTeamRuns(id message.QID, isGroup bool) int {
 	return g.cancelAll()
 }
 
-// runTeam 同步并行执行团队成员：N 个成员各起一个 b.Go goroutine（panic 自动恢复），
-// 全部完成后组装汇总报告返回。成员之间互不可见、互不影响；单成员超时/失败不中断
-// 整体执行（失败进报告）。
+// teamMemberIDs 为一次团队运行分配可寻址的成员 ID：<runID>-m1 …（报告、后台工作表
+// 与面板都用它引用单个成员）。成员 ID 在一次运行内稳定，完成后 TTL 内仍可追问。
+func teamMemberIDs(runID string, count int) []string {
+	ids := make([]string, count)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("%s-m%d", runID, i+1)
+	}
+	return ids
+}
+
+// launchAsyncTeam 异步启动一次团队运行：登记父/成员任务记录与会话后台工作表后
+// 立即返回任务 ID 与成员 ID，成员在后台并行执行；全部结束后汇总报告回灌会话。
 //
-// 运行记录：开始时写一条 team_run 父记录与每个成员一条 team_member 子记录，
-// 结束时回填状态/产出/token/耗时与工具调用步骤，供面板「后台任务」页查看
-// （taskStore 未启用时全部降级为 nil，不影响执行）。
-//
-// 注意：成员 context 不在此预建超时——每个成员由 runSubagentWithOptions 内部按
-// 父 ctx deadline 独立压缩预算（预留收尾时间），外层预建会双重压缩损失预算；
-// 也正因为每成员超时都有界，wg.Wait() 必然收敛。
-func (p *AIChatPlugin) runTeam(ctx context.Context, b bot.Bot, id message.QID, isGroup bool,
+// 与同步版的区别：不再阻塞主回合；每个成员都是可寻址的后台条目（<runID>-mN），
+// 运行中可 subagent_send 单独注入指令，完成后可在 TTL 内 subagent_followup。
+func (p *AIChatPlugin) launchAsyncTeam(ctx context.Context, b bot.Bot, id message.QID, isGroup bool,
 	task string, timeoutSec int, specs []teamMemberSpec, parentCbs llmtool.CallBackFuncs) (string, error) {
-	// 预算预检：剩余不足（父 deadline 30s 内）时直接失败，不启动任何成员
+	// 预算预检：父回合剩余不足时直接失败，不启动任何成员
 	if _, err := resolveSubagentTimeout(p.subagentTimeout(), timeoutSec, ctx); err != nil {
 		return "", fmt.Errorf("无法启动 Agent 团队: %w", err)
 	}
-	// 登记到会话后台工作表：#新对话 可立即取消本次团队运行（成员共享派生的 ctx）
-	ctx, unregister := p.registerTeamRun(ctx, id, isGroup)
-	defer unregister()
+	runID := newTaskID()
+	memberIDs := teamMemberIDs(runID, len(specs))
 
+	// 后台运行脱离当前回合：只继承插件生命周期（卸载时取消），成员超时由
+	// runSubagentWithOptions 内部管理（与异步子代理一致）
+	base := context.Background()
+	if p.runCtx != nil {
+		base = p.runCtx
+	}
+	runCtx, unregister := p.registerTeamRun(base, id, isGroup)
+
+	memberCtxs := make([]context.Context, len(specs))
+	memberCancels := make([]context.CancelFunc, len(specs))
+	memberSteers := make([]chan string, len(specs))
+	for i := range specs {
+		memberCtxs[i], memberCancels[i] = context.WithCancel(runCtx)
+		memberSteers[i] = make(chan string, 8)
+	}
+
+	// 条目一次性登记：父运行 + 全部成员，避免中间态只看到一半成员
+	entries := make([]asyncSubagentEntry, 0, len(specs)+1)
+	entries = append(entries, asyncSubagentEntry{
+		id: runID, kind: taskKindTeamRun, label: "团队", task: task, cancel: unregister,
+	})
+	for i, spec := range specs {
+		entries = append(entries, asyncSubagentEntry{
+			id: memberIDs[i], kind: taskKindTeamMember, label: spec.label, task: spec.task,
+			prompt: spec.prompt, parentID: runID, steer: memberSteers[i], cancel: memberCancels[i],
+		})
+	}
+	// 团队 ID 的 subagent_send 广播给全部成员（通道满的成员跳过，不阻塞其余成员）
+	entries[0].broadcast = func(msg string) int {
+		delivered := 0
+		for _, ch := range memberSteers {
+			select {
+			case ch <- msg:
+				delivered++
+			default:
+			}
+		}
+		return delivered
+	}
+
+	runTask := p.beginTeamRunTask(id, isGroup, task, runID)
+	p.getAsyncGroup(id, isGroup).addEntries(entries)
+
+	b.Go("team:"+runID, func() {
+		defer unregister()
+		// 异常退出兜底：正常完成的条目已转 finished，取消路径由 runAsyncTeam 移除
+		defer p.retireTeamEntries(id, isGroup, runID, memberIDs)
+		p.runAsyncTeam(runCtx, b, id, isGroup, runID, task, timeoutSec, specs, memberIDs,
+			memberCtxs, memberSteers, runTask, parentCbs)
+	})
+
+	// 立即返回可寻址的任务/成员 ID：主 AI 可在后续回合直接引用
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "✅ Agent 团队已启动（任务ID: %s，成员 %d 人），正在后台执行，完成后结果会自动回到会话", runID, len(specs))
+	sb.WriteString("\n成员 ID：")
+	for i, spec := range specs {
+		if i > 0 {
+			sb.WriteString("、")
+		}
+		fmt.Fprintf(&sb, "%s（%s）", memberIDs[i], spec.label)
+	}
+	sb.WriteString("\n提示：执行期间不要等待或轮询；可用 subagent_list 查看进度、subagent_send 给成员补充指令（成员 ID 只发该成员，团队 ID 广播全队）、subagent_cancel 取消成员或整队；完成后可在保留窗口内用 subagent_followup 按成员 ID 继续追问。")
+	return sb.String(), nil
+}
+
+// markTeamMemberEntryFinished 成员结束时立即更新会话后台工作表：完成/失败/
+// 超时条目转 finished（TTL 内可追问），被单独取消的成员直接移除。
+func (p *AIChatPlugin) markTeamMemberEntryFinished(id message.QID, isGroup bool, memberID string, r teamMemberResult) {
+	if isContextCanceled(r.err) {
+		p.removeAsyncSubagent(id, isGroup, memberID)
+		return
+	}
+	p.finishAsyncSubagent(id, isGroup, memberID, r.result, r.err)
+}
+
+// runAsyncTeam 后台执行团队运行：成员并行，全部结束后写任务记录、把成员/团队
+// 条目转为完成态并回灌汇总报告；父上下文取消时静默收尾（不注入结果）。
+func (p *AIChatPlugin) runAsyncTeam(runCtx context.Context, b bot.Bot, id message.QID, isGroup bool,
+	runID, task string, timeoutSec int, specs []teamMemberSpec, memberIDs []string,
+	memberCtxs []context.Context, memberSteers []chan string, runTask *agentTask,
+	parentCbs llmtool.CallBackFuncs) {
 	start := time.Now()
-	runTask := p.beginTeamRunTask(id, isGroup, task)
 	results := make([]teamMemberResult, len(specs))
 	var wg sync.WaitGroup
-	for i, spec := range specs {
+	for i := range specs {
+		i := i
 		wg.Add(1)
-		b.Go(fmt.Sprintf("team:%s:%d:%s", sessionKey(id, isGroup), i, spec.label), func() {
+		b.Go(fmt.Sprintf("team:%s:%d:%s", runID, i, specs[i].label), func() {
 			defer wg.Done()
-			results[i] = p.runTeamMember(ctx, b, id, isGroup, timeoutSec, spec, parentCbs, runTask)
+			// 成员执行 panic 时记录为失败成员，避免 b.Go 的 recover 让结果看起来成功
+			defer func() {
+				if r := recover(); r != nil {
+					p.Logger.Error("团队成员执行异常", "member", specs[i].label, "member_id", memberIDs[i], "panic", fmt.Sprint(r))
+					results[i] = teamMemberResult{id: memberIDs[i], label: specs[i].label, err: fmt.Errorf("团队成员执行异常: %v", r)}
+				}
+			}()
+			// 全局子代理池：与异步子代理共用名额；拿不到名额时等取消，不阻塞其他成员
+			if p.subagentSem != nil {
+				select {
+				case p.subagentSem <- struct{}{}:
+					defer func() { <-p.subagentSem }()
+				case <-memberCtxs[i].Done():
+					results[i] = teamMemberResult{id: memberIDs[i], label: specs[i].label, err: memberCtxs[i].Err()}
+					return
+				}
+			}
+			results[i] = p.runTeamMember(memberCtxs[i], b, id, isGroup, timeoutSec, specs[i],
+				parentCbs, runTask, memberIDs[i], memberSteers[i])
+			// 成员先于整队完成时立刻转为完成态：早完成的成员就能被 followup，
+			// 不再继续占用 steer 通道等整队结束
+			p.markTeamMemberEntryFinished(id, isGroup, memberIDs[i], results[i])
 		})
 	}
 	wg.Wait()
 
 	duration := time.Since(start)
 	report := buildTeamReport(results, duration)
-	p.finishTeamRunTask(runTask, report, results, duration, ctx.Err())
-	return report, nil
+	p.finishTeamRunTask(runTask, report, results, duration, runCtx.Err())
+
+	if err := runCtx.Err(); err != nil {
+		// /stop / #新对话 / 面板清空 / 插件卸载：整队取消，移除后台条目且不注入结果
+		p.removeAsyncSubagent(id, isGroup, runID)
+		for _, mid := range memberIDs {
+			p.removeAsyncSubagent(id, isGroup, mid)
+		}
+		p.Logger.Info("Agent 团队运行已被取消", "task_id", runID, "id", id, "is_group", isGroup, "error", err.Error())
+		return
+	}
+
+	// 成员完成态：正常情况下成员在各自 goroutine 结束时已转 finished（早完成
+	// 即可追问）；这里补齐 panic 等异常路径遗漏的成员，并移除被单独取消的成员。
+	for i, r := range results {
+		if isContextCanceled(r.err) {
+			p.removeAsyncSubagent(id, isGroup, memberIDs[i])
+			continue
+		}
+		p.finishAsyncSubagent(id, isGroup, memberIDs[i], r.result, r.err)
+	}
+	// 父条目保留完整报告：团队 ID 的追问基于整队报告继续，成员 ID 则基于单成员结果
+	status, _ := teamRunOutcome(results, nil)
+	var runErr error
+	if status != taskStatusCompleted {
+		runErr = fmt.Errorf("团队全部成员执行失败")
+	}
+	p.finishAsyncSubagent(id, isGroup, runID, report, runErr)
+	p.Logger.Info("Agent 团队执行完成", "task_id", runID, "id", id, "is_group", isGroup,
+		"status", status, "duration", duration, "members", len(results))
+	p.onTeamComplete(b, id, isGroup, runID, task, specs, memberIDs, results, report)
+}
+
+// retireTeamEntries 异常退出兜底：移除仍未结束的父/成员条目（已完成的保留）。
+func (p *AIChatPlugin) retireTeamEntries(id message.QID, isGroup bool, runID string, memberIDs []string) {
+	p.retireRunningAsyncSubagent(id, isGroup, runID)
+	for _, mid := range memberIDs {
+		p.retireRunningAsyncSubagent(id, isGroup, mid)
+	}
+}
+
+// onTeamComplete 团队运行完成后的回调（在后台 goroutine 中执行）：构造包含任务 ID、
+// 成员 ID 与汇总报告的合成消息入队，并触发主会话处理。报告按 ResultInlineRunes
+// 治理（超长落盘 + handle），完成条目本身仍保留完整报告供追问。
+func (p *AIChatPlugin) onTeamComplete(b bot.Bot, id message.QID, isGroup bool, runID, task string,
+	specs []teamMemberSpec, memberIDs []string, results []teamMemberResult, report string) {
+	status, _ := teamRunOutcome(results, nil)
+	title := "【Agent 团队执行完成】"
+	if status != taskStatusCompleted {
+		title = "【Agent 团队执行结束】"
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%s状态=%s\n任务ID: %s\n任务: %s\n成员: ", title, status, runID, truncateTaskTitle(task))
+	for i := range memberIDs {
+		if i > 0 {
+			sb.WriteString(" / ")
+		}
+		memberStatus, _ := taskRunStatus(results[i].err)
+		fmt.Fprintf(&sb, "%s（%s·%s）", specs[i].label, memberIDs[i], taskStatusLabel(memberStatus))
+	}
+	sb.WriteString("\n\n")
+	limited := p.toolResultLimiter.LimitAt(sessionKey(id, isGroup), "team_result", report, p.cfg.Subagent.ResultInlineRunes, false)
+	sb.WriteString(limited)
+	sb.WriteString("\n\n提示：可在保留窗口内用 subagent_followup(id=成员ID 或 团队任务ID, message=...) 基于结果继续追问。")
+
+	syntheticMsg := message.Message{
+		Sender: message.MessageSender{
+			Nickname: "Agent 团队",
+			UserId:   message.FromUint64(0),
+		},
+		Message: []message.OB11Segment{
+			{Type: message.SegmentText, Data: map[string]any{"text": sb.String()}},
+		},
+	}
+	p.sessionBots.Store(sessionKey(id, isGroup), b)
+	if _, ok := p.enqueuePending(id, isGroup, syntheticMsg); !ok {
+		p.Logger.Warn("Agent 团队结果入队失败（队列已满）", "id", id, "is_group", isGroup, "task_id", runID)
+		return
+	}
+	p.Logger.Info("Agent 团队结果已入队", "id", id, "is_group", isGroup, "task_id", runID)
+	b.Go("pending:"+sessionKey(id, isGroup), func() { p.kickPending(b, id, isGroup) })
 }
 
 // runTeamMember 单个成员的执行：带角色提示词的一次性子代理，执行参数与主模型
-// 一致（模型/生成参数/工具轮数取主模型配置，超时取框架消息处理预算；见
-// runSubagentWithOptions）。执行期间用 subagentTrace 收集工具调用步骤，随成员
-// 子记录落库（面板可展开查看它具体做了什么）。
+// 一致（模型/生成参数/工具轮数取主模型配置）。执行期间用 subagentTrace 收集工具
+// 调用步骤，随成员子记录落库（面板可展开查看它具体做了什么）。
+//
+// memberID 为成员的可寻址 ID（<runID>-mN），steer 为运行中追加指令通道。
 func (p *AIChatPlugin) runTeamMember(ctx context.Context, b bot.Bot, id message.QID, isGroup bool,
-	timeoutSec int, spec teamMemberSpec, parentCbs llmtool.CallBackFuncs, runTask *agentTask) teamMemberResult {
+	timeoutSec int, spec teamMemberSpec, parentCbs llmtool.CallBackFuncs, runTask *agentTask,
+	memberID string, steer <-chan string) teamMemberResult {
 	logger := p.Logger.WithGroup("team")
-	result := teamMemberResult{label: spec.label, degraded: spec.degraded}
+	result := teamMemberResult{id: memberID, label: spec.label, degraded: spec.degraded}
 
-	memberTask := p.beginTeamMemberTask(runTask, id, isGroup, spec)
+	memberTask := p.beginTeamMemberTask(runTask, id, isGroup, spec, memberID)
 	trace := newSubagentTrace()
 	// 执行中增量回写工具步骤，面板「后台任务」页可在成员跑完前就看到进度
 	trace.progress = p.trackProgress(memberTask)
@@ -455,6 +644,7 @@ func (p *AIChatPlugin) runTeamMember(ctx context.Context, b bot.Bot, id message.
 	resp, usage, err := p.runSubagentWithOptions(ctx, b, id, isGroup, spec.task, subagentRunOptions{
 		prompt:     spec.prompt,
 		timeoutSec: timeoutSec,
+		steer:      steer,
 		trace:      trace,
 	}, parentCbs)
 	result.usage = usage
@@ -462,11 +652,10 @@ func (p *AIChatPlugin) runTeamMember(ctx context.Context, b bot.Bot, id message.
 	p.finishTeamMemberTask(memberTask, spec, resp, usage, err, result.duration, trace)
 	// 成员消耗计入会话与全局配额（发起方已做前置检查，这里只累加不重复拒绝）
 	p.quotaManager.Add(sessionKey(id, isGroup), usage)
-	// 成员消耗并入会话统计：team_run 在主请求内同步等待完成，
-	// 当次请求的 finishQuery 会取走该累计值
+	// 成员消耗并入会话统计：由下一次 finishQuery 取走累计值
 	p.addExtraUsage(sessionKey(id, isGroup), usage)
 	if err != nil {
-		logger.Warn("团队成员执行失败", "member", spec.label, "error", err.Error())
+		logger.Warn("团队成员执行失败", "member", spec.label, "member_id", memberID, "error", err.Error())
 		result.err = err
 		return result
 	}
@@ -475,7 +664,8 @@ func (p *AIChatPlugin) runTeamMember(ctx context.Context, b bot.Bot, id message.
 }
 
 // buildTeamReport 汇总报告：按输入顺序输出各成员结果块。
-// 头行统计成功/失败数；失败块输出错误；降级成员在块内首行标注。
+// 头行统计成功/失败数；块头带成员可寻址 ID（subagent_followup 可精确定位到成员）；
+// 失败块输出错误；降级成员在块内首行标注。
 func buildTeamReport(results []teamMemberResult, total time.Duration) string {
 	success, failed := 0, 0
 	for _, r := range results {
@@ -490,7 +680,11 @@ func buildTeamReport(results []teamMemberResult, total time.Duration) string {
 	fmt.Fprintf(&sb, "【Agent 团队执行完成】耗时 %.1fs · 成员 %d 人（成功 %d · 失败 %d）\n",
 		total.Seconds(), len(results), success, failed)
 	for i, r := range results {
-		fmt.Fprintf(&sb, "\n===== 成员 %d/%d：%s =====\n", i+1, len(results), r.label)
+		memberID := ""
+		if r.id != "" {
+			memberID = "（ID: " + r.id + "）"
+		}
+		fmt.Fprintf(&sb, "\n===== 成员 %d/%d：%s%s =====\n", i+1, len(results), r.label, memberID)
 		if r.degraded != "" {
 			sb.WriteString("（" + r.degraded + "）\n")
 		}

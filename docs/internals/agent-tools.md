@@ -63,7 +63,7 @@ type SessionToolExecutor struct { // 会话层：每个会话独立
 | `CreateToolsWithMCP()` | 追加 MCP 工具（`mcpLazyLoad` 决定发现/加载模式或全量注册） |
 | `CreateToolsWithSkill()` | 追加 `skill_read` / `skill_reload` 工具与 SkillManager（同时加载内置技能） |
 
-另由 aichat 插件在会话层注册：`config_get`/`config_set`（配置中心读写，敏感字段掩码、仅注册键可写、重启生效——重启由管理员发送 `/reboot` 命令执行，AI 只负责引导）、`config_file_get`/`config_file_set`（扩展配置读写：`files.mcp_json`/`files.prompt_json`/`files.hooks_json`/`files.commands_json`，只校验 JSON 语法，hooks/commands/prompt 保存后数秒热生效、mcp 重启生效）、`mcp_list`/`mcp_add`/`mcp_remove`/`mcp_reconnect`（MCP 服务器自管理，写 `files.mcp_json` 持久化 + 运行时热注册/注销）、会话绑定的 clock/memory/knowledge/team/subagent 工具，以及主会话的 `send_message`（执行中主动发消息：发送走 `SendText` 语义，`|||` 拆分多条、群聊 @ 发起人、合并转发等与普通回复一致；不做条数限制，靠工具描述约束发送时机——只同步关键节点、不逐步汇报、不能代替最终回复）、`task_handoff`（后台交接）、`goal_create/update/status`（SQL + `goal.enable`）、`workflow_run`（`subagent.enable`）、`team_task_create/list/claim/complete`（任务存储可用）。其中配置修改类工具（`config_set`/`config_file_set`）执行前恒需管理员审批（与审批开关无关，请求者本人不能批准）。
+另由 aichat 插件在会话层注册：`config_get`/`config_set`（配置中心读写，敏感字段掩码、仅注册键可写、重启生效——重启由管理员发送 `/reboot` 命令执行，AI 只负责引导）、`config_file_get`/`config_file_set`（扩展配置读写：`files.mcp_json`/`files.prompt_json`/`files.hooks_json`/`files.commands_json`，只校验 JSON 语法，hooks/commands/prompt 保存后数秒热生效、mcp 重启生效）、`mcp_list`/`mcp_add`/`mcp_remove`/`mcp_reconnect`（MCP 服务器自管理，写 `files.mcp_json` 持久化 + 运行时热注册/注销）、会话绑定的 clock/memory/knowledge/team/subagent 工具（`subagent_run/list/followup/send/cancel`），以及主会话的 `send_message`（执行中主动发消息：发送走 `SendText` 语义，`|||` 拆分多条、群聊 @ 发起人、合并转发等与普通回复一致；不做条数限制，靠工具描述约束发送时机——只同步关键节点、不逐步汇报、不能代替最终回复）、`task_handoff`（后台交接）、`goal_create/update/status`（SQL + `goal.enable`）、`workflow_run`（`subagent.enable`）、`team_task_create/list/claim/complete`（任务存储可用）。其中配置修改类工具（`config_set`/`config_file_set`）执行前恒需管理员审批（与审批开关无关，请求者本人不能批准）。
 
 ### 回调桥（CallBackFuncs）
 
@@ -193,11 +193,11 @@ AI 消息入口不再在框架事件 goroutine 里跑完整个回合（`runner.g
 - **入口零阻塞**：`submitTurn` 入队后 `b.Go("runner:<session>")` 唤醒运行器；同一会话同一时刻只有一个回合（会话锁），跨会话并发受 `rate_limit`（默认 4）槽位限制。长回合不再占用框架事件 worker，也不受 `bot.msg_event_timeout_sec` 约束。
 - **回合上下文**：`context.WithoutCancel(parent)` 保留 Value（追踪、图片注册表）但丢弃框架 deadline；关联插件生命周期 `p.runCtx`（`OnUnload` 取消）；`turn.hard_timeout_sec`（默认 14400s，0=不限）叠加硬截止。
 - **排空循环**：每批处理完继续 drain 队列；批次执行期间到达的消息由工具循环在每次 LLM 请求前经 `ChatOptions.Steer` 注入当前对话（见下节），没来得及注入的剩余消息由运行器作为下一批处理。出错/取消时该批用户消息之外的行为由错误处理决定（`/stop` 是显式停止，会清空该会话排队队列）。一个回合**正常结束**后运行器调用 `maybeDriveGoal` 尝试推进当前会话的长任务目标（无排队消息、无运行中子代理、目标 active 且已武装时才开下一轮）。
-- **任务注册表**（`taskstore.go` + `tasktrack.go` + `teamlog.go`）：后台工作（异步子代理、交接、工作流、团队任务板、团队运行/成员）各写一行 `ania_agent_task`（`id` 形如 `t-<36进制纳秒>-<4位hex>`，含 `session_key/parent_id/kind/status/title/prompt/result/error/stop_reason/tokens/meta/时间戳`），kind 取值 `subagent|handoff|workflow|team_task|team_run|team_member`（`turn` 仅为旧库遗留类型，新回合不再写入），状态机 `queued → running → completed|failed|timeout|cancelled|interrupted`，停止原因 `completed|aborted|max_tokens|error|watchdog|timeout|user_stop`。普通回合的完整过程由 Query 日志记录，避免两套表重复；`/tasks` 的「最近回合」来自进程内 `recentTurnLog`（每会话 5 条，重启即清空）。任务表写入走 3 秒独立 ctx，DB 卡住不影响回合；建表失败降级为不持久化（不阻断启动）。同一条启动路径还建 `ania_agent_goal`（长任务目标表，`session_key` 主键），建表失败时目标功能同样自动降级。
+- **任务注册表**（`taskstore.go` + `tasktrack.go` + `teamlog.go`）：后台工作（异步子代理、交接、工作流、追问、团队任务板、团队运行/成员）各写一行 `ania_agent_task`（`id` 形如 `t-<36进制纳秒>-<4位hex>`，含 `session_key/parent_id/kind/status/title/prompt/result/error/stop_reason/tokens/meta/时间戳`），kind 取值 `subagent|handoff|workflow|followup|team_task|team_run|team_member`（`turn` 仅为旧库遗留类型，新回合不再写入），状态机 `queued → running → completed|failed|timeout|cancelled|interrupted`，停止原因 `completed|aborted|max_tokens|error|watchdog|timeout|user_stop`。普通回合的完整过程由 Query 日志记录，避免两套表重复；`/tasks` 的「最近回合」来自进程内 `recentTurnLog`（每会话 5 条，重启即清空）。任务表写入走 3 秒独立 ctx，DB 卡住不影响回合；建表失败降级为不持久化（不阻断启动）。同一条启动路径还建 `ania_agent_goal`（长任务目标表，`session_key` 主键），建表失败时目标功能同样自动降级。
 - **重启恢复**：启动时 `MarkInterrupted` 把残留的 `queued/running/waiting` 标记为 `interrupted`；默认不自动续跑，用户发 `/resume <任务ID>` 把本会话的 `interrupted` 子代理/交接任务重新入队（任务目标作为系统来源消息），由主 AI 带着会话历史继续。
 - **清理**：按 `task.retention_days`（默认 7 天）每 6 小时删除已结束且过期的任务记录。
-- **用户命令**：`/tasks`（本会话运行中子代理 + 最近后台任务 + 最近回合，含状态/耗时/类型/停止原因/token）、`/stop`（取消当前回合并清空本会话排队、暂停自动续跑目标）、`/stop <任务ID 或名字>`（只取消指定后台子代理）、`/resume <任务ID>`、`/goal [status|pause|resume|clear]`。
-- **面板**：`taskpanel.go` 实现 `adminpanel.TaskSource` / `TaskAdminSource` / `GoalSource`：展示最近后台任务（`GET /api/agent-tasks`，默认 100 条、上限 500；返回 `parent_id` 与 `prompt`）与 active 目标（`GET /api/agent-goals`），对应面板「AI 运行记录 → 后台任务」页签；`AgentTasksExport` / `AgentTasksClear` 支撑 `GET /api/agent-tasks/export`（按状态/类型/关键词导出全部命中记录）与 `DELETE /api/agent-tasks`（只清除已结束行，运行中/排队中保留），对应页面右上角的导出/清除按钮。`AgentTasks` 的 SQL 用 `kind <> 'turn'` 排除升级前的历史回合行（普通回合的完整过程在 Query 日志），并支持 `?task=` 深链定位。团队运行（`team_run` 父记录）、团队成员（`team_member` 子记录）与异步子代理的详情里可直接看到任务指令、成员产出摘要与工具调用步骤（`meta.tool_calls`；参数/结果完整保存、不截断，与 Query 日志同口径，明细也不限条数）；工具步骤在执行中即按约 3 秒节流增量落盘（`taskStore.UpdateProgress` 只改 `meta`/`updated_at`，`finished_at = 0` 保证迟到的进度写不会覆盖终态），面板轮询即可看到进度，收尾时再写全量。任务行点击弹出详情窗（与 Query 日志一致，避免就地展开占高度），Query 日志详情里的 `task_id` 可跳回本页。
+- **用户命令**：`/tasks`（本会话运行中后台任务 + 最近后台任务 + 最近回合，含状态/耗时/类型/停止原因/token）、`/stop`（取消当前回合并清空本会话排队、暂停自动续跑目标）、`/stop <任务ID 或名字>`（只取消指定后台任务：子代理、团队成员 ID 只取消该成员，团队运行 ID 取消整队）、`/resume <任务ID>`、`/goal [status|pause|resume|clear]`。
+- **面板**：`taskpanel.go` 实现 `adminpanel.TaskSource` / `TaskAdminSource` / `GoalSource`：展示最近后台任务（`GET /api/agent-tasks`，默认 100 条、上限 500；返回 `parent_id` 与 `prompt`）与 active 目标（`GET /api/agent-goals`），对应面板「AI 运行记录 → 后台任务」页签；`AgentTasksExport` / `AgentTasksClear` 支撑 `GET /api/agent-tasks/export`（按状态/类型/关键词导出全部命中记录）与 `DELETE /api/agent-tasks`（只清除已结束行，运行中/排队中保留），对应页面右上角的导出/清除按钮。`AgentTasks` 的 SQL 用 `kind <> 'turn'` 排除升级前的历史回合行（普通回合的完整过程在 Query 日志），并支持 `?task=` 深链定位。团队运行（`team_run` 父记录）、团队成员（`team_member` 子记录）、追问（`followup` 子记录）与异步子代理的详情里可直接看到任务指令、成员产出摘要与工具调用步骤（`meta.tool_calls`；参数/结果完整保存、不截断，与 Query 日志同口径，明细也不限条数）；详情弹窗把 `parent_id` 与子行解析成可点击的追问/任务链；工具步骤在执行中即按约 3 秒节流增量落盘（`taskStore.UpdateProgress` 只改 `meta`/`updated_at`，`finished_at = 0` 保证迟到的进度写不会覆盖终态），面板轮询即可看到进度，收尾时再写全量。任务行点击弹出详情窗（与 Query 日志一致，避免就地展开占高度），Query 日志详情里的 `task_id` 可跳回本页。
 
 ### 运行中插话（next-step 注入）与 send_message
 
@@ -205,7 +205,7 @@ AI 消息入口不再在框架事件 goroutine 里跑完整个回合（`runner.g
 
 - **两种前缀**：用户消息加 `【用户插话】你正在处理当前任务…请在本轮内纳入考虑并直接回应…` 前缀（群聊仍带 `[nickname:… id:…]` 发送者前缀，文案也引导「需要立刻回复时先用 `send_message` 回一条再继续」）；合成消息（`Sender.UserId=0`，如异步子代理完成通知、工作流汇总、`/resume` 恢复提示）加 `【后台消息】…` 前缀，不冒充用户发言。
 - **逐条注入、同批下发**：一次排空到的多条消息（无论来自同一人还是不同人）按到达顺序**逐条**作为独立 user 消息注入，各自保留【用户插话】/【后台消息】前缀与发送者信息，不会先拼成一条长文本（便于模型区分谁说了什么、也便于历史追溯）；但它们在同一次「下一次 LLM 请求前」一起进入上下文，不会为每条消息单独触发一次模型请求。
-- **剩余消息是下一批**：注入只发生在两次模型请求之间；最后一批 LLM 请求开始后才到达的消息留在队列里，由同一会话运行器在本批结束后作为**下一批**处理（正常路径不丢失、不重复消费）。`/stop`、取消与错误路径维持旧行为：清空待处理队列。`#新对话` 属于批次级语义（整批开始前清空历史）不能在回合中途执行，遇到时连同其后的消息一起放回队列、留到下一批处理。消息**到达时**（`submitTurn`）即先停止该会话运行中的异步子代理/工作流与 `team_run` 成员（`stopSessionBackground`），批次开始时再兜底停一次，避免旧后台任务的结果回灌进新对话；进行中的长任务目标也会被暂停（`/goal resume` 可恢复），否则回合结束后会立刻自动续跑旧目标。历史清空、动态 MCP 工具卸载、落盘结果删除与会话 token 换新仍在批次开始时执行。
+- **剩余消息是下一批**：注入只发生在两次模型请求之间；最后一批 LLM 请求开始后才到达的消息留在队列里，由同一会话运行器在本批结束后作为**下一批**处理（正常路径不丢失、不重复消费）。`/stop`、取消与错误路径维持旧行为：清空待处理队列。`#新对话` 属于批次级语义（整批开始前清空历史）不能在回合中途执行，遇到时连同其后的消息一起放回队列、留到下一批处理。消息**到达时**（`submitTurn`）即先停止该会话运行中的异步子代理/工作流与团队运行，并清空已完成条目的追问窗口（`stopSessionBackground`），批次开始时再兜底停一次，避免旧后台任务的结果回灌进新对话；进行中的长任务目标也会被暂停（`/goal resume` 可恢复），否则回合结束后会立刻自动续跑旧目标。历史清空、动态 MCP 工具卸载、落盘结果删除与会话 token 换新仍在批次开始时执行。
 - **图片可加载**：插话消息中的图片登记到本轮请求的图片注册表，`load_images` 可按哈希加载。
 - **Query 日志可审计**：注入的插话在注入时追加到本次 Query 日志的 `Query` 字段（原始输入保留，每段以 `【处理中插话】` 开头、带发送者前缀；经 `Logger.Update` 增量落盘，与工具明细的增量写互不覆盖），面板「AI 运行记录 → 对话记录」、导出 JSON 与关键词筛选都能看到。
 - **前缀归属**：`ChatOptions.Steer` 的契约是「回调返回的文本原样作为 user 消息追加」，编排层不再追加 `[追加指令]` 前缀——子代理 steering 的 `[追加指令]` 由 `subagent.go` 的 `steerDrain` 自己加，主会话插话加 `【用户插话】`/`【后台消息】`。
@@ -219,10 +219,11 @@ AI 消息入口不再在框架事件 goroutine 里跑完整个回合（`runner.g
 - 中间轮文本丢弃；发送图片/文件、读历史仍作用于当前会话
 - 图片状态隔离：子代理有自己的图片队列，`LoadImages` 是 stub（推迟给主 AI），避免两个工具循环互踩队列
 - 执行参数全部跟随主模型：模型与 API 格式直取主模型四元组（`subagentLLMConfig`），生成参数经 `buildSubagentChatOptions` 复用主模型配置，工具轮数取 `mainMaxIterations()`（主模型的最大工具调用轮数）
-- **异步语义**：工具启动受跟踪的 goroutine（`b.Go`）后立即返回任务 ID；完成时格式化结果、作为合成消息入该会话待处理队列并唤醒运行器——主回合若仍在运行，会在其下一次 LLM 请求前以 `【后台消息】` 注入当前对话；否则由主 AI 在后续回合处理。主回合不等待、不轮询。回灌消息首行是机器可读状态：`【子代理执行完成】状态=completed`，失败/超时为 `【子代理执行结束】状态=failed` / `状态=timeout`，随后附 `任务ID` 与（有名字时的）`名称`；被 `/stop` 取消的任务不回灌
-- **结果治理**：同步路径（团队/定时任务复用 `runSubagentWithOptions`）的最终文本作为工具结果返回、仍经过统一工具结果治理；异步路径按 `subagent.result_inline_runes`（默认 8000）处理——超长结果由 `toolResultLimiter.LimitAt` 落盘为会话私有文件，合成消息只带摘要 + handle，主 AI 用 `read_tool_output` 读取
+- **异步语义**：工具启动受跟踪的 goroutine（`b.Go`）后立即返回任务 ID；完成时格式化结果、作为合成消息入该会话待处理队列并唤醒运行器——主回合若仍在运行，会在其下一次 LLM 请求前以 `【后台消息】` 注入当前对话；否则由主 AI 在后续回合处理。主回合不等待、不轮询。回灌消息首行是机器可读状态：`【子代理执行完成】状态=completed`，失败/超时为 `【子代理执行结束】状态=failed` / `状态=timeout`，随后附 `任务ID`、（有名字时的）`名称` 与（追问产生的）`父任务ID`；被 `/stop` 取消的任务不回灌
+- **结果治理与完成态保留**：异步路径的即时回灌按 `subagent.result_inline_runes`（默认 8000）处理——超长结果由 `toolResultLimiter.LimitAt` 落盘为会话私有文件，合成消息只带摘要 + handle，主 AI 用 `read_tool_output` 读取。内存中的完成条目保留**完整结果**（不受内联上限影响），以便追问时重建上下文；保留时长 `subagent.finished_ttl_min`（默认 30 分钟，0 关闭），过期由常驻 janitor 清理，`#新对话` / 面板清空上下文会立即丢弃整个窗口。
+- **追问（followup）**：`subagent_followup(id, message, timeout_sec?)` 对已完成条目启动一个新的异步子代理，任务文本 = 原任务 + 上一轮结果（按内联上限治理，超长落盘）+ 追加追问，并明确要求「先利用已有信息回答、信息不足再取数、不要整段重做」。新任务 `kind=followup`、任务行 `parent_id` 指向原任务，完成后通知带 `父任务ID`，面板可展开追问链；团队成员复用原角色提示词。`subagent_send` 命中已完成条目时自动走同一追问语义。`subagent.max_followups_per_task`（默认 3，0 不限）按追问链根任务计数，避免对同一任务无限续问。`subagent_list(include_finished=true)` 展示完成条目的状态、结果摘要与剩余可追问时间。
 - **并发边界**：每会话 `subagent.max_concurrent_per_session`（4）与全局 `subagent.max_concurrent_global`（8）两个信号量，全局池与对话回合的 `rate_limit` **分开计算**；超出直接返回可读错误，不静默排队。`/stop` 与 `subagent_cancel`/`/stop <ID>` 按 ID **或名字**取消；`OnUnload` 取消全部后台子代理
-- **命名与运行中通信**：`subagent_run` 可传 `name`（1~32 位、小写字母开头，只含小写字母/数字/连字符，会话内运行中唯一），`subagent_list` 按 ID + 名字展示；`subagent_send(id|name, message)` 把指令写入该子代理的 steering 通道（8 格缓冲），子代理在下一次 LLM 请求前以 `[追加指令]` 注入、不打断当前工具批；`subagent_cancel(id|name)` 取消单个。结构化返回目前是「状态 + 任务 ID + 名称 + 结果正文」，没有独立的 JSON `artifacts` 字段，也没有子代理会话历史落库/跨重启续跑（规划中的 P2 剩余项）。
+- **命名与运行中通信**：`subagent_run` 可传 `name`（1~32 位、小写字母开头，只含小写字母/数字/连字符，会话内运行中唯一），`subagent_list` 按 ID + 名字展示；`subagent_send(id|name, message)` 把指令写入该子代理的 steering 通道（8 格缓冲），子代理在下一次 LLM 请求前以 `[追加指令]` 注入、不打断当前工具批；`subagent_cancel(id|name)` 取消单个。完成后的条目不再接受 steering/取消，只接受 followup。结构化返回目前是「状态 + 任务 ID + 名称 + 结果正文」，没有独立的 JSON `artifacts` 字段，也没有子代理会话历史落库/跨重启续跑（规划中的 P2 剩余项）。
 
 ### 超时预算
 
@@ -281,9 +282,11 @@ clock 任务里注册的是**异步**子代理变体（`clocksubagent.go`）：�
 在子代理之上的一层编排：AI 可保存/调用「团队」——一组带角色描述的子代理成员（默认启用，无配置开关）：
 
 - 团队按 scope（`g:` / `f:` / 全局 `global`）隔离，`team:` 命名空间 KV 存取；团队名严格校验（中文/字母/数字/下划线/连字符）
-- `team_run` 让多个成员**并行**执行（上限 `teamMaxMembers`=5，防并发风暴），每个成员复用 `runSubagentWithOptions` 并只传角色提示词——模型与执行参数（超时/轮数）全部与普通子代理一致（即跟随主模型）
-- 成员结果汇总返回主 AI；团队定义可保存复用（`team_create/list/delete`），面板提供管理页
-- **运行记录**：每次 `team_run` 写一条 `kind=team_run` 父记录（总体任务、汇总报告、成员合计 token/耗时、成员摘要），每个成员写一条 `kind=team_member` 子记录（`parent_id` 指向父记录，含任务指令、成员产出、状态、耗时与工具调用步骤；执行中按约 3 秒增量刷新），面板「AI 运行记录 → 后台任务」页签点击行可查看；taskStore 不可用时整体降级为不记录
+- `team_run` **异步**启动多个成员并行执行（上限 `teamMaxMembers`=5，防并发风暴），每个成员复用 `runSubagentWithOptions` 并只传角色提示词——模型与执行参数（超时/轮数）全部与普通子代理一致（即跟随主模型）。工具立即返回团队任务 ID 与成员 ID（`<runID>-m1`、`<runID>-m2`…）；运行中可用 `subagent_send` 按成员 ID 定向注入、按团队 ID 广播全队，`subagent_cancel`/`/stop <ID>` 取消单个成员或整队
+- 全部成员结束后汇总报告作为 `【Agent 团队执行完成】状态=completed|failed` 合成消息回灌主 AI（含任务 ID、成员 ID 与各成员状态），主回合不等待、不轮询
+- **完成态与追问**：团队与每个成员都登记进会话后台工作表，完成后在 `subagent.finished_ttl_min` 内保留；成员 ID 可 `subagent_followup`（沿用成员角色提示词），团队 ID 可基于整队报告继续追问。`#新对话`、面板清空上下文与 `OnUnload` 会取消运行中的团队并清空追问窗口
+- 团队定义可保存复用（`team_create/list/delete`），面板提供管理页
+- **运行记录**：每次 `team_run` 写一条 `kind=team_run` 父记录（总体任务、汇总报告、成员合计 token/耗时、成员摘要与成员 ID），每个成员写一条 `kind=team_member` 子记录（任务行主键即成员 ID `<runID>-mN`，`parent_id` 指向父记录，含任务指令、成员产出、状态、耗时与工具调用步骤；执行中按约 3 秒增量刷新），追问产生的任务行 `kind=followup` 且 `parent_id` 指向来源任务；面板「AI 运行记录 → 后台任务」页签点击行可查看，并可在详情里沿父/子 ID 展开追问链；taskStore 不可用时整体降级为不记录
 - 团队成员的一次性会话不注册团队工具（防递归组建团队）
 
 ## 知识库（knowledge）

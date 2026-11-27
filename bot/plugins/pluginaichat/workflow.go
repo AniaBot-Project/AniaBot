@@ -518,6 +518,20 @@ func (t *workflowRunTool) Execute(ctx context.Context, params any, callbacks llm
 	return t.plugin.launchWorkflow(t.bot, t.id, t.isGroup, plan, callbacks), nil
 }
 
+// workflowFollowupTask 生成写入后台工作表的任务背景：工作流完成后追问需要看到
+// 整体目标与各步骤原始任务，仅标题不足以重建上下文。
+func workflowFollowupTask(plan *workflowPlan) string {
+	var sb strings.Builder
+	if plan.goal != "" {
+		sb.WriteString("整体目标：" + plan.goal + "\n\n")
+	}
+	sb.WriteString("工作流步骤：\n")
+	for _, step := range plan.steps {
+		sb.WriteString("- " + step.ID + "：" + step.Task + "\n")
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
 // launchWorkflow 登记任务表与异步子代理组，启动后台 goroutine 并立即返回占位文本。
 //
 // ctx 由 newTurnContext 构造：自带回合硬截止、随插件卸载取消；cancel 登记进
@@ -530,12 +544,15 @@ func (p *AIChatPlugin) launchWorkflow(b bot.Bot, id message.QID, isGroup bool, p
 	ctx, cancel := p.newTurnContext(context.Background())
 	p.getAsyncGroup(id, isGroup).addEntry(asyncSubagentEntry{
 		id:     taskID,
-		task:   title,
+		kind:   taskKindWorkflow,
+		label:  "工作流",
+		task:   workflowFollowupTask(plan),
 		cancel: cancel,
 	})
 	b.Go("workflow:"+taskID, func() {
 		defer cancel()
-		defer p.removeAsyncSubagent(id, isGroup, taskID)
+		// 异常退出兜底：正常完成的条目已转 finished，取消路径由 runWorkflow 移除
+		defer p.retireRunningAsyncSubagent(id, isGroup, taskID)
 		p.runWorkflow(ctx, b, id, isGroup, taskID, task, plan, parentCbs)
 	})
 
@@ -663,6 +680,9 @@ func (p *AIChatPlugin) runWorkflow(ctx context.Context, b bot.Bot, id message.QI
 		if runErr == nil {
 			runErr = context.Canceled
 		}
+		// 取消（/stop、插件卸载、硬截止）：移除后台工作表条目，不作为追问目标；
+		// 任务表按 context 错误落 cancelled/timeout，不向会话注入失败骚扰消息。
+		p.removeAsyncSubagent(id, isGroup, taskID)
 		if errors.Is(runErr, context.DeadlineExceeded) {
 			p.Logger.Warn("工作流执行超时被中止", "task_id", taskID, "id", id, "is_group", isGroup, "duration", duration)
 			p.finishSubagentTask(task, "", total, fmt.Errorf("工作流执行超时（%v），已中止", runErr))
@@ -684,6 +704,8 @@ func (p *AIChatPlugin) runWorkflow(ctx context.Context, b bot.Bot, id message.QI
 	p.quotaManager.Add(sessionKey(id, isGroup), total)
 	p.addExtraUsage(sessionKey(id, isGroup), total)
 	p.finishSubagentTask(task, summary, total, runErr)
+	// 完成条目保留 TTL，供 subagent_followup 基于工作流汇总继续追问
+	p.finishAsyncSubagent(id, isGroup, taskID, summary, runErr)
 	p.Logger.Info("工作流执行完成", "task_id", taskID, "id", id, "is_group", isGroup,
 		"status", status, "duration", duration, "tokens", total.TotalTokens)
 	p.enqueueWorkflowResult(b, id, isGroup, summary)

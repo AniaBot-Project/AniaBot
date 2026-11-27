@@ -215,14 +215,16 @@
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
-| `subagent.enable` | `true` | 启用子代理；关闭后不注册 `subagent_run/list/send/cancel`、`task_handoff` 与 `workflow_run` |
+| `subagent.enable` | `true` | 启用子代理；关闭后不注册 `subagent_run/list/followup/send/cancel`、`task_handoff` 与 `workflow_run` |
 | `subagent.default_timeout_sec` | `0` | 子代理单次执行默认超时；`0`（默认）表示不限制，不再跟随 `bot.msg_event_timeout_sec` |
 | `subagent.max_timeout_sec` | `0` | 模型单次 `timeout_sec` 的业务上限；0 不限 |
 | `subagent.max_concurrent_per_session` | `4` | 每会话同时运行的后台子代理上限，超出直接拒绝 |
 | `subagent.max_concurrent_global` | `8` | 全局后台子代理并发上限，与对话回合的 `rate_limit` 分开计算 |
 | `subagent.result_inline_runes` | `8000` | 异步子代理结果内联上限；超长结果落盘为预览 + handle，用 `read_tool_output` 读回；0 不限 |
+| `subagent.finished_ttl_min` | `30` | 子代理/团队成员完成后的追问窗口（分钟）；窗口内可用 `subagent_followup` 基于原任务+原结果续问；0 表示完成后立即丢弃、不可追问 |
+| `subagent.max_followups_per_task` | `3` | 同一个原始任务最多可追问的次数（按追问链根任务统计），防止无限续问；0 不限 |
 
-子代理是异步的：`subagent_run` 立即返回任务 ID，完成后结果自动回到会话。可传 `name`（1~32 位、小写字母开头，只含小写字母/数字/连字符，会话内运行中唯一）；`subagent_send(id 或名字, message)` 给运行中的子代理追加指令（下一个模型请求前以 `[追加指令]` 注入），`subagent_cancel` 与 `/stop <ID 或名字>` 支持 ID 或名字。完成通知首行为 `【子代理执行完成】状态=completed`（失败/超时为 `状态=failed` / `状态=timeout`），附任务 ID 与名称。深度固定为 1（子代理不能再委派），没有对应配置项。
+子代理是异步的：`subagent_run` 立即返回任务 ID，完成后结果自动回到会话。可传 `name`（1~32 位、小写字母开头，只含小写字母/数字/连字符，会话内运行中唯一）；`subagent_send(id 或名字, message)` 给运行中的子代理追加指令（下一个模型请求前以 `[追加指令]` 注入），`subagent_cancel` 与 `/stop <ID 或名字>` 支持 ID 或名字。完成通知首行为 `【子代理执行完成】状态=completed`（失败/超时为 `状态=failed` / `状态=timeout`），附任务 ID 与名称；追问产生的完成通知还带 `父任务ID`。完成后在 `subagent.finished_ttl_min` 内可 `subagent_followup(id, message, timeout_sec?)`（也可直接 `subagent_send`）基于原任务与上一轮结果继续追问，`subagent_list(include_finished=true)` 可查看哪些条目还能追问；任务行类型为 `followup` 且 `parent_id` 指向原任务。`#新对话` 与面板清空上下文会丢弃已完成条目的追问窗口。深度固定为 1（子代理不能再委派），没有对应配置项。
 
 ### 长任务目标（goal）
 
@@ -251,7 +253,7 @@
 | --- | --- | --- |
 | `task.retention_days` | `7` | 已结束任务记录保留天数，每 6 小时清理一次；0 不清理 |
 
-任务记录存于 SQL 表 `ania_agent_task`（需要 SQL 持久化，建表失败自动降级为不持久化），记子代理/交接/工作流/团队任务/团队运行/团队成员（`subagent`/`handoff`/`workflow`/`team_task`/`team_run`/`team_member`）；普通回合不再写任务表（完整过程看「AI 运行记录 → 对话记录」），旧库可能残留 `turn` 行。进程重启时遗留任务标记 `interrupted`，用户用 `/resume <任务ID>` 恢复；`/tasks` 查看本会话运行中子代理、最近后台任务与最近回合，`/stop` 取消当前回合并清空排队，`/stop <任务ID>` 取消指定后台子代理。面板「AI 运行记录 → 后台任务」页签可按筛选条件导出 JSON 或清除已结束记录（运行中/排队中的任务保留），任务指令、结果、错误与工具步骤完整保存、不截断。`#新对话` 会先停止本会话运行中的子代理/工作流与团队运行、暂停长任务目标（`/goal resume` 可恢复），再清空上下文。
+任务记录存于 SQL 表 `ania_agent_task`（需要 SQL 持久化，建表失败自动降级为不持久化），记子代理/交接/工作流/追问/团队任务/团队运行/团队成员（`subagent`/`handoff`/`workflow`/`followup`/`team_task`/`team_run`/`team_member`）；普通回合不再写任务表（完整过程看「AI 运行记录 → 对话记录」），旧库可能残留 `turn` 行。进程重启时遗留任务标记 `interrupted`，用户用 `/resume <任务ID>` 恢复；`/tasks` 查看本会话运行中后台任务、最近后台任务与最近回合，`/stop` 取消当前回合并清空排队，`/stop <任务ID>` 取消指定后台任务（团队成员 ID 只取消该成员，团队运行 ID 取消整队）。面板「AI 运行记录 → 后台任务」页签可按筛选条件导出 JSON 或清除已结束记录（运行中/排队中的任务保留），任务指令、结果、错误与工具步骤完整保存、不截断，并可按父/子任务展开追问链。`#新对话` 会先停止本会话运行中的子代理/工作流/团队运行、清空已完成条目的追问窗口、暂停长任务目标（`/goal resume` 可恢复），再清空上下文。
 
 
 ### 备用识图（主模型不支持多模态时把图片转文字）

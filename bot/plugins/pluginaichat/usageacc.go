@@ -49,9 +49,9 @@ func mergeTokenUsage(dst, src aichat.TokenUsage) aichat.TokenUsage {
 // addExtraUsage 把一次派生 LLM 调用的用量累加到会话级暂存，在下一次
 // finishQuery 时并入该会话的 Query 日志（takeExtraUsage）。
 //
-// 归属语义：同步派生（team_run 成员等在主请求内完成的）计入当次请求；
-// 异步派生（异步子代理在主请求结束后才完成的）计入该会话的下一条 Query
-// 日志——统计口径是「会话粒度的总成本」，而非严格按请求归属。
+// 归属语义：后台派生（异步子代理、team_run 成员等在主请求结束后才完成的）
+// 计入该会话的下一条 Query 日志——统计口径是「会话粒度的总成本」，而非严格
+// 按请求归属。
 // Query 日志不可用（记录器未初始化，如持久化不支持 SQL）时不暂存，
 // 避免累计器无限增长；配额计量不受影响，走各调用点独立的 quotaManager.Add。
 func (p *AIChatPlugin) addExtraUsage(sessionKey string, u aichat.TokenUsage) {

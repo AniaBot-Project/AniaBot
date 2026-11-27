@@ -13,8 +13,8 @@ import (
 // 后台任务注册表（ania_agent_task）与长任务目标表（ania_agent_goal）都属于插件
 // 的 SQL 持久层；面板是旁路视图：列表直接查最近 N 条，导出/清除把筛选条件下推，
 // 不引入新的运行时状态。表结构见 taskstore.go / goalstore.go，本文件不改动它们。
-// 行内同时承载 Agent 团队运行（team_run）与团队成员（team_member）记录，供面板
-// 展示任务指令、成员产出与工具调用步骤。
+// 行内同时承载 Agent 团队运行（team_run）与团队成员（team_member）、追问
+// （followup）记录，供面板展示任务指令、成员产出、追问链与工具调用步骤。
 //
 // 降级约定：SQL 后端不可用（taskStore/goalStore 为 nil）或查询失败时返回空切片，
 // 面板按空列表展示，不影响其它页面与插件运行。

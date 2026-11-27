@@ -20,8 +20,9 @@ func (p *AIChatPlugin) taskDB() (context.Context, context.CancelFunc) {
 }
 
 // beginSubagentTask 为一次异步子代理创建任务记录（taskStore 未启用时返回 nil）。
-// kind 为 taskKindSubagent / taskKindHandoff。
-func (p *AIChatPlugin) beginSubagentTask(taskID string, id message.QID, isGroup bool, task, kind string) *agentTask {
+// kind 为 taskKindSubagent / taskKindHandoff / taskKindFollowup 等；parentID 可选：
+// 追问填原任务 ID，团队成员的父子关系由 teamlog.go 的专用 helper 处理。
+func (p *AIChatPlugin) beginSubagentTask(taskID string, id message.QID, isGroup bool, task, kind string, parentID ...string) *agentTask {
 	if p.taskStore == nil {
 		return nil
 	}
@@ -39,6 +40,9 @@ func (p *AIChatPlugin) beginSubagentTask(taskID string, id message.QID, isGroup 
 		CreatedAt:  now,
 		StartedAt:  now,
 		UpdatedAt:  now,
+	}
+	if len(parentID) > 0 {
+		t.ParentID = strings.TrimSpace(parentID[0])
 	}
 	ctx, cancel := p.taskDB()
 	defer cancel()

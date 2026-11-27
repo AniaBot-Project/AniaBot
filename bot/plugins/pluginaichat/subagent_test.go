@@ -239,14 +239,14 @@ func TestNewSubagentTools(t *testing.T) {
 	p.cfg.Subagent.DefaultTimeoutSec = 300
 
 	groupTools := newSubagentTools(p, nil, message.FromUint64(12345), true)
-	if len(groupTools) != 4 {
-		t.Fatalf("应有 4 个子代理工具（run/list/send/cancel）, got %d", len(groupTools))
+	if len(groupTools) != 5 {
+		t.Fatalf("应有 5 个子代理工具（run/list/followup/send/cancel）, got %d", len(groupTools))
 	}
 	gotNames := make([]string, 0, len(groupTools))
 	for _, tl := range groupTools {
 		gotNames = append(gotNames, tl.Name())
 	}
-	wantNames := []string{"subagent_run", "subagent_list", "subagent_send", "subagent_cancel"}
+	wantNames := []string{"subagent_run", "subagent_list", "subagent_followup", "subagent_send", "subagent_cancel"}
 	for i := range wantNames {
 		if gotNames[i] != wantNames[i] {
 			t.Fatalf("工具顺序/名字 = %v, want %v", gotNames, wantNames)

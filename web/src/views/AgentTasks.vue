@@ -198,7 +198,15 @@
           <dd class="font-mono text-zinc-700 break-all">{{ detail.session_key || '—' }}</dd>
           <template v-if="detail.parent_id">
             <dt class="task-dt">父任务</dt>
-            <dd class="font-mono text-zinc-700 break-all">{{ detail.parent_id }}</dd>
+            <dd>
+              <button
+                v-if="detailParent"
+                type="button"
+                class="font-mono text-[#0071e3] break-all text-left hover:underline"
+                @click="openTaskByID(detail.parent_id)"
+              >{{ detail.parent_id }}</button>
+              <span v-else class="font-mono text-zinc-700 break-all">{{ detail.parent_id }}（不在当前列表）</span>
+            </dd>
           </template>
           <dt class="task-dt">创建 / 开始 / 结束</dt>
           <dd class="text-zinc-700">{{ fmtTimeFull(detail.created_at) }} → {{ fmtTimeFull(detail.started_at) }} → {{ fmtTimeFull(detail.finished_at) }}</dd>
@@ -225,6 +233,7 @@
             <div v-for="(m, i) in metaOf(detail).members" :key="i" class="task-member-row">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="text-xs font-medium text-zinc-800">{{ m.name }}</span>
+                <span v-if="m.id" class="font-mono text-[11px] text-zinc-400">{{ m.id }}</span>
                 <Tag variant="solid" size="small" :color="statusColor(m.status)">{{ statusText(m.status) }}</Tag>
                 <span v-if="m.tokens" class="text-[11px] text-zinc-400">{{ fmtInt(m.tokens) }} tok</span>
                 <span v-if="m.duration_ms" class="text-[11px] text-zinc-400">{{ fmtMs(m.duration_ms) }}</span>
@@ -269,6 +278,27 @@
             </div>
           </div>
         </div>
+
+        <!-- 追问链：当前任务的子任务（追问/团队成员）可点击继续展开 -->
+        <template v-if="detailChildren.length">
+          <h3 class="task-subtitle">追问 / 子任务（{{ detailChildren.length }}）</h3>
+          <div class="space-y-1.5">
+            <button
+              v-for="child in detailChildren"
+              :key="child.id"
+              type="button"
+              class="task-member-row w-full text-left hover:bg-zinc-50"
+              @click="openTaskByID(child.id)"
+            >
+              <div class="flex items-center gap-2 flex-wrap">
+                <Tag variant="outlined" size="small">{{ kindText(child.kind) }}</Tag>
+                <span class="font-mono text-[11px] text-[#0071e3]">{{ child.id }}</span>
+                <span class="text-xs text-zinc-700 truncate">{{ child.title || '(无标题)' }}</span>
+                <Tag variant="solid" size="small" :color="statusColor(child.status)">{{ statusText(child.status) }}</Tag>
+              </div>
+            </button>
+          </div>
+        </template>
 
         <!-- 结果 / 错误 / 原始 Meta -->
         <template v-if="detail.error">
@@ -344,6 +374,7 @@ const kindLabels = {
   team_task: '团队任务',
   team_run: '团队运行',
   team_member: '团队成员',
+  followup: '追问',
 }
 
 const statusLabels = {
@@ -408,9 +439,27 @@ const detailOpen = computed({
 const openFields = ref(new Set())
 const filters = reactive({ status: '', kind: '', keyword: '' })
 
+// 追问链：父任务与子任务（追问 / 团队成员）都从当前列表里解析，点击可跳转
+const detailParent = computed(() => {
+  const pid = detail.value?.parent_id
+  if (!pid) return null
+  return tasks.value.find((t) => t.id === pid) || null
+})
+const detailChildren = computed(() => {
+  const id = detail.value?.id
+  if (!id) return []
+  return tasks.value.filter((t) => t.parent_id === id)
+})
+
 // 打开任务详情弹窗（与 Query 日志一致，避免就地展开占满表格高度）
 function openDetail(record) {
   detail.value = record
+}
+
+// 按 ID 打开详情（追问链跳转；目标不在当前列表时保持原弹窗）
+function openTaskByID(id) {
+  const hit = tasks.value.find((t) => t.id === id)
+  if (hit) openDetail(hit)
 }
 
 // 显式选择具体类型时按类型筛选

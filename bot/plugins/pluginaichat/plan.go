@@ -52,7 +52,7 @@ var planBlockedTools = map[string]struct{}{
 	"clock_create": {}, "clock_update": {}, "clock_delete": {},
 	"skill_install": {}, "skill_remove": {},
 	"mcp_add": {}, "mcp_remove": {}, "mcp_reconnect": {},
-	"subagent_run": {}, "team_run": {}, "team_create": {}, "team_delete": {},
+	"subagent_run": {}, "subagent_followup": {}, "subagent_send": {}, "team_run": {}, "team_create": {}, "team_delete": {},
 	// 目标工具会改变跨回合自动续跑状态（plan 阶段只做规划，不应建立/推进目标）
 	"goal_create": {}, "goal_update": {},
 	// 工作流与团队任务板都会派发后台执行/改变任务状态，属于副作用操作

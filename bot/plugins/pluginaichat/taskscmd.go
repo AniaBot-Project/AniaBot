@@ -27,13 +27,17 @@ func (p *AIChatPlugin) renderTasks(id message.QID, isGroup bool) string {
 	var sb strings.Builder
 	sb.WriteString("【后台任务】\n")
 
-	// 运行中的异步子代理（内存态，必然实时）
+	// 运行中的异步后台工作（内存态，必然实时）；团队运行/成员也在其中
 	running := p.listRunningSubagents(id, isGroup)
 	if len(running) > 0 {
 		fmt.Fprintf(&sb, "运行中：%d 个\n", len(running))
 		for i, e := range running {
-			fmt.Fprintf(&sb, "%d. %s（子代理，运行 %s）\n   任务：%s\n",
-				i+1, e.id, formatStatusDuration(time.Since(e.startTime)), truncateTaskTitle(e.task))
+			display := ""
+			if e.label != "" {
+				display = " " + e.label
+			}
+			fmt.Fprintf(&sb, "%d. %s（%s%s，运行 %s）\n   任务：%s\n",
+				i+1, e.id, asyncEntryKindLabel(e.kind), display, formatStatusDuration(time.Since(e.startTime)), truncateTaskTitle(e.task))
 		}
 	} else {
 		sb.WriteString("运行中：无\n")
@@ -91,6 +95,8 @@ func renderTaskLine(t *agentTask) string {
 		kind = "团队"
 	case taskKindTeamMember:
 		kind = "团队成员"
+	case taskKindFollowup:
+		kind = "追问"
 	}
 	dur := ""
 	if t.StartedAt > 0 {

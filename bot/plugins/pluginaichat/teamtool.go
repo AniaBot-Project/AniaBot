@@ -27,13 +27,17 @@ func newTeamTools(p *AIChatPlugin, b bot.Bot, id message.QID, isGroup bool) []ll
 		sessionDesc = "群聊（会话 ID " + id.String() + "）"
 	}
 	roles := builtinTeamRoleNames()
-	runDesc := "组建一个多代理团队并同步执行：把任务并行派发给多个成员代理（每个成员以全新上下文运行，" +
-		"拥有与你一致的工具能力，以其实际可用的工具列表为准），全部完成后汇总各成员结果返回，由你综合出最终回复。" +
+	runDesc := "组建一个多代理团队并后台并行执行：把任务派发给多个成员代理（每个成员以全新上下文运行，" +
+		"拥有与你一致的工具能力，以其实际可用的工具列表为准），立即返回团队任务 ID 与每个成员的可寻址 ID，不阻塞本轮；" +
+		"全部完成后汇总各成员结果自动回到会话并触发你综合出最终回复。" +
 		"适用场景：需要多视角/多维度处理的任务（如同时调研与评审、交叉验证）。两种用法：①所有成员执行同一总体任务" +
 		"（task 字段）；②作为 leader 分工，在不同成员的 task 字段填写各自专属任务（如让后端程序员审查后端代码、测试工程师执行测试），" +
 		"成员会先收到总体任务作为背景再执行专属任务。" +
 		"成员指定三种方式：① role 填内联自定义角色描述（优先级最高）；② name 填预置角色（" + roles + "）；" +
 		"③ name 填当前会话已保存团队（team_list 查看）或全局团队（Web 面板管理的跨会话团队）中的成员名。未识别的 name 会按普通子代理执行。" +
+		"\n\n行为：启动后立即返回，不要等待或轮询；运行中可用 subagent_list 查看成员进度、subagent_send 给成员补充指令" +
+		"（成员 ID 只发给该成员，团队 ID 广播全队）、subagent_cancel 取消成员或整队；完成后可在保留窗口内用 " +
+		"subagent_followup 按成员 ID 或团队 ID 继续追问，不必整队重跑。" +
 		"当前会话为" + sessionDesc + "，总体任务会发给每个成员。" +
 		fmt.Sprintf("单成员默认超时 %d 秒，最多并行 %d 个成员；成员无法再组建团队或委派子代理。",
 			int(p.subagentTimeout().Seconds()), teamMaxMembers)
@@ -116,11 +120,11 @@ func (t *teamRunTool) Execute(ctx context.Context, params any, callbacks llmtool
 		specs = append(specs, spec)
 	}
 
-	report, err := t.plugin.runTeam(ctx, t.bot, t.id, t.isGroup, task, p.TimeoutSec, specs, callbacks)
+	out, err := t.plugin.launchAsyncTeam(ctx, t.bot, t.id, t.isGroup, task, p.TimeoutSec, specs, callbacks)
 	if err != nil {
 		return "", err
 	}
-	return report, nil
+	return out, nil
 }
 
 // ---- team_create ----

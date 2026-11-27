@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jeanhua/AniaBot/bot/component/aichat"
@@ -16,10 +17,11 @@ import (
 //
 //   - team_run 是父记录（kind=team_run），Title/Prompt 为总体任务，Result 为汇总报告，
 //     Tokens 为成员合计，Meta 存成员摘要（teamRunMeta）；
-//   - 每个团队成员是一条子记录（kind=team_member，ParentID 指向父记录），Result 为
-//     成员产出，Meta 存角色降级说明、LLM 轮数、耗时与工具调用步骤（subagentRunMeta）；
-//   - 异步子代理沿用 kind=subagent/handoff，Meta 同样补执行细节与工具步骤
-//     （workflow 只记汇总行，步骤明细在汇总结果里）。
+//   - 每个团队成员是一条子记录（kind=team_member，任务行主键即成员可寻址 ID
+//     <runID>-mN，ParentID 指向父记录），Result 为成员产出，Meta 存角色降级说明、
+//     LLM 轮数、耗时与工具调用步骤（subagentRunMeta）；
+//   - 异步子代理沿用 kind=subagent/handoff/followup，Meta 同样补执行细节与工具步骤
+//     （workflow 只记汇总行，步骤明细在汇总结果里）；追问行的 ParentID 指向原任务。
 //
 // 这是「旁路观测」：taskStore 未启用（SQL 不可用）时所有 helper 返回 nil 并静默跳过，
 // 不影响团队/子代理执行；写入走 tasktrack.go 的 3 秒独立上下文，DB 卡住不阻塞回合。
@@ -41,6 +43,7 @@ type teamRunMeta struct {
 
 // teamMemberSummary 团队运行中单个成员的结果摘要（写入 teamRunMeta.Members）。
 type teamMemberSummary struct {
+	ID         string `json:"id,omitempty"` // 成员可寻址 ID（<runID>-mN）
 	Name       string `json:"name"`
 	Status     string `json:"status"` // 任务状态（completed/failed/timeout/cancelled）
 	Tokens     int64  `json:"tokens,omitempty"`
@@ -176,14 +179,19 @@ func encodeRunMeta(v any) string {
 }
 
 // beginTeamRunTask 创建一次团队运行的父记录（Status=running）。taskStore 未启用时
-// 返回 nil，此时成员记录也一并跳过。
-func (p *AIChatPlugin) beginTeamRunTask(id message.QID, isGroup bool, task string) *agentTask {
+// 返回 nil，此时成员记录也一并跳过。runID 可选：异步团队运行由调用方预先生成 ID
+// （成员 ID 以它为前缀），缺省时自动生成。
+func (p *AIChatPlugin) beginTeamRunTask(id message.QID, isGroup bool, task string, runID ...string) *agentTask {
 	if p.taskStore == nil {
 		return nil
 	}
 	now := time.Now().Unix()
+	taskID := newTaskID()
+	if len(runID) > 0 && strings.TrimSpace(runID[0]) != "" {
+		taskID = strings.TrimSpace(runID[0])
+	}
 	t := &agentTask{
-		ID:         newTaskID(),
+		ID:         taskID,
 		SessionKey: sessionKey(id, isGroup),
 		Kind:       taskKindTeamRun,
 		Status:     taskStatusRunning,
@@ -224,13 +232,19 @@ func (p *AIChatPlugin) finishTeamRunTask(t *agentTask, report string, results []
 
 // beginTeamMemberTask 创建一个团队成员的子记录；父记录未建成（nil）时不落库：
 // 孤儿成员行没有归属，面板上也看不出属于哪次团队运行。
-func (p *AIChatPlugin) beginTeamMemberTask(parent *agentTask, id message.QID, isGroup bool, spec teamMemberSpec) *agentTask {
+// memberID 可选：异步团队运行传入可寻址 ID（<runID>-mN）作为任务行主键，
+// 使后台工作表、报告与面板任务行使用同一个句柄，followup 的父 ID 也能落库串联。
+func (p *AIChatPlugin) beginTeamMemberTask(parent *agentTask, id message.QID, isGroup bool, spec teamMemberSpec, memberID ...string) *agentTask {
 	if p.taskStore == nil || parent == nil {
 		return nil
 	}
 	now := time.Now().Unix()
+	taskID := newTaskID()
+	if len(memberID) > 0 && strings.TrimSpace(memberID[0]) != "" {
+		taskID = strings.TrimSpace(memberID[0])
+	}
 	t := &agentTask{
-		ID:         newTaskID(),
+		ID:         taskID,
 		SessionKey: sessionKey(id, isGroup),
 		ParentID:   parent.ID,
 		Kind:       taskKindTeamMember,
@@ -319,6 +333,7 @@ func teamRunMetaFrom(results []teamMemberResult, duration time.Duration) teamRun
 			meta.Failed++
 		}
 		sum := teamMemberSummary{
+			ID:         r.id,
 			Name:       r.label,
 			Status:     status,
 			Tokens:     int64(r.usage.TotalTokens),

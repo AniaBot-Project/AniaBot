@@ -490,20 +490,22 @@ AI 回复不再有"5 分钟一刀切"的总超时：框架的 `bot.msg_event_tim
 
 | 配置键 | 默认值 | 说明 |
 | --- | --- | --- |
-| `plugin.ai_chat_bot.subagent.enable` | `true` | 是否启用子代理；关闭后不注册 `subagent_run/list/send/cancel`、`task_handoff` 与 `workflow_run` 工具，主 AI 无法委派 |
+| `plugin.ai_chat_bot.subagent.enable` | `true` | 是否启用子代理；关闭后不注册 `subagent_run/list/followup/send/cancel`、`task_handoff` 与 `workflow_run` 工具，主 AI 无法委派 |
 | `plugin.ai_chat_bot.subagent.default_timeout_sec` | `0` | 子代理单次执行默认超时（秒）；`0`（默认）表示不限制，由 token 配额与 `/stop` 兜底。**不再跟随** `bot.msg_event_timeout_sec` |
 | `plugin.ai_chat_bot.subagent.max_timeout_sec` | `0` | 模型单次调用 `timeout_sec` 的业务上限（秒）；`0` 表示不限制 |
 | `plugin.ai_chat_bot.subagent.max_concurrent_per_session` | `4` | 同一会话同时运行的后台子代理上限，超出时直接拒绝并提示（不静默排队） |
 | `plugin.ai_chat_bot.subagent.max_concurrent_global` | `8` | 所有会话合计的后台子代理上限，与对话回合的 `rate_limit` **分开计算**，后台任务不挤占正常对话 |
 | `plugin.ai_chat_bot.subagent.result_inline_runes` | `8000` | 异步子代理结果的内联上限（字符）；超过时完整结果落盘为会话私有文件，主 AI 收到摘要 + handle，可用 `read_tool_output` 按需读取；`0` 不限制 |
+| `plugin.ai_chat_bot.subagent.finished_ttl_min` | `30` | 子代理/团队成员完成后的追问窗口（分钟）；窗口内可用 `subagent_followup` 基于原任务与原结果继续追问；`0` 表示完成后立即丢弃、不可追问 |
+| `plugin.ai_chat_bot.subagent.max_followups_per_task` | `3` | 同一个原始任务最多可追问的次数（按追问链根任务统计），防止对同一任务无限续问；`0` 表示不限制 |
 
 执行参数全部跟随主模型：模型与 API 格式、生成参数（深度思考等）取「AI 对话 · 模型」配置，工具轮数与 `max_iterations` 一致。若父回合确实带硬截止，子代理超时会收缩到父回合剩余预算（预留 30 秒收尾，最少 10 秒），保证以工具结果优雅返回。
 
-子代理 2.0：`subagent_run` 可传 `name`（1~32 位、小写字母开头，只含小写字母/数字/连字符，同一会话运行中不可重名）便于引用；`subagent_send(id 或名字, message)` 给运行中的子代理追加指令（它在下一个 LLM 请求前以 `[追加指令]` 注入，不打断当前工具批），`subagent_cancel` 与 `/stop <ID 或名字>` 支持 ID 或名字。完成通知首行是结构化的 `【子代理执行完成】状态=completed`（失败/超时为 `状态=failed` / `状态=timeout`），并附任务 ID 与名称；被 `/stop` 取消的不回灌。详见 [AI 对话插件](/guide/builtin-plugins#ai-子代理-subagent)。
+子代理 2.0：`subagent_run` 可传 `name`（1~32 位、小写字母开头，只含小写字母/数字/连字符，同一会话运行中不可重名）便于引用；`subagent_send(id 或名字, message)` 给运行中的子代理追加指令（它在下一个 LLM 请求前以 `[追加指令]` 注入，不打断当前工具批），`subagent_cancel` 与 `/stop <ID 或名字>` 支持 ID 或名字。完成通知首行是结构化的 `【子代理执行完成】状态=completed`（失败/超时为 `状态=failed` / `状态=timeout`），并附任务 ID 与名称；被 `/stop` 取消的不回灌。完成后在 `subagent.finished_ttl_min` 内可 `subagent_followup(id, message, timeout_sec?)`（也可直接 `subagent_send`）基于原任务与上一轮结果继续追问，`subagent_list(include_finished=true)` 可查看可追问条目与剩余时间；追问任务行类型为 `followup` 且 `parent_id` 指向原任务。`#新对话` 与面板清空上下文会丢弃追问窗口。详见 [AI 对话插件](/guide/builtin-plugins#ai-子代理-subagent)。
 
 ### AI 任务记录与后台接管（task）
 
-后台子代理与交接任务、Agent 团队运行与团队成员、工作流与团队任务板都会在 SQL 表 `ania_agent_task` 里落一条任务记录（状态、结果、停止原因、token、时间戳；团队/子代理记录另含任务指令、耗时与工具调用步骤），用于 `/tasks` 查看与重启后恢复。普通回合不再写入任务表（完整过程由 Query 日志记录，`/tasks` 的「最近回合」只保留本进程最近几条摘要）；进程启动时会把上次遗留的"运行中"后台任务标记为 `interrupted`；用户发送 `/resume <任务ID>` 可把本会话被中断的子代理/交接任务重新入队，由主 AI 带着会话历史继续。
+后台子代理与交接任务、追问、Agent 团队运行与团队成员、工作流与团队任务板都会在 SQL 表 `ania_agent_task` 里落一条任务记录（状态、结果、停止原因、token、时间戳；团队/子代理记录另含任务指令、耗时与工具调用步骤），用于 `/tasks` 查看与重启后恢复。普通回合不再写入任务表（完整过程由 Query 日志记录，`/tasks` 的「最近回合」只保留本进程最近几条摘要）；进程启动时会把上次遗留的"运行中"后台任务标记为 `interrupted`；用户发送 `/resume <任务ID>` 可把本会话被中断的子代理/交接任务重新入队，由主 AI 带着会话历史继续。
 
 | 配置键 | 默认值 | 说明 |
 | --- | --- | --- |

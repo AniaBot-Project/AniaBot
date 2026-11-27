@@ -28,7 +28,7 @@ AniaBot 是一个用 Go 写的插件驱动型多平台机器人框架，**你自
   | `dc:` 前缀 | Discord |
   | `wx:` 前缀 | 微信 |
 - **插件**：内置「系统 / 日志 / 请求拦截 / 复读机 / 每日新闻 / AI 对话」六个；第三方插件从面板「插件市场」安装（自动下载源码 → 编译 → 重启）。
-- **AI 对话能力**：三种 LLM API 格式（`chat_completions` / `responses` / `anthropic`）、工具调用、MCP、技能（skill）、长期记忆、知识库、定时任务、主动互动、子代理（异步委派 + 命名 + 运行中追加指令 + 后台交接）、用户运行中插话注入与 `send_message` 执行中主动发消息、Agent 团队、工作流（workflow DAG）、团队任务板、长任务目标续跑（goal）、工具审批、计划模式、上下文压缩、任务编排与配额限制。
+- **AI 对话能力**：三种 LLM API 格式（`chat_completions` / `responses` / `anthropic`）、工具调用、MCP、技能（skill）、长期记忆、知识库、定时任务、主动互动、子代理（异步委派 + 命名 + 运行中追加指令 + 完成后追问 followup + 后台交接）、用户运行中插话注入与 `send_message` 执行中主动发消息、Agent 团队（异步执行 + 成员可寻址/追加指令/追问）、工作流（workflow DAG）、团队任务板、长任务目标续跑（goal）、工具审批、计划模式、上下文压缩、任务编排与配额限制。
 - **数据落点**：SQLite `./data/aniabot.db`（可用环境变量换 MySQL）；微信登录凭据在 `./data/weixin/`；市场插件在 `./data/plugins/`；技能目录默认 `./skills`（配置项 `plugin.ai_chat_bot.skills_dir`）。
 
 ## 三、要查/改配置，按这个顺序走
@@ -61,7 +61,7 @@ AniaBot 是一个用 Go 写的插件驱动型多平台机器人框架，**你自
 | 接 QQ / 飞书 / Telegram / Discord / 微信 | 配置管理 → 平台适配器（先勾 `bot.platform.<名字>.enable`）→ 对应适配器分组填连接信息；**重启生效** |
 | 面板端口 / 局域网访问 / 关掉面板 | Web 面板 → `bot.admin_panel.listen`（`0.0.0.0:7700` 可局域网访问） |
 | AI 回复跑太久、复杂任务被打断 | AI 回合已不再受 `bot.msg_event_timeout_sec` 限制：软截止提醒 / 硬截止 / 无进展看门狗在 `plugin.ai_chat_bot.turn.*`（硬截止默认 4 小时），单次请求超时在 `plugin.ai_chat_bot.llm.*`；后台任务见 `/tasks` |
-| 多步骤任务、有依赖的流程怎么交给 AI | 直接描述目标即可，AI 会用 `subagent_run`（单个）/ `workflow_run`（有依赖的 1~8 步 DAG）/ `team_run`（多人并行）编排；可用 `team_task_*` 维护会话内持久任务板 |
+| 多步骤任务、有依赖的流程怎么交给 AI | 直接描述目标即可，AI 会用 `subagent_run`（单个）/ `workflow_run`（有依赖的 1~8 步 DAG）/ `team_run`（多人后台并行）编排；子代理/团队成员完成后可在保留窗口内用 `subagent_followup` 追问，不必重新委派；可用 `team_task_*` 维护会话内持久任务板 |
 | 让 AI 持续推进一个长期目标 | 直接描述目标，AI 用 `goal_create` 登记；续跑开关与轮数上限在 AI 对话 · 回合与任务（`plugin.ai_chat_bot.goal.enable` / `goal.max_rounds`，默认 64 轮）；用户可用 `/goal` 查看/暂停/恢复/清除 |
 | 看后台任务、子代理、团队运行、目标进度 | 面板「AI 运行记录 → 后台任务」（`/#/agent-tasks`：后台任务状态/类型/停止原因/结果与进行中的目标；普通回合看「对话记录」页签；团队运行与团队成员、子代理点击行可看任务指令、成员产出与工具调用步骤；可按筛选条件导出 JSON 或清除已结束记录），或会话里 `/tasks`（含最近回合） |
 | 看 AI 到底拿到了什么上下文 / 让某个会话忘掉历史 | 面板「会话上下文」（`/#/contexts`：系统提示词三段、消息历史（含工具调用与结果）、工具定义与 token 估算；可清空单个/多个/全部会话的上下文、删除会话、导出 JSON；会话正在执行请求时会先确认再终止请求）；会话里发 `#新对话` 只清当前会话 |

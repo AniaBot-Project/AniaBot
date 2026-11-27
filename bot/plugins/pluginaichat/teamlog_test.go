@@ -364,6 +364,36 @@ func TestTeamRunRecordingDegradesWithoutStore(t *testing.T) {
 	}
 }
 
+// TestTeamTaskRowsUseAddressableIDs 异步团队的任务行主键即对外暴露的寻址 ID：
+// 团队行 = runID，成员行 = <runID>-mN；追问行以原任务 ID 作为 parent_id。
+func TestTeamTaskRowsUseAddressableIDs(t *testing.T) {
+	p := newTeamLogTestPlugin(t)
+	qid := message.FromUint64(3004)
+
+	parent := p.beginTeamRunTask(qid, true, "总体任务", "t-run-addr")
+	if parent == nil || parent.ID != "t-run-addr" {
+		t.Fatalf("团队行应复用 runID: %+v", parent)
+	}
+	member := p.beginTeamMemberTask(parent, qid, true,
+		teamMemberSpec{label: "研究员", task: "分工"}, "t-run-addr-m1")
+	if member == nil || member.ID != "t-run-addr-m1" || member.ParentID != "t-run-addr" {
+		t.Fatalf("成员行应复用成员 ID 且父 ID 指向团队: %+v", member)
+	}
+	followup := p.beginSubagentTask("t-run-addr-m2", qid, true, "追问任务", taskKindFollowup, "t-run-addr-m1")
+	if followup == nil {
+		t.Fatal("追问任务行应创建")
+	}
+	ctx, cancel := p.taskDB()
+	defer cancel()
+	got, ok, err := p.taskStore.Get(ctx, followup.ID)
+	if err != nil || !ok {
+		t.Fatalf("读回追问任务失败: ok=%v err=%v", ok, err)
+	}
+	if got.Kind != taskKindFollowup || got.ParentID != "t-run-addr-m1" {
+		t.Fatalf("追问任务行 = kind %q parent %q, want followup/%q", got.Kind, got.ParentID, "t-run-addr-m1")
+	}
+}
+
 // 成员记录并发写入：真实 team_run 的 N 个成员同时开始/结束，SQLite 单连接下
 // 也必须按 3 秒独立上下文串行完成，不丢行、不卡住。
 func TestTeamRunConcurrentMembers(t *testing.T) {

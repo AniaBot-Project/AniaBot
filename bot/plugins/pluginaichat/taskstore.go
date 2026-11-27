@@ -17,7 +17,7 @@ import (
 )
 
 // 后台任务注册表的行级存储 schema：所有「离开当前回合继续存在的工作」
-// （子代理 / 交接 / 工作流 / 团队运行与团队成员 / 团队任务板）统一落一行，
+// （子代理 / 交接 / 工作流 / 追问 / 团队运行与团队成员 / 团队任务板）统一落一行，
 // 按 id 主键读写，session_key/status 只用于收窄查询。普通回合已不再写入
 // （其完整过程由 Query 日志记录，避免两套表重复），turn 仅为旧记录兼容。
 // 时间戳统一 unix 秒（INTEGER/BIGINT），不用 CURRENT_TIMESTAMP：
@@ -39,6 +39,7 @@ const (
 	taskKindTeamTask   = "team_task"   // 团队任务板条目
 	taskKindTeamRun    = "team_run"    // Agent 团队一次并行执行（父记录）
 	taskKindTeamMember = "team_member" // 团队成员代理（team_run 的子记录）
+	taskKindFollowup   = "followup"    // 对已完成子代理/团队成员的追问（ParentID 指向原任务）
 )
 
 const (
@@ -78,7 +79,7 @@ type agentTask struct {
 	ID         string // "t-<unixnano 36 进制>-<4 位随机 hex>"
 	SessionKey string // "g:<id>" / "f:<id>"
 	ParentID   string // 父任务 ID，可为空
-	Kind       string // turn|subagent|handoff|workflow|team_task|team_run|team_member
+	Kind       string // turn|subagent|handoff|workflow|team_task|team_run|team_member|followup
 	Status     string // queued|running|waiting|completed|failed|timeout|cancelled|interrupted
 	Title      string
 	Prompt     string // 任务指令/摘要（可为空）

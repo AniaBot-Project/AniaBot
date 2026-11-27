@@ -87,7 +87,7 @@ func TestFinishQueryMergesExtraUsage(t *testing.T) {
 		t.Fatal("beginQuery 应返回 recorder")
 	}
 
-	// 模拟主请求期间派生的消耗（team_run 成员同步完成）
+	// 模拟主请求期间派生的消耗（如备用图片识别等在主请求内完成的调用）
 	p.addExtraUsage(sessionKey(id, true), aichat.TokenUsage{
 		PromptTokens: 100, CompletionTokens: 40, TotalTokens: 140, CachedTokens: 10, Iterations: 3,
 	})
