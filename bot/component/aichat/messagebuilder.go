@@ -41,13 +41,23 @@ func (b *MessageBuilder) SetScene(scene string) {
 // 场景描述含会话 ID/群名等每会话不同的内容，必须排在 skills 之后：上游前缀缓存
 // 按最长公共前缀命中，场景夹在静态段与 skills 之间会把 skills 挡在共享前缀之外。
 func (b *MessageBuilder) buildSystemPrompt() string {
-	prompt := b.prompt
-	if b.skillManager != nil {
-		if skillBlock := b.skillManager.BuildAvailableSkillsPrompt(); skillBlock != "" {
-			prompt += "\n\n" + skillBlock
-		}
+	prompt, skills, scene := b.SystemSections()
+	if skills != "" {
+		prompt += "\n\n" + skills
 	}
-	return prompt + b.scene
+	return prompt + scene
+}
+
+// SystemSections 返回 system prompt 的三段原始内容（未经拼接）：静态提示词、
+// available_skills 段与场景描述段。面板「上下文管理」页按段展示完整上下文，
+// 空段原样返回空串（不插入分隔符）。与 buildSystemPrompt 使用同一份取值，
+// 因此展示内容与真正发给模型的内容一致。
+func (b *MessageBuilder) SystemSections() (prompt, skills, scene string) {
+	prompt = b.prompt
+	if b.skillManager != nil {
+		skills = b.skillManager.BuildAvailableSkillsPrompt()
+	}
+	return prompt, skills, b.scene
 }
 
 // timePrefix 本条消息的时间前缀（"[RFC3339] "）。请求构建与历史落盘两侧

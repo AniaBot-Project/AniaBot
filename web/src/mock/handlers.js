@@ -92,6 +92,196 @@ const agentGoals = [
   { session_key: 'g:qq:123456', objective: '把项目的构建流程迁移到 Vite 5，修复全部构建警告并跑通 CI', phase: 'active', rounds_started: 2, max_rounds: 64, blocked_code: '', blocked_message: '', updated_at: Math.floor(now0 / 1000) - 600 },
 ]
 
+// 「上下文管理」演示数据：会话摘要 + 完整上下文快照（system 分段 / 消息 / 工具定义）。
+// chars 与 token 估算口径与后端一致（约 2 字符折 1 token，图片按固定值计）。
+const runeLen = (s) => [...(s || '')].length
+const estTok = (n) => Math.floor(n / 2)
+
+function contextSection(key, title, content) {
+  const chars = runeLen(content)
+  return { key, title, content, chars, est_tokens: estTok(chars) }
+}
+
+function contextTool(name, description, parameters) {
+  const params = JSON.stringify(parameters)
+  const chars = runeLen(name) + runeLen(description) + params.length
+  return { name, description, parameters: params, chars, est_tokens: estTok(chars) }
+}
+
+function contextMessage(role, text, extra = {}) {
+  let chars = runeLen(text) + runeLen(extra.reasoning || '')
+  for (const tc of extra.tool_calls || []) chars += runeLen(tc.name) + runeLen(tc.arguments)
+  return { role, text, chars, est_tokens: estTok(chars) + (extra.images || 0) * 1000, ...extra }
+}
+
+function finalizeContextDetail(d) {
+  d.system_chars = d.system.reduce((a, s) => a + s.chars, 0)
+  d.system_tokens = d.system.reduce((a, s) => a + s.est_tokens, 0)
+  d.history_chars = d.messages.reduce((a, m) => a + m.chars, 0)
+  d.history_tokens = d.messages.reduce((a, m) => a + m.est_tokens, 0)
+  d.tools_chars = d.tools.reduce((a, t) => a + t.chars, 0)
+  d.tools_tokens = d.tools.reduce((a, t) => a + t.est_tokens, 0)
+  d.total_chars = d.system_chars + d.history_chars + d.tools_chars
+  d.total_tokens = d.system_tokens + d.history_tokens + d.tools_tokens
+  return d
+}
+
+function buildContextFixtures(nowSec) {
+  const t = (delta) => nowSec - delta
+
+  const prompt =
+    '你是一个运行在即时通讯平台上的 AniaBot 助手，在群聊和私聊中帮用户解决实际问题。回答要准确、简洁、自然，不堆砌术语，不要长篇大论，也不要复述工具说明。\n\n' +
+    '## 一般处理流程\n1. 先理解用户意图。上下文不清、指代不明或涉及过去的事时，先调用历史消息工具查看最近消息，再用 memory_search / kb_search 找已有背景；仍不足再问用户。\n' +
+    '2. 按“最小必要”原则选择工具：能直接回答的不查，能读不写，能一次完成的不反复调用。\n' +
+    '3. 工具结果不等于最终回复。拿到结果后提炼成用户能看懂的回答。\n' +
+    '4. 用户意图不明确时，先问一句简短问题，不要擅自执行删除、修改、重启等有副作用操作。'
+  const skills =
+    '- web：联网搜索与网页抓取（需要 bash 工具与搜索服务商 API Key）\n' +
+    '- aniabot：本 Bot 自身的使用手册（面板页面、配置键、聊天指令）'
+  const scene =
+    '\n\n【当前对话场景】\n你正在一个群聊中与多位成员对话，会话 ID：qq:123456，群名：AniaBot 交流群，成员 486 人\n' +
+    '用户消息以 [nickname:昵称 id:用户ID] 开头，id 即该发言者在当前平台的用户 ID。\n\n' +
+    '【长期记忆】你拥有跨会话的长期记忆能力：对话中得知的用户称呼/偏好/重要信息应主动调用 memory_save 保存……\n\n' +
+    '【任务编排与时间预算】\n1. 判断任务规模：预计需要 3 步以上工具调用、超过 1 分钟时，直接调用 subagent_run 委派给子代理后台执行。\n' +
+    '2. 委派后不要等待、不要轮询。\n3. 多个互相独立的子任务，必须放在同一条回复里并行启动。'
+
+  const tools = [
+    contextTool('time', '获取当前时间（含日期与星期），回答依赖当前时间的问题时使用', {
+      type: 'object', properties: {}, required: [],
+    }),
+    contextTool('qq_get_msg_history', '读取当前群聊的历史消息，可按 user_id 只看某个群成员的发言', {
+      type: 'object',
+      properties: {
+        count: { type: 'integer', description: '拉取条数，默认 30' },
+        user_id: { type: 'string', description: '只看该用户的消息' },
+      },
+      required: [],
+    }),
+    contextTool('load_images', '按图片哈希加载消息中的图片（消息里以 [图片 <hash> url:<url>] 标识）', {
+      type: 'object',
+      properties: { hashes: { type: 'array', items: { type: 'string' }, description: '需要查看的图片哈希' } },
+      required: ['hashes'],
+    }),
+    contextTool('memory_search', '检索当前会话的长期记忆', {
+      type: 'object', properties: { query: { type: 'string', description: '检索关键词' } }, required: ['query'],
+    }),
+    contextTool('memory_save', '保存一条值得长期记住的事实', {
+      type: 'object', properties: { content: { type: 'string', description: '完整自洽的一句话事实' } }, required: ['content'],
+    }),
+    contextTool('todo_write', '创建或更新当前会话的任务清单（全量替换，传空数组清空）', {
+      type: 'object',
+      properties: {
+        todos: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              content: { type: 'string', description: '任务内容' },
+              status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
+            },
+            required: ['content', 'status'],
+          },
+        },
+      },
+      required: ['todos'],
+    }),
+    contextTool('subagent_run', '把自包含的子任务委派给后台子代理执行，立即返回', {
+      type: 'object',
+      properties: {
+        task: { type: 'string', description: '任务描述，必须自包含' },
+        name: { type: 'string', description: '子代理名称（小写字母开头，可含数字与连字符）' },
+      },
+      required: ['task'],
+    }),
+  ]
+
+  const messagesA = [
+    contextMessage('user', '[nickname:管理员 id:qq:10000] 帮我看看最近群里都在聊什么，顺便整理成三条要点'),
+    contextMessage('assistant', '我先把最近的消息拉出来看看。', {
+      tool_calls: [{ name: 'qq_get_msg_history', arguments: '{"count":100}' }],
+    }),
+    contextMessage('tool', '{"messages":[{"nickname":"K","text":"周末有人去爬山吗"},{"nickname":"Neko","text":"新版面板的截图我发群里了"},{"nickname":"Momo","text":"构建又挂了，谁帮忙看下"}]}'),
+    contextMessage('assistant', '近 100 条消息主要围绕三件事：\n1. 周末活动安排（约 40%），爬山报名 6 人；\n2. 新版面板截图与主题色讨论（约 35%）；\n3. 构建失败排查（约 25%）。', {
+      reasoning: '三条要点已经能从工具结果里概括出来，不需要再调用工具。',
+    }),
+  ]
+
+  const messagesB = [
+    contextMessage('user', '[nickname:同事-K id:qq:10004] 帮我把这句英文润色一下：the build is broke'),
+    contextMessage('assistant', 'The build is broken.'),
+  ]
+
+  const messagesC = [
+    contextMessage('user', '以下是之前的对话摘要：用户要求把项目的构建流程迁移到 Vite 5，已确认使用 pnpm，剩余工作是修复 3 条构建警告并跑通 CI。'),
+  ]
+
+  const detailA = finalizeContextDetail({
+    key: 'g:qq:123456', kind: 'group', target: 'qq:123456',
+    message_count: messagesA.length, created_at: t(86400), updated_at: t(120),
+    resident: true, busy: false, stage: '', pending: 0, subagents: 0, last_active: t(120), plan_mode: false,
+    source: 'live',
+    system: [
+      contextSection('prompt', '静态提示词（含会话 Prompt 覆盖）', prompt),
+      contextSection('skills', '可用技能（available_skills）', skills),
+      contextSection('scene', '场景描述与编排指引', scene),
+    ],
+    messages: messagesA,
+    tools,
+    todo: [
+      { content: '整理群聊近 100 条消息的三条要点', status: 'completed' },
+      { content: '把要点发到群里并 @ 提问者', status: 'in_progress' },
+    ],
+    session_token: '8f3c1d02a7b94e61',
+    last_prompt_tokens: 24160,
+    max_context_tokens: 128000,
+    hint: '实时上下文：系统提示词、消息窗口与工具定义取自驻留内存的会话对象。',
+  })
+
+  const detailB = finalizeContextDetail({
+    key: 'f:qq:10004', kind: 'friend', target: 'qq:10004',
+    message_count: messagesB.length, created_at: t(7200), updated_at: t(8),
+    resident: true, busy: true, stage: '等待模型回复', pending: 1, subagents: 0, last_active: t(8), plan_mode: false,
+    source: 'persisted',
+    system: [
+      contextSection('prompt', '静态提示词（含会话 Prompt 覆盖）', prompt),
+      contextSection('skills', '可用技能（available_skills）', skills),
+      contextSection('scene', '场景描述与编排指引', '\n\n【当前对话场景】\n你正在与一位用户私聊，对方 ID：qq:10004'),
+    ],
+    messages: messagesB,
+    tools: [],
+    todo: [],
+    session_token: '1a94b7e0ccd34f28',
+    last_prompt_tokens: 0,
+    max_context_tokens: 128000,
+    hint: '会话正在执行请求，本轮消息窗口不可读：这里展示持久化快照，本轮新增内容与工具定义会在回合结束后可见；系统提示词按当前配置重建。',
+  })
+
+  const detailC = finalizeContextDetail({
+    key: 'g:qq:7891011', kind: 'group', target: 'qq:7891011',
+    message_count: messagesC.length, created_at: t(604800), updated_at: t(86400 * 2),
+    resident: false, busy: false, stage: '', pending: 0, subagents: 0, last_active: 0, plan_mode: true,
+    source: 'persisted',
+    system: [
+      contextSection('prompt', '静态提示词（含会话 Prompt 覆盖）', prompt),
+      contextSection('scene', '场景描述与编排指引', '\n\n【当前对话场景】\n你正在一个群聊中与多位成员对话，会话 ID：qq:7891011'),
+    ],
+    messages: messagesC,
+    tools: [],
+    todo: [],
+    session_token: '5d02ab7f91e64c03',
+    last_prompt_tokens: 3120,
+    max_context_tokens: 128000,
+    hint: '会话未驻留内存（进程重启或闲置回收）：历史来自持久化存储，系统提示词按当前配置重建；工具定义需会话驻留后可见（任意一条消息即可重建会话）。',
+  })
+
+  return [
+    { session: detailA, detail: detailA },
+    { session: detailB, detail: detailB },
+    { session: detailC, detail: detailC },
+  ]
+}
+
+
 const state = {
   config: { ...rebase(seedConfig) },
   presets: [{
@@ -128,6 +318,7 @@ const state = {
   taskLogs: buildTaskLogs(now0),
   agentTasks: buildAgentTasks(Math.floor(now0 / 1000)),
   agentGoals,
+  contexts: buildContextFixtures(Math.floor(now0 / 1000)),
   // 演示：预置 3 个已安装的市场插件（rss 为旧版本 → 显示可更新）
   installed: {},
   marketJob: null,
@@ -1092,6 +1283,80 @@ const routes = [
     m: 'POST', re: /^\/api\/chatconsole\/sessions\/([^/]+)\/stop$/, h: (c) => {
       chatConsoleStop(decodeURIComponent(c.params[0]))
       return { ok: true }
+    },
+  },
+
+  // 上下文管理（按会话查看完整 AI 上下文，支持清空 / 删除 / 导出）
+  { m: 'GET', re: /^\/api\/contexts$/, h: () => ({ items: state.contexts.map((x) => x.session) }) },
+  {
+    m: 'GET', re: /^\/api\/contexts\/detail$/, h: (c) => {
+      const key = c.query.get('key') || ''
+      const found = state.contexts.find((x) => x.session.key === key)
+      if (!found) return { status: 404, body: { error: '会话不存在或已无上下文：' + key } }
+      return found.detail
+    },
+  },
+  {
+    m: 'GET', re: /^\/api\/contexts\/export$/, h: (c) => {
+      const raw = c.query.get('keys') || ''
+      const keys = raw ? raw.split(',').filter(Boolean) : null
+      const items = state.contexts.filter((x) => !keys || keys.includes(x.session.key)).map((x) => x.detail)
+      const scope = keys ? `${keys.length} 个会话` : '全部会话'
+      addOpLog('system', 'context_export', `面板导出上下文（${scope}，${items.length} 份）`)
+      const stamp = new Date()
+      const pad = (n) => String(n).padStart(2, '0')
+      const name = `aniabot-contexts-${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}-${pad(stamp.getHours())}${pad(stamp.getMinutes())}${pad(stamp.getSeconds())}.json`
+      return {
+        status: 200,
+        body: JSON.stringify({ exported_at: toLocalIso(stamp), total: items.length, items }, null, 2),
+        headers: { 'Content-Disposition': `attachment; filename="${name}"` },
+      }
+    },
+  },
+  {
+    m: 'POST', re: /^\/api\/contexts\/clear$/, h: (c) => {
+      const b = c.body || {}
+      if (!b.all && (!Array.isArray(b.keys) || b.keys.length === 0)) {
+        return { status: 400, body: { error: '请指定要清空的会话（keys）或传 all=true' } }
+      }
+      const targets = b.all ? state.contexts.map((x) => x.session.key) : [...new Set(b.keys.filter(Boolean))]
+      if (targets.length > 500) return { status: 400, body: { error: '单次最多处理 500 个会话' } }
+      const failed = []
+      let cleared = 0
+      let terminated = 0
+      for (const key of targets) {
+        const found = state.contexts.find((x) => x.session.key === key)
+        if (!found) {
+          failed.push({ key, error: '会话不存在或已无上下文' })
+          continue
+        }
+        if (found.session.busy && !b.terminate) {
+          failed.push({ key, error: '会话正在执行请求，需确认终止后才能操作' })
+          continue
+        }
+        if (found.session.busy) terminated++
+        state.contexts = state.contexts.filter((x) => x.session.key !== key)
+        cleared++
+      }
+      if (cleared > 0) {
+        addOpLog('system', b.all ? 'context_clear_all' : 'context_clear', `面板清空会话上下文（${cleared} 个会话，终止 ${terminated} 个请求）`)
+      }
+      return { ok: failed.length === 0, cleared, terminated, failed }
+    },
+  },
+  {
+    m: 'DELETE', re: /^\/api\/contexts$/, h: (c) => {
+      const key = c.query.get('key') || ''
+      if (!key) return { status: 400, body: { error: '缺少 key 参数' } }
+      const found = state.contexts.find((x) => x.session.key === key)
+      if (!found) return { status: 404, body: { error: '会话不存在或已无上下文：' + key } }
+      const terminate = ['1', 'true', 'yes'].includes((c.query.get('terminate') || '').toLowerCase())
+      if (found.session.busy && !terminate) {
+        return { status: 409, body: { error: '会话正在执行请求，需确认终止后才能操作' } }
+      }
+      state.contexts = state.contexts.filter((x) => x.session.key !== key)
+      addOpLog('system', 'context_delete', `面板删除会话 ${key}`)
+      return { ok: true, key, deleted: true, terminated: Boolean(found.session.busy && terminate) }
     },
   },
 

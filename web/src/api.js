@@ -191,14 +191,24 @@ export const api = {
       try {
         const groups = await api.getContacts(s.adapter, 'groups')
         for (const g of groups || []) {
-          if (g.group_name) map[`g:${g.group_id}`] = g.group_name
+          if (!g.group_name) continue
+          const key = String(g.group_id || '')
+          if (!key) continue
+          map[`g:${key}`] = g.group_name
+          // 未带平台前缀的裸数字（演示数据 / 老接口）同时登记 qq: 变体，
+          // 与会话键 g:qq:<id> 对齐
+          if (/^\d+$/.test(key)) map[`g:qq:${key}`] = g.group_name
         }
       } catch { /* 适配器未连接时忽略 */ }
       try {
         const friends = await api.getContacts(s.adapter, 'friends')
         for (const f of friends || []) {
           const name = f.remark || f.nickname
-          if (name) map[`f:${f.user_id}`] = name
+          if (!name) continue
+          const key = String(f.user_id || '')
+          if (!key) continue
+          map[`f:${key}`] = name
+          if (/^\d+$/.test(key)) map[`f:qq:${key}`] = name
         }
       } catch { /* 适配器未连接时忽略 */ }
     }
@@ -275,6 +285,20 @@ export const api = {
     }),
   stopChatConsole: (id) =>
     request(`/api/chatconsole/sessions/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
+
+  // 上下文管理：按会话查看 AI 实际持有的完整上下文（系统提示词 / 消息历史 / 工具定义），
+  // 支持清空（保留会话本身）、删除会话与导出（单个或多个）。
+  getContexts: () => request('/api/contexts'),
+  getContextDetail: (key) => request(`/api/contexts/detail${qs({ key })}`),
+  // 导出完整上下文：keys 为空表示导出全部会话（JSON 文件下载）
+  exportContexts: (keys = []) =>
+    download(`/api/contexts/export${keys.length ? qs({ keys: keys.join(',') }) : ''}`, 'aniabot-contexts.json'),
+  // 清空上下文：all=true 清空全部会话；terminate=true 先终止该会话正在执行的请求
+  clearContexts: (keys, all, terminate) =>
+    request('/api/contexts/clear', { method: 'POST', body: JSON.stringify({ keys, all, terminate }) }),
+  // 删除单个会话（上下文 + 会话级目标与运行态）；terminate 同上
+  deleteContext: (key, terminate = false) =>
+    request(`/api/contexts${qs({ key, terminate: terminate ? 1 : undefined })}`, { method: 'DELETE' }),
 
   getSkills: () => request('/api/skills'),
   getSkillDetail: (name) => request(`/api/skills/${encodeURIComponent(name)}`),

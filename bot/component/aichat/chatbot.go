@@ -3,6 +3,7 @@ package aichat
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/jeanhua/AniaBot/bot/component/agenthook"
 	"github.com/jeanhua/AniaBot/bot/component/llmtool"
@@ -17,6 +18,12 @@ type ChatBot struct {
 	// 由 SetHookRunner 注入；nil 时 UserPromptSubmit 埋点跳过
 	hookRunner HookRunner
 	hookBase   agenthook.Payload
+	// windowMu 保护消息窗口的可变状态：Chat/LoadHistory/AppendHistory/
+	// ClearHistory 在调用期间持锁（这些调用本来由插件层按会话串行，加锁是为了
+	// 让旁路只读方 —— 面板的上下文快照 —— 能安全地并发读取而不产生数据竞争）。
+	// 快照方用 TryLock：回合正在执行时立即返回「不可用」，不去阻塞面板请求，
+	// 也不必等一次长达数分钟的工具循环。
+	windowMu sync.Mutex
 }
 
 // chatBotConfig 收集 NewChatBot 的可选参数。
@@ -85,6 +92,8 @@ func NewChatBot(baseURL, apiKey, model, prompt string, maxContextTokens int, too
 // LoadHistory 从持久化存储回放历史对话，重启后调用以恢复上下文。
 // historyStore 未注入时为空操作。
 func (b *ChatBot) LoadHistory(ctx context.Context) {
+	b.windowMu.Lock()
+	defer b.windowMu.Unlock()
 	b.window.load(ctx)
 }
 
@@ -98,6 +107,8 @@ func (b *ChatBot) AppendHistory(msgs ...Message) {
 	if len(msgs) == 0 {
 		return
 	}
+	b.windowMu.Lock()
+	defer b.windowMu.Unlock()
 	b.window.append(msgs...)
 }
 
@@ -113,6 +124,10 @@ func (b *ChatBot) SetScenePrompt(scene string) {
 }
 
 func (b *ChatBot) Chat(ctx context.Context, userInput string, callbacks llmtool.CallBackFuncs, opts ChatOptions) (string, TokenUsage, error) {
+	// 整轮独占消息窗口：面板的上下文快照据此判断「正在执行」并让路
+	b.windowMu.Lock()
+	defer b.windowMu.Unlock()
+
 	// 压缩检查：在构建消息之前，确保上下文不超限
 	if err := b.window.MaybeCompress(ctx); err != nil {
 		return "", TokenUsage{}, err
@@ -198,9 +213,73 @@ func (b *ChatBot) GetSingleImageDesc(ctx context.Context, userInput string, imag
 // 且必须知道"清空未真正生效"——否则内存窗口已空、日志写"清理成功"，但 DB 行
 // 仍在，会话被淘汰或进程重启后 LoadHistory 会把旧上下文整段回放。
 func (b *ChatBot) ClearHistory(ctx context.Context) error {
+	b.windowMu.Lock()
+	defer b.windowMu.Unlock()
 	return b.window.clear(ctx)
 }
 
+// SystemContextSnapshot 会话 system prompt 的分段快照（未拼接的原始内容）。
+type SystemContextSnapshot struct {
+	Prompt string // 静态提示词（含会话级 Prompt 覆盖）
+	Skills string // available_skills 段（空表示无 skills 或 skill manager 未注入）
+	Scene  string // 场景描述段（主会话还含任务编排指引）
+}
+
+// ContextSnapshot 一次会话的完整上下文快照：系统提示词分段 + 历史消息 + 上下文规模。
+type ContextSnapshot struct {
+	System           SystemContextSnapshot
+	Messages         []Message
+	Tools            []llmtool.ToolDef // 实际下发给模型的工具定义（按名称排序）
+	LastPromptTokens int               // 最近一次请求的 prompt token（0 表示未知）
+	MaxContextTokens int               // 上下文 Token 上限（0 表示未配置）
+}
+
+// ContextSnapshot 返回当前会话的完整上下文（面板「上下文管理」页的数据来源）。
+//
+// ok=false 表示会话正在执行请求（消息窗口被本轮占用），快照不可用——此时调用方
+// 应改读持久化历史，避免阻塞面板请求，也避免读到半轮状态。
+func (b *ChatBot) ContextSnapshot() (ContextSnapshot, bool) {
+	if !b.windowMu.TryLock() {
+		return ContextSnapshot{}, false
+	}
+	defer b.windowMu.Unlock()
+	prompt, skills, scene := b.msgBuilder.SystemSections()
+	hist := b.window.history()
+	msgs := make([]Message, len(hist))
+	copy(msgs, hist)
+	return ContextSnapshot{
+		System: SystemContextSnapshot{
+			Prompt: prompt,
+			Skills: skills,
+			Scene:  scene,
+		},
+		Messages:         msgs,
+		Tools:            b.ToolDefinitions(),
+		LastPromptTokens: b.window.lastPromptTokens,
+		MaxContextTokens: b.window.maxContextTokens,
+	}, true
+}
+
+// ToolDefinitions 返回本会话实际下发给模型的工具定义（共享工具 + 会话工具，
+// 按名称排序，输出确定）。未注入工具编排器时返回 nil。
+func (b *ChatBot) ToolDefinitions() []llmtool.ToolDef {
+	if b.toolOrchestrator == nil || b.toolOrchestrator.executor == nil {
+		return nil
+	}
+	return b.toolOrchestrator.executor.Tools()
+}
+
+// HistoryCount 返回当前内存窗口的历史消息条数；会话正在执行请求时 ok=false。
+// 供面板列表低成本展示条数（不复制消息内容）。
+func (b *ChatBot) HistoryCount() (int, bool) {
+	if !b.windowMu.TryLock() {
+		return 0, false
+	}
+	defer b.windowMu.Unlock()
+	return len(b.window.messages), true
+}
+
+// ClearDynamicTools 卸载会话内动态加载的 MCP 工具，返回卸载数量。
 func (b *ChatBot) ClearDynamicTools() int {
 	if b.toolOrchestrator != nil && b.toolOrchestrator.executor != nil {
 		if session, ok := b.toolOrchestrator.executor.(*llmtool.SessionToolExecutor); ok {

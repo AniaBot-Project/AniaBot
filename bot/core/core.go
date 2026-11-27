@@ -532,6 +532,9 @@ func (ania *AniaBot) startAdminPanel() {
 	var teamSrc adminpanel.TeamSource
 	var quotaSrc adminpanel.QuotaSource
 	var chatConsoleSrc adminpanel.ChatConsoleSource
+	// 面板「上下文管理」页数据源：插件实现 adminpanel.ContextSource 时收集
+	// （当前由 AI 对话插件提供，读取各会话的系统提示词 / 消息历史 / 工具定义）
+	var contextSrc adminpanel.ContextSource
 	var queryLogFn func(f querylog.Filter) []querylog.Entry
 	var queryLogStatsFn func(f querylog.Filter) []querylog.StatRow
 	var queryLogClearFn func(f querylog.Filter) int
@@ -583,6 +586,9 @@ func (ania *AniaBot) startAdminPanel() {
 		}
 		if src, ok := p.(adminpanel.ChatConsoleSource); ok {
 			chatConsoleSrc = src
+		}
+		if src, ok := p.(adminpanel.ContextSource); ok {
+			contextSrc = src
 		}
 		if src, ok := p.(adminpanel.QueryLogSource); ok {
 			queryLogFn = src.QueryLogRecent
@@ -679,6 +685,7 @@ func (ania *AniaBot) startAdminPanel() {
 		Teams:               teamSrc,
 		Quota:               quotaSrc,
 		ChatConsole:         chatConsoleSrc,
+		Contexts:            contextSrc,
 		QueryLogs:           queryLogFn,
 		QueryLogsStats:      queryLogStatsFn,
 		QueryLogsClear:      queryLogClearFn,

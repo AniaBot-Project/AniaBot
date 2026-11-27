@@ -44,9 +44,12 @@ const (
 //   - 心跳确认锁丢失（令牌被换或键消失）时取消附着其上的请求（attachCancel）：
 //     宁可让在跑请求以「已停止」收尾，也不让它与新持锁者并发驱动同一会话。
 type sessionLock struct {
-	p           *AIChatPlugin
-	key         string
-	token       string
+	p     *AIChatPlugin
+	key   string
+	token string
+	// holdsRate 是否同时占用了对话并发槽位（rateCh）。管理操作（面板清空 /
+	// 删除会话）只取锁、不占槽位，release 时不能误还给别的会话。
+	holdsRate   bool
 	stopCh      chan struct{}
 	stopped     chan struct{}
 	releaseOnce sync.Once
@@ -64,26 +67,51 @@ func (p *AIChatPlugin) tryLockDetailed(id message.QID, isGroup bool) (*sessionLo
 	default:
 		return nil, lockRateLimited
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	defer cancel()
-	token := newLockToken()
-	locked := p.lockStorage.SetString(ctx, sessionKey(id, isGroup), token, storage.WithCheckExist(), storage.WithTTL(LockExpTime))
-	if !locked {
+	lock, ok := p.acquireSessionLock(id, isGroup, true)
+	if !ok {
 		select {
 		case <-p.rateCh:
 		default:
 		}
 		return nil, lockBusy
 	}
+	return lock, lockOK
+}
+
+// tryLockOnly 只获取会话锁、不占用对话并发槽位（面板清空 / 删除会话等管理操作
+// 使用）：并发槽位是给 LLM 回合限流的，管理操作不应因为别的会话占满槽位而失败。
+// 拿不到锁返回 nil（调用方可轮询重试）。
+func (p *AIChatPlugin) tryLockOnly(id message.QID, isGroup bool) *sessionLock {
+	lock, ok := p.acquireSessionLock(id, isGroup, false)
+	if !ok {
+		return nil
+	}
+	return lock
+}
+
+// acquireSessionLock 申请会话锁并启动续期心跳。lockStorage 未初始化（插件降载
+// 模式）时返回 nil,false：此时没有可依赖的会话互斥，调用方应按「拿不到锁」处理。
+func (p *AIChatPlugin) acquireSessionLock(id message.QID, isGroup bool, holdsRate bool) (*sessionLock, bool) {
+	if p.lockStorage == nil {
+		return nil, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+	token := newLockToken()
+	locked := p.lockStorage.SetString(ctx, sessionKey(id, isGroup), token, storage.WithCheckExist(), storage.WithTTL(LockExpTime))
+	if !locked {
+		return nil, false
+	}
 	l := &sessionLock{
-		p:       p,
-		key:     sessionKey(id, isGroup),
-		token:   token,
-		stopCh:  make(chan struct{}),
-		stopped: make(chan struct{}),
+		p:         p,
+		key:       sessionKey(id, isGroup),
+		token:     token,
+		holdsRate: holdsRate,
+		stopCh:    make(chan struct{}),
+		stopped:   make(chan struct{}),
 	}
 	go l.renewLoop()
-	return l, lockOK
+	return l, true
 }
 
 // sessionLockHeld 探测会话锁是否被持有（只读，不获取锁）。供 /status 在
@@ -124,9 +152,13 @@ func (l *sessionLock) release() {
 		if cur, ok := l.p.lockStorage.GetString(ctx, l.key); ok && cur == l.token {
 			l.p.lockStorage.Del(ctx, l.key)
 		}
-		select {
-		case <-l.p.rateCh:
-		default:
+		// 只归还自己占用的槽位：管理操作（tryLockOnly）没有占用 rateCh，
+		// 无条件 <-rateCh 会误吞其他会话的并发名额
+		if l.holdsRate {
+			select {
+			case <-l.p.rateCh:
+			default:
+			}
 		}
 	})
 }

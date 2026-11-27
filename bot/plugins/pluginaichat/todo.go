@@ -95,6 +95,19 @@ func (m *todoManager) clear(key string) {
 	delete(m.generated, key)
 }
 
+// snapshot 拷贝指定会话的清单（面板「上下文管理」页展示用，不改变任何状态）。
+func (m *todoManager) snapshot(key string) []todoItem {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	items := m.lists[key]
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]todoItem, len(items))
+	copy(out, items)
+	return out
+}
+
 // pendingReminder 生成未完成事项提醒（尾部注入用）；清单无未完成项时返回空串。
 // 内容与上次注入相同时返回空串（哈希去重），避免每轮重复占用上下文。
 func (m *todoManager) pendingReminder(key string) string {

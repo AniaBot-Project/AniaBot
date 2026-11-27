@@ -72,7 +72,8 @@ bot/core/                Orchestrator: startup order, plugin lifecycle, event di
                          storage impls (memory/redis/sqlite/mysql), configstore/, CLI helpers
 bot/adminpanel/          Panel HTTP API (pure net/http) + embedded SPA (dist/ via go:embed);
                          data-source adapters, auth, config presets/export, token stats, balance,
-                         quota, msg-log proxy/URL refresh, chat console, QR login, update, marketplace glue
+                         quota, msg-log proxy/URL refresh, chat console, session-context inspector,
+                         QR login, update, marketplace glue
 bot/marketplace/         Plugin marketplace service: GitHub index/detail + local cache, OAuth device
                          flow, batch install/upgrade/uninstall/rollback pipelines (regenerate registry,
                          go mod tidy, build, restart), manifest validation (common/pluginmeta)
@@ -370,7 +371,9 @@ Rules that most often break plugins:
   server itself then
   probes `SkillToggleSource`/`SkillDetailSource` (on the skill provider) and
   `MemoryBatchDeleteSource`/`KnowledgeBatchDeleteSource` (on the memory/KB providers) for the
-  multi-select and detail pages. Adapters may implement `adapter.ContactsExt` (address book) and
+  multi-select and detail pages. Core also probes `adminpanel.ContextSource` (implemented by
+  `pluginaichat` via `contextpanel.go`) into `Options.Contexts` for the 上下文管理 page.
+  Adapters may implement `adapter.ContactsExt` (address book) and
   `adminpanel.QRLoginSource` (WeChat QR login) — core collects all of them across adapters.
 
 ## Architecture
@@ -440,6 +443,23 @@ registry and goal continuation, and owns all session-scoped tool registration.
   loaded MCP tools die with it, like a restart).
 - Group un-@ chatter: `session.no_mention_clear` (default 30) auto-clears the group history
   after N consecutive non-mentioned messages (count persisted across restarts).
+
+**Context inspector** (`pluginaichat/contextpanel.go`, panel `/#/contexts`):
+`ChatBot.ContextSnapshot()` returns the assembled system prompt in three raw sections
+(static prompt / `available_skills` / scene), the full message window and the tool definitions
+actually sent to the model, plus last prompt tokens. It `TryLock`s a per-ChatBot window mutex
+(`Chat`/`LoadHistory`/`AppendHistory`/`ClearHistory` hold it) so a running turn makes it fail
+rather than block; the panel then falls back to the persisted history (`source=persisted`) and
+rebuilds the system prompt from current config (group name is degraded away when no live
+facade is known). `GET /api/contexts` lists the union of persisted sessions and the resident
+cache, `GET /api/contexts/detail?key=`, `GET /api/contexts/export?keys=a,b` (no keys = all).
+Clear/delete first cancel the active turn when `terminate=1` (otherwise a busy session returns
+`plugininfo.ErrContextBusy` → 409), stop the session's background subagents/team runs, poll the
+session lock (15s cap), then wipe the memory window + SQL history, dynamic MCP tools, spilled
+tool outputs, todo list and pending queue, renew the session token and drop the resident chat
+object. Delete additionally clears the goal row and plan mode; clear only pauses the goal.
+Per-turn injections (memory/KB/todo/plan notes) never enter history and therefore never show
+up in a snapshot. Tests: `contextpanel_test.go`, `adminpanel/contexts_test.go`.
 
 **Conversation behavior (`pluginaichat`)**
 
@@ -810,7 +830,10 @@ the panel Query-log list/detail and export show them, and `task_id` doubles as a
   router, default `http://127.0.0.1:7700` (`bot.admin_panel.listen`; env override
   `ANIA_BOT_ADMIN_PANEL_ENABLE` if the panel is disabled in config). Same process as the bot;
   session cookie `ania_session`, 24h sliding; login lockout. `-set-password` CLI helper.
-- Pages: 状态总览, 控制台日志, 操作日志, 消息日志, 试聊室, Query 日志, Token 统计, 配额管理,
+- Pages: 状态总览, 控制台日志, 操作日志, 消息日志, 试聊室, 上下文管理 (`/#/contexts`: per-session
+  full context — system prompt sections / message history with tool calls / tool definitions,
+  with token estimates; clear one/selected/all, delete a session, JSON export; busy sessions
+  need `terminate` confirmation), Query 日志, Token 统计, 配额管理,
   AI 定时任务, 后台任务 (`/#/agent-tasks`, task registry + active goals, JSON export + clear
   finished rows), 技能管理,
   记忆管理, 知识库, Agent 团队, 配置管理 (with export + presets),

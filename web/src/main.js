@@ -14,6 +14,7 @@ const routes = [
   { path: '/oplogs', name: 'oplogs', component: () => import('./views/OpLog.vue'), meta: { title: '操作日志' } },
   { path: '/msglogs', name: 'msglogs', component: () => import('./views/MsgLog.vue'), meta: { title: '消息日志' } },
   { path: '/chatconsole', name: 'chatconsole', component: () => import('./views/ChatConsole.vue'), meta: { title: '试聊室' } },
+  { path: '/contexts', name: 'contexts', component: () => import('./views/Contexts.vue'), meta: { title: '上下文管理' } },
   { path: '/querylogs', name: 'querylogs', component: () => import('./views/QueryLog.vue'), meta: { title: 'Query 日志' } },
   { path: '/tokenstats', name: 'tokenstats', component: () => import('./views/TokenStats.vue'), meta: { title: 'Token 统计' } },
   { path: '/quota', name: 'quota', component: () => import('./views/Quota.vue'), meta: { title: '配额管理' } },
