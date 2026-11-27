@@ -326,6 +326,78 @@ func teamEffectiveTask(base, memberTask string) string {
 	return base + "\n\n" + memberTask
 }
 
+// runningTeamRun 一次正在执行的团队运行（#新对话 据此取消）。
+type runningTeamRun struct {
+	cancel context.CancelFunc
+}
+
+// teamRunGroup 一个会话正在执行的团队运行集合。同一轮的多个工具调用并行执行，
+// AI 可能同时发起多个 team_run，因此按会话记录全部运行而不是单个取消函数。
+type teamRunGroup struct {
+	mu   sync.Mutex
+	runs map[*runningTeamRun]struct{}
+}
+
+func (g *teamRunGroup) add(e *runningTeamRun) {
+	g.mu.Lock()
+	if g.runs == nil {
+		g.runs = make(map[*runningTeamRun]struct{}, 1)
+	}
+	g.runs[e] = struct{}{}
+	g.mu.Unlock()
+}
+
+// remove 移除一项并返回是否已空（取消路径 LoadAndDelete 摘除整组后为 false）。
+func (g *teamRunGroup) remove(e *runningTeamRun) (empty bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.runs, e)
+	return len(g.runs) == 0
+}
+
+// cancelAll 取消组内全部运行，返回取消数量。
+func (g *teamRunGroup) cancelAll() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	n := len(g.runs)
+	for e := range g.runs {
+		e.cancel()
+	}
+	g.runs = nil
+	return n
+}
+
+// registerTeamRun 把一次团队运行登记到会话后台工作表，返回派生上下文与注销函数。
+// 上下文被 #新对话（cancelTeamRuns）或 /stop（父上下文取消）中止时，成员子代理
+// 随之取消，runTeam 会尽快收敛并写入 cancelled 终态。
+func (p *AIChatPlugin) registerTeamRun(ctx context.Context, id message.QID, isGroup bool) (context.Context, func()) {
+	key := sessionKey(id, isGroup)
+	teamCtx, cancel := context.WithCancel(ctx)
+	entry := &runningTeamRun{cancel: cancel}
+	v, _ := p.teamRuns.LoadOrStore(key, &teamRunGroup{})
+	g, _ := v.(*teamRunGroup)
+	g.add(entry)
+	return teamCtx, func() {
+		if g.remove(entry) {
+			p.teamRuns.CompareAndDelete(key, g)
+		}
+		cancel()
+	}
+}
+
+// cancelTeamRuns 取消会话当前全部正在执行的团队运行，返回取消数量。
+func (p *AIChatPlugin) cancelTeamRuns(id message.QID, isGroup bool) int {
+	v, ok := p.teamRuns.LoadAndDelete(sessionKey(id, isGroup))
+	if !ok {
+		return 0
+	}
+	g, ok := v.(*teamRunGroup)
+	if !ok || g == nil {
+		return 0
+	}
+	return g.cancelAll()
+}
+
 // runTeam 同步并行执行团队成员：N 个成员各起一个 b.Go goroutine（panic 自动恢复），
 // 全部完成后组装汇总报告返回。成员之间互不可见、互不影响；单成员超时/失败不中断
 // 整体执行（失败进报告）。
@@ -343,6 +415,9 @@ func (p *AIChatPlugin) runTeam(ctx context.Context, b bot.Bot, id message.QID, i
 	if _, err := resolveSubagentTimeout(p.subagentTimeout(), timeoutSec, ctx); err != nil {
 		return "", fmt.Errorf("无法启动 Agent 团队: %w", err)
 	}
+	// 登记到会话后台工作表：#新对话 可立即取消本次团队运行（成员共享派生的 ctx）
+	ctx, unregister := p.registerTeamRun(ctx, id, isGroup)
+	defer unregister()
 
 	start := time.Now()
 	runTask := p.beginTeamRunTask(id, isGroup, task)

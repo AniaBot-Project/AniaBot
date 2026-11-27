@@ -439,6 +439,116 @@ func (s *taskStore) DeleteFinishedBefore(ctx context.Context, cutoff int64) (int
 	return n, nil
 }
 
+// taskFilter 后台任务日志的筛选条件（面板导出/清除用）。Status/Kind 下推到 SQL；
+// Keyword 在 Go 侧做不区分大小写的最终判定——各数据库 LIKE 的大小写与排序规则
+// 不同，面板列表本身也按 Go 侧口径过滤，两边结果才一致。
+type taskFilter struct {
+	Status  string
+	Kind    string
+	Keyword string
+}
+
+// matchKeyword 关键词是否命中标题 / 任务 ID / 会话键 / 任务指令（不区分大小写）。
+func (f taskFilter) matchKeyword(t *agentTask) bool {
+	kw := strings.ToLower(strings.TrimSpace(f.Keyword))
+	if kw == "" || t == nil {
+		return true
+	}
+	for _, s := range []string{t.Title, t.ID, t.SessionKey, t.Prompt} {
+		if strings.Contains(strings.ToLower(s), kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// ListFiltered 按条件列出后台任务（updated_at 倒序；limit<=0 返回全部）。
+// 升级前的 turn 行不返回（与面板列表口径一致）。带关键词时先取全部候选再在 Go
+// 侧过滤与限条，避免 SQL LIMIT 截掉后面才命中的记录。
+func (s *taskStore) ListFiltered(ctx context.Context, f taskFilter, limit int) ([]*agentTask, error) {
+	where := []string{"kind <> ?"}
+	args := []any{taskKindTurn}
+	if f.Status != "" {
+		where = append(where, "status = ?")
+		args = append(args, f.Status)
+	}
+	if f.Kind != "" {
+		where = append(where, "kind = ?")
+		args = append(args, f.Kind)
+	}
+	q := `SELECT ` + taskColumns + ` FROM ania_agent_task WHERE ` +
+		strings.Join(where, " AND ") + ` ORDER BY updated_at DESC, id DESC`
+	if limit > 0 && f.Keyword == "" {
+		q += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		s.logger.Error("按条件列出后台任务失败", "error", err)
+		return nil, err
+	}
+	tasks, err := collectTasks(rows)
+	if err != nil {
+		s.logger.Error("按条件列出后台任务失败", "error", err)
+		return nil, err
+	}
+	if f.Keyword == "" {
+		return tasks, nil
+	}
+	matched := make([]*agentTask, 0, len(tasks))
+	for _, t := range tasks {
+		if f.matchKeyword(t) {
+			matched = append(matched, t)
+		}
+	}
+	if limit > 0 && len(matched) > limit {
+		matched = matched[:limit]
+	}
+	return matched, nil
+}
+
+// taskDeleteChunk 单条 DELETE 语句的 ID 数上限：SQLite 的变量上限默认 999，
+// 留出余量后分块删除，避免任务很多时拼出超长 IN 列表。
+const taskDeleteChunk = 400
+
+// DeleteFinishedFiltered 删除满足条件的**已结束**任务，返回删除条数。
+// 运行中/排队中的任务一律保留：它们仍被运行时写入，删除任务行会让进度写与
+// 收尾写落空；turn 历史行也不删（不属于面板「后台任务」日志）。
+func (s *taskStore) DeleteFinishedFiltered(ctx context.Context, f taskFilter) (int64, error) {
+	tasks, err := s.ListFiltered(ctx, f, 0)
+	if err != nil {
+		return 0, err
+	}
+	finished := make(map[string]struct{}, len(taskFinishedStatuses()))
+	for _, st := range taskFinishedStatuses() {
+		finished[st] = struct{}{}
+	}
+	ids := make([]any, 0, len(tasks))
+	for _, t := range tasks {
+		if _, ok := finished[t.Status]; ok {
+			ids = append(ids, t.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	var removed int64
+	for start := 0; start < len(ids); start += taskDeleteChunk {
+		end := min(start+taskDeleteChunk, len(ids))
+		part := ids[start:end]
+		holders := strings.TrimSuffix(strings.Repeat("?,", len(part)), ",")
+		res, err := s.db.ExecContext(ctx,
+			`DELETE FROM ania_agent_task WHERE id IN (`+holders+`)`, part...)
+		if err != nil {
+			s.logger.Error("清除后台任务失败", "error", err)
+			return removed, err
+		}
+		n, _ := res.RowsAffected()
+		removed += n
+	}
+	return removed, nil
+}
+
 // taskActiveStatuses 尚未结束的任务状态：ListRunning 与 MarkInterrupted 的判定集。
 func taskActiveStatuses() []string {
 	return []string{taskStatusQueued, taskStatusRunning, taskStatusWaiting}

@@ -458,6 +458,13 @@ registry and goal continuation, and owns all session-scoped tool registration.
   cancels only the named background subagent; `/tasks` lists the session's running subagents
   plus the task registry's recent rows; `/resume <任务ID>` re-queues an `interrupted`
   subagent/handoff task of this session as a continuation prompt for the main AI.
+- `#新对话` is batch-level (detected from a message's **own** text segments, quoted/forwarded
+  content is ignored). On submit it immediately cancels the session's running async
+  subagents/workflows and `team_run` members (`stopSessionBackground`) and pauses an active
+  goal (recoverable with `/goal resume`) so old work cannot report back into the new
+  conversation; at batch start the runner clears persisted history, dynamic MCP tools, spilled
+  tool outputs, renews the session token and cancels background work once more as a
+  race/queued-path safety net.
 - Prompt: main sessions append a dynamic "任务编排与时间预算" guide after the scene description
   (`orchestrationGuide` in `llm.go`): delegate multi-step work to `subagent_run`, launch
   independent subagents in the same reply, never wait/poll after delegating, keep the main
@@ -495,11 +502,11 @@ registry and goal continuation, and owns all session-scoped tool registration.
   a running subagent: it is drained before the subagent's next LLM request and injected as a
   `[追加指令]` user message (never interrupts a running tool batch; the steer buffer holds 8).
   `subagent_cancel` and `/stop <ID|name>` accept the ID or the name. Timeout is independent from
-  the framework event budget: `subagent.default_timeout_sec` (default 1800 = 30 min; 0 =
-  unlimited), a per-call `timeout_sec` overrides it, and `subagent.max_timeout_sec` (default 0 =
-  unlimited) caps the model-supplied value; if the parent turn really has a deadline (hard
-  cutoff), the timeout is shrunk to fit that remaining budget with a 30s reserve (never below
-  10s). Concurrency is capped by `subagent.max_concurrent_per_session` (4) and
+  the framework event budget: `subagent.default_timeout_sec` (default 0 = unlimited; a positive
+  value caps each run), a per-call `timeout_sec` overrides it, and `subagent.max_timeout_sec`
+  (default 0 = unlimited) caps the model-supplied value; if the parent turn really has a deadline
+  (hard cutoff), the timeout is shrunk to fit that remaining budget with a 30s reserve (never
+  below 10s). Concurrency is capped by `subagent.max_concurrent_per_session` (4) and
   `subagent.max_concurrent_global` (8, a separate pool from the `rate_limit` chat slots). Async
   results are length-governed: `subagent.result_inline_runes` (default 8000) — longer results are
   spilled to a per-session file and the synthetic message carries a preview + handle for
@@ -548,20 +555,24 @@ registry and goal continuation, and owns all session-scoped tool registration.
   its `blocked_by` tasks are `completed`; `team_task_complete` returns the dependents it just
   unblocked. Caps: 20 unfinished board tasks per session, list returns 50 rows. Plan mode blocks
   create/claim/complete but allows list.
-- **Panel task view** (`taskpanel.go`): implements `adminpanel.TaskSource` / `GoalSource` for the
-  panel 后台任务 page (read-only): `AgentTasks(limit)` reads the most recent
+- **Panel task view** (`taskpanel.go`): implements `adminpanel.TaskSource` / `TaskAdminSource` /
+  `GoalSource` for the panel 后台任务 page: `AgentTasks(limit)` reads the most recent
   `ania_agent_task` rows (`GET /api/agent-tasks?limit=…`, default 100, 1–500) including
   `parent_id` and `prompt`, so team runs / members and subagents can be inspected with their task
-  instructions, member summaries and tool-call steps;
-  `AgentGoals()` lists `active` rows from `ania_agent_goal` (`GET /api/agent-goals`). Missing SQL
-  backend or query failure returns an empty slice. `AgentTasks` excludes legacy `turn` rows
-  (their canonical record is the Query log), so the page only lists real background work;
-  clicking a row opens a detail modal (matching the Query-log page), and Query-log rows with
-  `task_id` link back to `/#/agent-tasks?task=…`. Subagent / team-member tool steps are also
-  written **while running**: `taskStore.UpdateProgress` (meta + `updated_at` only,
-  `WHERE finished_at = 0` so a late progress write can never overwrite a terminal state) is fed by
-  `subagentTrace.flushProgress`, throttled by `subagentProgressInterval` (3s; the first tool call
-  flushes immediately), so the 10s panel poll shows steps as they happen.
+  instructions, member summaries and tool-call steps; `AgentTasksExport`/`AgentTasksClear` back
+  `GET /api/agent-tasks/export` and `DELETE /api/agent-tasks` (status/kind/keyword filters,
+  clear only deletes **finished** rows); `AgentGoals()` lists `active` rows from `ania_agent_goal`
+  (`GET /api/agent-goals`). Missing SQL backend or query failure returns an empty slice.
+  `AgentTasks` excludes legacy `turn` rows (their canonical record is the Query log), so the page
+  only lists real background work; clicking a row opens a detail modal (matching the Query-log
+  page), and Query-log rows with `task_id` link back to `/#/agent-tasks?task=…`. Task `prompt`,
+  `result`, `error` and the `meta.tool_calls` steps are stored **untruncated** (same policy as the
+  Query log; the panel folds long text), and the page can export the full log as JSON or clear
+  finished rows. Subagent / team-member tool steps are also written **while running**:
+  `taskStore.UpdateProgress` (meta + `updated_at` only, `WHERE finished_at = 0` so a late progress
+  write can never overwrite a terminal state) is fed by `subagentTrace.flushProgress`, throttled by
+  `subagentProgressInterval` (3s; the first tool call flushes immediately), so the 10s panel poll
+  shows steps as they happen.
 - **Session runner & task registry** (`runner.go`, `taskstore.go`, `tasktrack.go`, `taskscmd.go`):
   `OnGroupMsg`/`OnFriendMsg` only gate/command/enqueue and return at once; `submitTurn` enqueues
   and starts a `b.Go` runner per session. The runner tries the session lock (one turn at a time
@@ -586,6 +597,9 @@ registry and goal continuation, and owns all session-scoped tool registration.
   background rows + the last few turns from an in-process ring (`recentTurns`, lost on restart);
   `/resume <id>` re-queues an interrupted subagent/handoff task as a synthetic message (this
   session only); a janitor deletes finished rows past `task.retention_days` (default 7, every 6h).
+  The panel 后台任务 page exports the full rows as JSON and clears finished rows (running/queued
+  rows are never deleted); task `prompt`/`result`/`error` and `meta.tool_calls` are stored
+  untruncated, the same policy as the Query log.
   If the SQL probe/DDL fails, task persistence degrades to in-memory/no-op without blocking
   startup; the goal table (`ania_agent_goal`) is created by the same startup path and degrades
   the same way.
@@ -653,6 +667,8 @@ registry and goal continuation, and owns all session-scoped tool registration.
 - **Logs**: every AI request writes a query-log row (`querylog`, kinds chat/proactive, chat
   types group/friend/panel), clock runs write task-log rows (`tasklog`), management actions write
   op-log rows (`oplog`). Token stats and the panel's Token 统计 page derive from the query log.
+  Query-log `senders` ignore synthetic messages (sender `qq:0`, e.g. subagent completion) and fall
+  back to the session target id, so the panel never shows `来自 qq:0`.
 
 **Tool result length governance**
 
@@ -794,7 +810,8 @@ the panel Query-log list/detail and export show them, and `task_id` doubles as a
   `ANIA_BOT_ADMIN_PANEL_ENABLE` if the panel is disabled in config). Same process as the bot;
   session cookie `ania_session`, 24h sliding; login lockout. `-set-password` CLI helper.
 - Pages: 状态总览, 控制台日志, 操作日志, 消息日志, 试聊室, Query 日志, Token 统计, 配额管理,
-  AI 定时任务, 后台任务 (`/#/agent-tasks`, read-only task registry + active goals), 技能管理,
+  AI 定时任务, 后台任务 (`/#/agent-tasks`, task registry + active goals, JSON export + clear
+  finished rows), 技能管理,
   记忆管理, 知识库, Agent 团队, 配置管理 (with export + presets),
   扩展配置 (`mcp`/`prompt`/`hooks`/`commands`), 通讯录, 插件市场, 自动更新, 外观设置.
 - First run: `meta.setup_pending=true` → panel forces the setup wizard and adapters do **not

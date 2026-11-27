@@ -538,6 +538,8 @@ func (ania *AniaBot) startAdminPanel() {
 	// 面板「后台任务」页数据源：插件实现 adminpanel.TaskSource / GoalSource 时收集
 	// （当前由 AI 对话插件提供，读取任务注册表与 active 会话目标）。
 	var agentTasksFn func(limit int) []adminpanel.AgentTaskView
+	var agentTasksExportFn func(f plugininfo.AgentTaskFilter) []adminpanel.AgentTaskView
+	var agentTasksClearFn func(f plugininfo.AgentTaskFilter) int
 	var agentGoalsFn func() []adminpanel.AgentGoalView
 	for _, p := range ania.plugins {
 		if src, ok := p.(adminpanel.TaskLogSource); ok {
@@ -589,6 +591,10 @@ func (ania *AniaBot) startAdminPanel() {
 		}
 		if src, ok := p.(adminpanel.TaskSource); ok {
 			agentTasksFn = src.AgentTasks
+		}
+		if src, ok := p.(adminpanel.TaskAdminSource); ok {
+			agentTasksExportFn = src.AgentTasksExport
+			agentTasksClearFn = src.AgentTasksClear
 		}
 		if src, ok := p.(adminpanel.GoalSource); ok {
 			agentGoalsFn = src.AgentGoals
@@ -677,6 +683,8 @@ func (ania *AniaBot) startAdminPanel() {
 		QueryLogsStats:      queryLogStatsFn,
 		QueryLogsClear:      queryLogClearFn,
 		AgentTasks:          agentTasksFn,
+		AgentTasksExport:    agentTasksExportFn,
+		AgentTasksClear:     agentTasksClearFn,
 		AgentGoals:          agentGoalsFn,
 		ConsoleLogs:         consollog.Page,
 		QRLogins:            qrLogins,

@@ -276,6 +276,8 @@ type Options struct {
 	QueryLogsStats      func(f querylog.Filter) []querylog.StatRow                               // Query 日志的轻量统计行（可为 nil）
 	QueryLogsClear      func(f querylog.Filter) int                                              // 清除 AI Query 日志（可为 nil）
 	AgentTasks          func(limit int) []AgentTaskView                                          // AI 后台任务注册表（新在前，可为 nil）
+	AgentTasksExport    func(f plugininfo.AgentTaskFilter) []AgentTaskView                       // 后台任务日志导出（可为 nil）
+	AgentTasksClear     func(f plugininfo.AgentTaskFilter) int                                   // 清除已结束的后台任务日志（可为 nil）
 	AgentGoals          func() []AgentGoalView                                                   // 当前 active 的会话目标（可为 nil）
 	ConsoleLogs         func(limit int, beforeID uint64) []consollog.Entry                       // 控制台日志（slog + log 输出，可为 nil）
 	QRLogins            []QRLoginChannel                                                         // 支持扫码登录的平台适配器（如微信；可为 nil）
@@ -360,6 +362,8 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/balance", s.requireAuth(http.HandlerFunc(s.handleBalance)))
 	s.mux.Handle("GET /api/tokenstats/detail", s.requireAuth(http.HandlerFunc(s.handleTokenStatsDetail)))
 	s.mux.Handle("GET /api/agent-tasks", s.requireAuth(http.HandlerFunc(s.handleAgentTasks)))
+	s.mux.Handle("GET /api/agent-tasks/export", s.requireAuth(http.HandlerFunc(s.handleAgentTasksExport)))
+	s.mux.Handle("DELETE /api/agent-tasks", s.requireAuth(http.HandlerFunc(s.handleAgentTasksClear)))
 	s.mux.Handle("GET /api/agent-goals", s.requireAuth(http.HandlerFunc(s.handleAgentGoals)))
 	s.mux.Handle("GET /api/clocks", s.requireAuth(http.HandlerFunc(s.handleClockList)))
 	s.mux.Handle("POST /api/clocks", s.requireAuth(http.HandlerFunc(s.handleClockCreate)))

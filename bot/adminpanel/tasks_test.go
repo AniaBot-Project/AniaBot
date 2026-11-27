@@ -2,6 +2,7 @@ package adminpanel
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -133,15 +134,104 @@ func TestTasksAPILimit(t *testing.T) {
 	}
 }
 
-// TestTasksAPIRoutes 注册后 /api/agent-tasks 与 /api/agent-goals 受登录保护（未登录 401）。
+// TestTasksAPIRoutes 注册后后台任务相关接口受登录保护（未登录 401）。
 func TestTasksAPIRoutes(t *testing.T) {
 	s := &Server{opt: Options{}, mux: http.NewServeMux()}
 	s.routes()
-	for _, path := range []string{"/api/agent-tasks", "/api/agent-goals"} {
+	cases := []struct{ method, path string }{
+		{"GET", "/api/agent-tasks"},
+		{"GET", "/api/agent-tasks/export"},
+		{"DELETE", "/api/agent-tasks"},
+		{"GET", "/api/agent-goals"},
+	}
+	for _, c := range cases {
 		rec := httptest.NewRecorder()
-		s.mux.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		s.mux.ServeHTTP(rec, httptest.NewRequest(c.method, c.path, nil))
 		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("%s 未登录 status = %d, want 401", path, rec.Code)
+			t.Fatalf("%s %s 未登录 status = %d, want 401", c.method, c.path, rec.Code)
 		}
+	}
+}
+
+// TestTasksAPIExport 导出接口把筛选条件透传给数据源，返回带下载文件名的 JSON 附件；
+// 无数据源时 404（与其它日志导出接口一致）。
+func TestTasksAPIExport(t *testing.T) {
+	var got AgentTaskFilter
+	calls := 0
+	s := &Server{opt: Options{
+		Logger: slog.Default(),
+		AgentTasksExport: func(f AgentTaskFilter) []AgentTaskView {
+			calls++
+			got = f
+			return []AgentTaskView{{ID: "t-abc", SessionKey: "g:qq:1", Kind: "subagent", Status: "completed"}}
+		},
+	}}
+	rec := httptest.NewRecorder()
+	s.handleAgentTasksExport(rec, httptest.NewRequest("GET",
+		"/api/agent-tasks/export?status=completed&kind=subagent&keyword=%E8%B0%83%E7%A0%94", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if calls != 1 {
+		t.Fatalf("导出数据源调用次数 = %d, want 1", calls)
+	}
+	if got.Status != "completed" || got.Kind != "subagent" || got.Keyword != "调研" {
+		t.Fatalf("筛选条件未透传: %+v", got)
+	}
+	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, "agent-tasks-") {
+		t.Fatalf("Content-Disposition = %q, want agent-tasks 文件名", cd)
+	}
+	var payload struct {
+		Total int              `json:"total"`
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, rec.Body.String())
+	}
+	if payload.Total != 1 || len(payload.Items) != 1 || payload.Items[0]["id"] != "t-abc" {
+		t.Fatalf("导出内容不符: %+v", payload)
+	}
+
+	// 无数据源：404
+	rec = httptest.NewRecorder()
+	(&Server{opt: Options{Logger: slog.Default()}}).handleAgentTasksExport(rec,
+		httptest.NewRequest("GET", "/api/agent-tasks/export", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("无数据源导出 status = %d, want 404", rec.Code)
+	}
+}
+
+// TestTasksAPIClear 清除接口把筛选条件透传给数据源并返回删除条数；无数据源时 404。
+func TestTasksAPIClear(t *testing.T) {
+	var got AgentTaskFilter
+	s := &Server{opt: Options{
+		Logger:          slog.Default(),
+		AgentTasksClear: func(f AgentTaskFilter) int { got = f; return 3 },
+	}}
+	rec := httptest.NewRecorder()
+	s.handleAgentTasksClear(rec, httptest.NewRequest("DELETE",
+		"/api/agent-tasks?status=failed&kind=team_member&keyword=%E5%8D%9A%E5%AE%A2", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if got.Status != "failed" || got.Kind != "team_member" || got.Keyword != "博客" {
+		t.Fatalf("筛选条件未透传: %+v", got)
+	}
+	var res struct {
+		OK      bool `json:"ok"`
+		Removed int  `json:"removed"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, rec.Body.String())
+	}
+	if !res.OK || res.Removed != 3 {
+		t.Fatalf("清除响应不符: %+v", res)
+	}
+
+	rec = httptest.NewRecorder()
+	(&Server{opt: Options{Logger: slog.Default()}}).handleAgentTasksClear(rec,
+		httptest.NewRequest("DELETE", "/api/agent-tasks", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("无数据源清除 status = %d, want 404", rec.Code)
 	}
 }

@@ -28,6 +28,16 @@ type AgentTaskView struct {
 	FinishedAt int64  `json:"finished_at"`
 }
 
+// AgentTaskFilter 后台任务日志导出/清除的筛选条件（零值字段不过滤）。
+// 与面板列表的筛选口径一致：Status / Kind 精确匹配，Keyword 不区分大小写匹配
+// 标题、任务 ID、会话键与任务指令。注：面板列表在下拉/关键词变化时本地过滤，
+// 导出/清除把同样的条件交给后端处理，因此可以覆盖列表未加载的更早记录。
+type AgentTaskFilter struct {
+	Status  string `json:"status,omitempty"`
+	Kind    string `json:"kind,omitempty"`
+	Keyword string `json:"keyword,omitempty"`
+}
+
 // AgentGoalView 一个 active 会话目标（表 ania_agent_goal，跨回合自动续跑）。
 type AgentGoalView struct {
 	SessionKey     string `json:"session_key"`

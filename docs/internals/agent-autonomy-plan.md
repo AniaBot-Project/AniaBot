@@ -631,7 +631,7 @@ CREATE INDEX idx_agent_task_status  ON ania_agent_task(status, updated_at);
 
 1. **P0 是否立即实施**，还是等 P1 设计一起评审？→ **已决策：P0+P1 一起实施**（同一分支，先补 LLM 请求超时/看门狗再放开限制）。
 2. **硬截止默认值**：建议默认 0（不限制），由看门狗与 `/stop` 兜底；保守可设 4 小时。→ **已决策：默认 4 小时**（`turn.hard_timeout_sec=14400`，可配 0 关闭）。
-3. **子代理默认超时**：建议 0（不限制）；保守可设 30 分钟。→ **已决策：默认 30 分钟**（`subagent.default_timeout_sec=1800`，`subagent.max_timeout_sec=0` 表示模型传入值不设业务上限）。
+3. **子代理默认超时**：建议 0（不限制）；保守可设 30 分钟。→ **最终实现默认 0（不限制）**，需要上限时可用 `subagent.default_timeout_sec` 设正数（如 1800 = 30 分钟）；`subagent.max_timeout_sec=0` 表示模型传入值不设业务上限。
 4. **是否引入 Goal 自动续跑**（P2）：收益大但成本不可控，建议默认开启但 `max_rounds` 保守（如 64），并提供 pause。→ **已决策（P2 口径）：默认开启，`max_rounds=64`**；**已在 P2 落地**（`plugin.ai_chat_bot.goal.enable` / `goal.max_rounds`，硬上限 500；进程重启后需 `/goal resume` 重新武装）。
 5. **并发分池**：对话 `rate_limit` 是否从 2 调到 4？后台任务独立池默认 8。→ **已决策：`rate_limit=4`（仅对话回合），后台子代理独立池 `subagent.max_concurrent_global=8`。**
 6. **重启自动续跑**：建议默认关闭（需用户 `/resume`），避免升级重启后自动烧钱。→ **已决策：默认不自动续跑**；启动时把遗留任务标记 `interrupted`，用户 `/resume <任务ID>` 手动恢复（仅本会话、仅子代理/交接任务）。

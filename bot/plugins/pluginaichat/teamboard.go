@@ -127,7 +127,7 @@ func (t *teamTaskCreateTool) Execute(ctx context.Context, params any, callbacks 
 		Kind:       taskKindTeamTask,
 		Status:     taskStatusQueued,
 		Title:      title,
-		Prompt:     truncateTaskPrompt(strings.TrimSpace(p.Description)),
+		Prompt:     strings.TrimSpace(p.Description),
 	}
 
 	dbCtx, cancel := t.plugin.taskDB()

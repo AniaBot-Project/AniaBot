@@ -491,7 +491,7 @@ AI 回复不再有"5 分钟一刀切"的总超时：框架的 `bot.msg_event_tim
 | 配置键 | 默认值 | 说明 |
 | --- | --- | --- |
 | `plugin.ai_chat_bot.subagent.enable` | `true` | 是否启用子代理；关闭后不注册 `subagent_run/list/send/cancel`、`task_handoff` 与 `workflow_run` 工具，主 AI 无法委派 |
-| `plugin.ai_chat_bot.subagent.default_timeout_sec` | `1800` | 子代理单次执行默认超时（秒），默认 30 分钟；`0` 表示不限制。**不再跟随** `bot.msg_event_timeout_sec` |
+| `plugin.ai_chat_bot.subagent.default_timeout_sec` | `0` | 子代理单次执行默认超时（秒）；`0`（默认）表示不限制，由 token 配额与 `/stop` 兜底。**不再跟随** `bot.msg_event_timeout_sec` |
 | `plugin.ai_chat_bot.subagent.max_timeout_sec` | `0` | 模型单次调用 `timeout_sec` 的业务上限（秒）；`0` 表示不限制 |
 | `plugin.ai_chat_bot.subagent.max_concurrent_per_session` | `4` | 同一会话同时运行的后台子代理上限，超出时直接拒绝并提示（不静默排队） |
 | `plugin.ai_chat_bot.subagent.max_concurrent_global` | `8` | 所有会话合计的后台子代理上限，与对话回合的 `rate_limit` **分开计算**，后台任务不挤占正常对话 |
@@ -509,7 +509,7 @@ AI 回复不再有"5 分钟一刀切"的总超时：框架的 `bot.msg_event_tim
 | --- | --- | --- |
 | `plugin.ai_chat_bot.task.retention_days` | `7` | 已结束任务记录的保留天数，后台每 6 小时清理一次；`0` 表示不清理 |
 
-任务表建不起来（SQL 探测/建表失败）时降级为不持久化，`/tasks` 仍可看内存中运行中的子代理与最近回合，不影响对话。会话内命令：`/tasks` 查看本会话运行中/最近后台任务与最近回合，`/stop` 取消当前回合并清空该会话排队消息，`/stop <任务ID>` 只取消指定后台子代理，`/resume <任务ID>` 恢复被中断任务（仅限本会话、仅 `interrupted` 状态）。<br>
+任务表建不起来（SQL 探测/建表失败）时降级为不持久化，`/tasks` 仍可看内存中运行中的子代理与最近回合，不影响对话。面板「后台任务」页可按当前筛选条件导出完整任务记录（JSON）或清除已结束记录（运行中、排队中的任务保留）；任务指令、结果、错误与工具调用参数/结果都完整保存、不截断。会话内命令：`/tasks` 查看本会话运行中/最近后台任务与最近回合，`/stop` 取消当前回合并清空该会话排队消息，`/stop <任务ID>` 只取消指定后台子代理，`/resume <任务ID>` 恢复被中断任务（仅限本会话、仅 `interrupted` 状态）；`#新对话` 会先停止本会话运行中的子代理/工作流与团队运行，并暂停进行中的长任务目标（可用 `/goal resume` 恢复），再清空上下文。<br>
 `task_handoff` 工具（`subagent.enable=true` 时注册）用于「优雅收口」：软截止提醒会引导模型把「已完成摘要 + 剩余工作 + 验收标准」交给后台子代理继续，当前回合立即结束，完成后结果回到会话。
 
 ### 长任务目标（goal）
@@ -585,7 +585,7 @@ AI 用 `team_task_create` / `team_task_list` / `team_task_claim` / `team_task_co
 
 Query 日志默认开启且无独立配置项，在面板记录每次 AI 回复的完整执行过程。日志全量保留（不做容量淘汰；工具调用明细记录的是统一长度治理后的结果文本，超长结果以预览 + handle 落盘，完整内容可在对话中由 AI 用 `read_tool_output` 读取），由管理员在「Query 日志」页按当前筛选条件**导出**（JSON）或**清除**；前端展示工具结果超过 1000 字符时默认折叠，点击可展开。
 
-每条日志包含：触发会话、发送者、用户输入、LLM 轮数、工具调用明细（名称/参数/结果/耗时）、token 用量与最终回复，状态区分 `running` / `success` / `skipped`（主动互动中 AI 判断无需发言）/ `stopped` / `timeout` / `error`。普通对话回合还会记录**停止原因** `stop_reason`（`completed` 正常完成 / `aborted` 中止 / `max_tokens` 达到输出上限 / `error` 出错 / `watchdog` 循环保护终止 / `timeout` 超时 / `user_stop` 用户停止）；升级前的记录还可能带**任务 ID** `task_id`（关联当时的后台任务表 `ania_agent_task`，新版本普通回合已不再写任务表，因此新记录留空）。主动互动与面板试聊不填这两项。两者随 Query 日志 API 返回、导出 JSON 时也会带出，面板列表（异常停止原因）与详情（停止原因、关联任务跳转）均已展示；从后台任务页跳转时可用 `task_id` 过滤。运行中插话会以 `【处理中插话】` 段落追加在用户输入之后（保留发送者信息，关键词筛选可命中）。面板「Query 日志」页可筛选查看；主动互动的执行（来源标记为「主动互动」）也会记录在这里，以触发说明替代用户输入。
+每条日志包含：触发会话、发送者、用户输入、LLM 轮数、工具调用明细（名称/参数/结果/耗时）、token 用量与最终回复，状态区分 `running` / `success` / `skipped`（主动互动中 AI 判断无需发言）/ `stopped` / `timeout` / `error`。普通对话回合还会记录**停止原因** `stop_reason`（`completed` 正常完成 / `aborted` 中止 / `max_tokens` 达到输出上限 / `error` 出错 / `watchdog` 循环保护终止 / `timeout` 超时 / `user_stop` 用户停止）；升级前的记录还可能带**任务 ID** `task_id`（关联当时的后台任务表 `ania_agent_task`，新版本普通回合已不再写任务表，因此新记录留空）。主动互动与面板试聊不填这两项。两者随 Query 日志 API 返回、导出 JSON 时也会带出，面板列表（异常停止原因）与详情（停止原因、关联任务跳转）均已展示；从后台任务页跳转时可用 `task_id` 过滤。运行中插话会以 `【处理中插话】` 段落追加在用户输入之后（保留发送者信息，关键词筛选可命中）。子代理完成等后台消息触发的回合没有人类发送者，`senders` 会回退为目标会话 ID（群号 / 好友号），面板不会显示 `qq:0`。面板「Query 日志」页可筛选查看；主动互动的执行（来源标记为「主动互动」）也会记录在这里，以触发说明替代用户输入。
 
 ### 流式回复（stream）
 

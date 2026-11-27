@@ -61,28 +61,67 @@ func TestTeamRunOutcome(t *testing.T) {
 
 // ---- 工具调用步骤收集 ----
 
-func TestSubagentTraceCapsAndTruncates(t *testing.T) {
+// TestSubagentTraceKeepsFullToolCalls 后台任务日志与 Query 日志同口径：工具参数/
+// 结果完整保留、不做长度截断，也不限制明细条数（上限只在展示层折叠）。
+func TestSubagentTraceKeepsFullToolCalls(t *testing.T) {
 	tr := newSubagentTrace()
 	args := strings.Repeat("参", tasklog.MaxArgsRunes+50)
 	result := strings.Repeat("结", tasklog.MaxResultRunes+50)
-	for i := 0; i < subagentTraceMaxCalls+10; i++ {
+	const calls = 60 // 超过历史实现的上限（50），验证不再丢弃
+	for i := 0; i < calls; i++ {
 		tr.observe(aichat.ToolCallInfo{Name: "bash", Arguments: args, Result: result, DurationMs: 7})
 	}
-	calls, total := tr.snapshot()
-	if len(calls) != subagentTraceMaxCalls {
-		t.Fatalf("保留明细 %d 条, want %d", len(calls), subagentTraceMaxCalls)
+	got, total := tr.snapshot()
+	if len(got) != calls {
+		t.Fatalf("应保留全部明细 %d 条, got %d", calls, len(got))
 	}
-	if total != subagentTraceMaxCalls+10 {
-		t.Fatalf("总调用数 %d, want %d", total, subagentTraceMaxCalls+10)
+	if total != calls {
+		t.Fatalf("总调用数 %d, want %d", total, calls)
 	}
-	if got := len([]rune(calls[0].Arguments)); got != tasklog.MaxArgsRunes+1 {
-		t.Fatalf("参数截断后 %d runes, want %d（含省略号）", got, tasklog.MaxArgsRunes+1)
+	if got[0].Arguments != args {
+		t.Fatalf("参数应完整保留: %d runes, want %d", len([]rune(got[0].Arguments)), len([]rune(args)))
 	}
-	if got := len([]rune(calls[0].Result)); got != tasklog.MaxResultRunes+1 {
-		t.Fatalf("结果截断后 %d runes, want %d（含省略号）", got, tasklog.MaxResultRunes+1)
+	if got[0].Result != result {
+		t.Fatalf("结果应完整保留: %d runes, want %d", len([]rune(got[0].Result)), len([]rune(result)))
 	}
-	if calls[0].DurationMs != 7 || calls[0].Name != "bash" {
-		t.Fatalf("工具明细字段丢失: %+v", calls[0])
+	if got[0].DurationMs != 7 || got[0].Name != "bash" {
+		t.Fatalf("工具明细字段丢失: %+v", got[0])
+	}
+}
+
+// TestFinishSubagentTaskKeepsFullContent 任务指令 / 结果 / 错误完整入库，不做长度
+// 截断（与 Query 日志同一口径）：面板详情与导出都能看到完整内容。
+func TestFinishSubagentTaskKeepsFullContent(t *testing.T) {
+	p := newTeamLogTestPlugin(t)
+	longPrompt := strings.Repeat("任务说明", 3000) // 12000 rune，超过历史实现的 8000 上限
+	longResult := strings.Repeat("结果", 3000)   // 6000 rune，超过历史实现的 4000 上限
+	task := p.beginSubagentTask("t-full-0001", message.FromString("10001"), true, longPrompt, taskKindSubagent)
+	if task == nil {
+		t.Fatal("任务记录应创建")
+	}
+	p.finishSubagentTaskMeta(task, longResult, aichat.TokenUsage{TotalTokens: 10}, nil, "")
+
+	got, ok, err := p.taskStore.Get(context.Background(), task.ID)
+	if err != nil || !ok {
+		t.Fatalf("读取任务失败: ok=%v err=%v", ok, err)
+	}
+	if got.Prompt != longPrompt {
+		t.Fatalf("任务指令被截断: %d rune, want %d", len([]rune(got.Prompt)), len([]rune(longPrompt)))
+	}
+	if got.Result != longResult {
+		t.Fatalf("任务结果被截断: %d rune, want %d", len([]rune(got.Result)), len([]rune(longResult)))
+	}
+
+	// 失败任务的错误同样完整保留
+	longErr := errors.New(strings.Repeat("错误", 800))
+	failed := p.beginSubagentTask("t-full-0002", message.FromString("10001"), true, "会失败的任务", taskKindSubagent)
+	p.finishSubagentTaskMeta(failed, "", aichat.TokenUsage{}, longErr, "")
+	got, ok, err = p.taskStore.Get(context.Background(), failed.ID)
+	if err != nil || !ok {
+		t.Fatalf("读取失败任务失败: ok=%v err=%v", ok, err)
+	}
+	if got.Status != taskStatusFailed || got.Error != longErr.Error() {
+		t.Fatalf("失败错误应完整保留: status=%s len=%d", got.Status, len([]rune(got.Error)))
 	}
 }
 

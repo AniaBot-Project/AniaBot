@@ -159,7 +159,7 @@
                 <template v-if="cacheRate(log) > 0"> · 命中率 <span class="ratehit">{{ cachePct(log) }}</span></template>
               </span>
             </template>
-            <span v-if="log.senders?.length">来自 {{ log.senders.join(', ') }}</span>
+            <span v-if="displaySenders(log)">来自 {{ displaySenders(log) }}</span>
             <!-- 历史记录可能带关联任务：列表里直接给出跳转入口 -->
             <RouterLink
               v-if="log.task_id"
@@ -216,7 +216,7 @@
               <template v-if="cacheRate(detail) > 0"> · 命中率 <span class="ratehit">{{ cachePct(detail) }}</span></template>
             </span>
           </template>
-          <span v-if="detail.senders?.length">来自 {{ detail.senders.join(', ') }}</span>
+          <span v-if="displaySenders(detail)">来自 {{ displaySenders(detail) }}</span>
         </div>
 
         <!-- 停止原因与关联后台任务（历史记录可能带 task_id） -->
@@ -375,6 +375,13 @@ let observer = null
 let loadToken = 0
 
 const hasFilter = computed(() => Object.values(applied).some((v) => v !== ''))
+
+// 发送者展示：过滤占位「qq:0」（升级前的记录里合成消息也会写入发送者），整批都是
+// 后台消息时回退显示目标会话 ID，与后端新写入口径一致。
+function displaySenders(log) {
+  const list = (log?.senders || []).filter((s) => s && s !== 'qq:0')
+  return list.length ? list.join(', ') : (log?.target_id || '')
+}
 
 function applyFilters() {
   Object.assign(applied, filters)

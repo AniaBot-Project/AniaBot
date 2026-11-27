@@ -75,11 +75,21 @@ func (p *AIChatPlugin) beginQuery(chat *aichat.ChatBot, id message.QID, isGroup 
 	seen := make(map[message.QID]struct{}, len(batch))
 	for i := range batch {
 		uid := batch[i].Sender.UserId
+		// 合成消息（子代理完成通知、目标续跑、/resume 恢复提示等）的 Sender 是
+		// 占位 0，不是真实触发人：跳过，否则面板会显示「来自 qq:0」。
+		if uid == message.FromUint64(0) {
+			continue
+		}
 		if _, ok := seen[uid]; ok {
 			continue
 		}
 		seen[uid] = struct{}{}
 		senders = append(senders, uid.String())
+	}
+	// 整批都是合成消息时没有人类发送者：回退为会话目标（群号 / 好友号），面板
+	// 展示真实 ID 而不是 0，触发人筛选也能按目标会话命中。
+	if len(senders) == 0 && id != "" {
+		senders = append(senders, id.String())
 	}
 	r := &queryRecorder{start: time.Now(), key: sessionKey(id, isGroup)}
 	r.entry = p.queryLogger.Record(querylog.Entry{

@@ -9,7 +9,7 @@ AniaBot 的 Web 控制面板与插件有两种协作机制，**不要混淆**：
 
 面板的功能页面**不是写死的**：core 启动面板前会遍历插件，用类型断言探测 `adminpanel.XxxSource` 可选接口（与 `bot.QQ` 同一套「可选接口 + 类型断言」惯例）。插件实现了哪个接口，对应页面就自动接上它的数据；没有任何插件实现时，页面返回空数据，面板照常运行。
 
-目前 core 的发现循环跟踪 **9 个核心接口**（`TaskLogSource` / `ClockTaskSource` / `MsgLogSource` / `SkillSource` / `MemorySource` / `KnowledgeBaseSource` / `TeamSource` / `QuotaSource` / `QueryLogSource`），它们全部集齐后即停止遍历；另有 **7 个可选扩展接口**（`MsgLogSessionSource` / `MsgLogMediaSource` / `MsgLogDeleteSource` / `MsgLogSessionDeleteSource` / `SkillToggleSource` / `SkillDetailSource` / `ChatConsoleSource`），不参与停止条件；但循环在核心接口集齐后就会 `break`，所以只实现可选接口、且注册在 break 点之后的插件同样不会被发现。
+目前 core 的发现循环跟踪 **9 个核心接口**（`TaskLogSource` / `ClockTaskSource` / `MsgLogSource` / `SkillSource` / `MemorySource` / `KnowledgeBaseSource` / `TeamSource` / `QuotaSource` / `QueryLogSource`），它们全部集齐后即停止遍历；另有 **7 个可选扩展接口**（`MsgLogSessionSource` / `MsgLogMediaSource` / `MsgLogDeleteSource` / `MsgLogSessionDeleteSource` / `SkillToggleSource` / `SkillDetailSource` / `ChatConsoleSource`），不参与停止条件；但循环在核心接口集齐后就会 `break`，所以只实现可选接口、且注册在 break 点之后的插件同样不会被发现。「后台任务」页的 `TaskSource` / `TaskAdminSource` / `GoalSource` 是另一组独立探测的接口（见下），同样只接线第一个实现的插件。
 
 ## 发现机制
 
@@ -54,6 +54,7 @@ for _, p := range ania.plugins {
 | Agent 团队 | `adminpanel.TeamSource` | AI 对话插件 |
 | 配额管理 | `adminpanel.QuotaSource` | AI 对话插件 |
 | Query 日志 | `adminpanel.QueryLogSource` | AI 对话插件 |
+| 后台任务 | `adminpanel.TaskSource` + `adminpanel.TaskAdminSource`（可选） + `adminpanel.GoalSource`（可选） | AI 对话插件 |
 | 试聊室 | `adminpanel.ChatConsoleSource` | AI 对话插件 |
 
 ## 接口签名
@@ -215,6 +216,29 @@ type QueryLogSource interface {
     QueryLogClear(f querylog.Filter) int
 }
 ```
+
+### TaskSource / TaskAdminSource / GoalSource —— 后台任务页
+
+```go
+type TaskSource interface {
+    // 最近的后台任务（新在前）；limit<=0 由实现取默认值
+    AgentTasks(limit int) []plugininfo.AgentTaskView
+}
+
+// 可选：在只读列表之外提供日志导出与清除
+type TaskAdminSource interface {
+    // 满足筛选条件的全部任务（不分页，导出用）
+    AgentTasksExport(f plugininfo.AgentTaskFilter) []plugininfo.AgentTaskView
+    // 删除满足筛选条件的**已结束**任务，返回删除条数（运行中/排队中的任务保留）
+    AgentTasksClear(f plugininfo.AgentTaskFilter) int
+}
+
+type GoalSource interface {
+    AgentGoals() []plugininfo.AgentGoalView
+}
+```
+
+接口对应面板「后台任务」页：`GET /api/agent-tasks?limit=1~500`、`GET /api/agent-tasks/export`（按 `status`/`kind`/`keyword` 过滤）、`DELETE /api/agent-tasks` 与 `GET /api/agent-goals`。`plugininfo.AgentTaskFilter` 的零值字段不过滤，`Keyword` 不区分大小写匹配标题 / 任务 ID / 会话键 / 任务指令；清除只删除已结束（completed/failed/timeout/cancelled/interrupted）的行，避免删掉运行时仍在写的任务记录。
 
 ### ChatConsoleSource —— 试聊室页
 

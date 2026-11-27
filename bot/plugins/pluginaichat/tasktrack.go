@@ -35,7 +35,7 @@ func (p *AIChatPlugin) beginSubagentTask(taskID string, id message.QID, isGroup 
 		Kind:       kind,
 		Status:     taskStatusRunning,
 		Title:      truncateTaskTitle(task),
-		Prompt:     truncateTaskPrompt(task),
+		Prompt:     task,
 		CreatedAt:  now,
 		StartedAt:  now,
 		UpdatedAt:  now,
@@ -56,6 +56,7 @@ func (p *AIChatPlugin) finishSubagentTask(t *agentTask, result string, usage aic
 
 // finishSubagentTaskMeta 更新子代理任务的终态、结果、token 用量与执行细节 Meta
 // （轮数/耗时/工具调用步骤，由 subagentTraceMeta 构造；空串表示不写）。
+// 结果与错误完整入库（与 Query 日志一致，不在写路径截断）。
 func (p *AIChatPlugin) finishSubagentTaskMeta(t *agentTask, result string, usage aichat.TokenUsage, runErr error, meta string) {
 	if p.taskStore == nil || t == nil {
 		return
@@ -65,11 +66,11 @@ func (p *AIChatPlugin) finishSubagentTaskMeta(t *agentTask, result string, usage
 	t.Status, t.StopReason = taskRunStatus(runErr)
 	switch {
 	case runErr == nil:
-		t.Result = truncateTaskResult(result)
+		t.Result = result
 	case t.Status == taskStatusTimeout:
 		t.Error = runErr.Error()
 	case t.Status == taskStatusFailed:
-		t.Error = truncateTaskTitle(runErr.Error())
+		t.Error = runErr.Error()
 	}
 	if meta != "" {
 		t.Meta = meta
@@ -111,7 +112,8 @@ func isContextCanceled(err error) bool {
 	return strings.Contains(msg, "context canceled") || strings.Contains(msg, "context deadline exceeded")
 }
 
-// truncateTaskTitle 任务标题/提示的 rune 安全截断。
+// truncateTaskTitle 任务标题/提示的 rune 安全截断（标题是列表摘要，完整内容在
+// Prompt / Result / Meta 里，均不截断）。
 func truncateTaskTitle(s string) string {
 	s = strings.TrimSpace(s)
 	const maxRunes = 200
@@ -120,28 +122,6 @@ func truncateTaskTitle(s string) string {
 		return s
 	}
 	return string(r[:maxRunes]) + "…"
-}
-
-// truncateTaskResult 任务结果入库前的长度限制：任务表只保留可复核摘要，
-// 完整结果已由工具结果落盘治理保存（read_tool_output 可读）。
-func truncateTaskResult(s string) string {
-	const maxRunes = 4000
-	r := []rune(s)
-	if len(r) <= maxRunes {
-		return s
-	}
-	return string(r[:maxRunes]) + "\n…（结果已截断，完整内容见会话侧落盘文件）"
-}
-
-// truncateTaskPrompt 任务指令入库前的长度限制：/resume 依赖它恢复中断任务，
-// 保留足够重建上下文的长度（完整对话历史不在任务表内）。
-func truncateTaskPrompt(s string) string {
-	const maxRunes = 8000
-	r := []rune(s)
-	if len(r) <= maxRunes {
-		return s
-	}
-	return string(r[:maxRunes]) + "\n…（任务指令已截断）"
 }
 
 // startTaskJanitor 启动任务记录清理器：按 task.retention_days 删除过期已结束

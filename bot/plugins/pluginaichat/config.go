@@ -323,7 +323,7 @@ type llmGuardConfig struct {
 // subagentConfig 子代理配置：委派任务的独立生命周期与资源边界。
 type subagentConfig struct {
 	Enable                  bool `cfg:"enable" label:"启用子代理" group:"AI 对话 · 子代理" default:"true"`
-	DefaultTimeoutSec       int  `cfg:"default_timeout_sec" label:"默认超时(秒)" group:"AI 对话 · 子代理" help:"子代理单次执行默认超时，0 表示不限制（由 token 配额与 /stop 兜底）" default:"1800"`
+	DefaultTimeoutSec       int  `cfg:"default_timeout_sec" label:"默认超时(秒)" group:"AI 对话 · 子代理" help:"子代理单次执行默认超时；0（默认）表示不限制，由 token 配额与 /stop 兜底" default:"0"`
 	MaxTimeoutSec           int  `cfg:"max_timeout_sec" label:"最大超时(秒)" group:"AI 对话 · 子代理" help:"模型单次调用 timeout_sec 的硬上限；0 表示不限制" default:"0"`
 	MaxConcurrentPerSession int  `cfg:"max_concurrent_per_session" label:"每会话并发子代理" group:"AI 对话 · 子代理" help:"同一会话同时运行的后台子代理上限，超出时拒绝并提示" default:"4"`
 	MaxConcurrentGlobal     int  `cfg:"max_concurrent_global" label:"全局并发子代理" group:"AI 对话 · 子代理" help:"所有会话合计的后台子代理上限，与对话回合并发分开计算" default:"8"`
