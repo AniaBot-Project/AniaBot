@@ -63,12 +63,22 @@
               </div>
             </div>
           </div>
-          <!-- 手机端按钮落到描述下方独立一行；桌面端仍在右侧，避免描述被按钮挤成很窄的一列 -->
-          <div class="flex items-center gap-1 shrink-0 justify-end sm:justify-start">
+          <!-- 手机端操作落到描述下方独立一行；桌面端仍在右侧，避免描述被按钮挤成很窄的一列 -->
+          <div class="flex items-center gap-2 shrink-0 justify-end sm:justify-start">
+            <Tooltip
+              v-if="!s.builtin"
+              :title="s.disabled ? '已禁用：描述不进入上下文，点击启用' : '已启用：描述进入上下文，点击禁用'"
+              placement="bottom"
+            >
+              <Switch
+                :model-value="!s.disabled"
+                :loading="toggling.has(s.name)"
+                :aria-label="`${s.name} 技能开关`"
+                size="small"
+                @update:model-value="onSetEnabled(s, $event)"
+              />
+            </Tooltip>
             <Button type="text" size="small" @click="onDetail(s)">详情</Button>
-            <Button v-if="!s.builtin" type="text" size="small" @click="onToggle(s)">
-              {{ s.disabled ? '启用' : '禁用' }}
-            </Button>
             <Button v-if="!s.builtin" type="text" size="small" danger @click="onDelete(s)">删除</Button>
           </div>
         </li>
@@ -156,7 +166,7 @@ import { confirmAction } from '../ui/confirm'
 import { computed, onMounted, ref } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { Button, Card, Modal, Tag, Tooltip } from 'animal-island-vue'
+import { Button, Card, Modal, Switch, Tag, Tooltip } from 'animal-island-vue'
 import { api } from '../api.js'
 import LoadingState from '../components/LoadingState.vue'
 
@@ -167,6 +177,8 @@ const whitelist = ref([])
 const loading = ref(true)
 const fileInput = ref(null)
 const uploading = ref(false)
+// 正在切换启停的 skill 名称：切换期间开关显示加载态，避免重复提交
+const toggling = ref(new Set())
 const msg = ref('')
 const msgOk = ref(false)
 const detail = ref(null)
@@ -250,17 +262,25 @@ async function onUpload(e) {
   }
 }
 
-async function onToggle(s) {
-  const enabled = !!s.disabled
+// 启用/禁用外置 skill：先本地更新开关，避免整表刷新造成闪烁；失败时按服务端实际状态回读
+// （后端可能已生效但写配置失败，回滚本地状态会与真实状态不一致）
+async function onSetEnabled(s, enabled) {
+  if (s.builtin || toggling.value.has(s.name)) return
+  toggling.value = new Set(toggling.value).add(s.name)
+  s.disabled = !enabled
   msg.value = ''
   try {
     await api.setSkillEnabled(s.name, enabled)
     msgOk.value = true
     msg.value = `「${s.name}」已${enabled ? '启用' : '禁用'}`
-    await load()
   } catch (e) {
     msgOk.value = false
     msg.value = e.message
+    await load()
+  } finally {
+    const next = new Set(toggling.value)
+    next.delete(s.name)
+    toggling.value = next
   }
 }
 
