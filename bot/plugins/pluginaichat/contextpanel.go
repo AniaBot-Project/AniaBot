@@ -255,9 +255,15 @@ func (p *AIChatPlugin) ContextDetail(key string) (plugininfo.ContextDetail, erro
 		return plugininfo.ContextDetail{}, fmt.Errorf("会话不存在或已无上下文：%s", key)
 	}
 
+	// 三个切片一律初始化为空数组（而不是 nil）：面板前端按数组渲染，nil 会编码成
+	// null，导致「持久化快照」分支（不重建工具定义）在页面上渲染失败。
+	// 持久化分支读不到工具定义，返回空数组并由 Hint 说明原因。
 	detail := plugininfo.ContextDetail{
 		ContextSession: p.contextSessionInfo(key, meta),
 		SessionToken:   p.sessionTokenPeek(key),
+		System:         []plugininfo.ContextSection{},
+		Messages:       []plugininfo.ContextMessage{},
+		Tools:          []plugininfo.ContextTool{},
 	}
 
 	snap, live := p.contextSnapshot(entry)

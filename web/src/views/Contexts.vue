@@ -157,12 +157,12 @@
         </div>
 
         <!-- 任务清单（每轮以 todo_reminder 注入） -->
-        <div v-if="detail.todo && detail.todo.length" class="px-5 py-3 border-b border-white/50">
+        <div v-if="todoItems.length" class="px-5 py-3 border-b border-white/50">
           <div class="text-[11px] font-semibold text-slate-600 mb-1.5">
             任务清单 <span class="font-normal text-slate-400">（每轮以 todo_reminder 尾部注入上下文）</span>
           </div>
           <ul class="space-y-1">
-            <li v-for="(t, i) in detail.todo" :key="i" class="text-xs text-slate-700 flex items-start gap-1.5">
+            <li v-for="(t, i) in todoItems" :key="i" class="text-xs text-slate-700 flex items-start gap-1.5">
               <Tag variant="soft" size="small" :color="todoColor(t.status)" class="shrink-0">{{ todoLabel(t.status) }}</Tag>
               <span class="break-words">{{ t.content }}<span v-if="t.active_form" class="text-slate-400"> · {{ t.active_form }}</span></span>
             </li>
@@ -173,10 +173,10 @@
         <div class="border-b border-white/50">
           <div class="px-5 pt-3 pb-1 flex items-center justify-between gap-2">
             <span class="tlabel">System · 系统提示词（按真正下发的顺序）</span>
-            <span class="text-[10px] text-slate-400 font-mono">{{ detail.system.length }} 段 · ~{{ fmtNum(detail.system_tokens) }} token</span>
+            <span class="text-[10px] text-slate-400 font-mono">{{ systemSections.length }} 段 · ~{{ fmtNum(detail.system_tokens) }} token</span>
           </div>
-          <div v-if="!detail.system.length" class="px-5 pb-3 text-xs text-slate-400">（空）</div>
-          <details v-for="s in detail.system" :key="s.key" class="ctx-block">
+          <div v-if="!systemSections.length" class="px-5 pb-3 text-xs text-slate-400">（空）</div>
+          <details v-for="s in systemSections" :key="s.key" class="ctx-block">
             <summary>
               <span class="text-xs font-semibold text-slate-700">{{ s.title }}</span>
               <span class="text-[10px] font-mono text-slate-400">{{ fmtNum(s.chars) }} 字 · ~{{ fmtNum(s.est_tokens) }} token</span>
@@ -194,23 +194,23 @@
         <div class="border-b border-white/50">
           <div class="px-5 pt-3 pb-1 flex items-center justify-between gap-2">
             <span class="tlabel">Tools · 工具定义（实际下发给模型）</span>
-            <span class="text-[10px] text-slate-400 font-mono">{{ detail.tools.length }} 个 · ~{{ fmtNum(detail.tools_tokens) }} token</span>
+            <span class="text-[10px] text-slate-400 font-mono">{{ contextTools.length }} 个 · ~{{ fmtNum(detail.tools_tokens) }} token</span>
           </div>
-          <div v-if="!detail.tools.length" class="px-5 pb-3 text-xs text-slate-400">
+          <div v-if="!contextTools.length" class="px-5 pb-3 text-xs text-slate-400">
             会话未驻留内存时读不到工具定义；会话产生一条消息后即可重建并读取
           </div>
           <div class="px-5 pb-3 flex flex-wrap gap-1">
-            <Tag v-for="t in detail.tools" :key="t.name" variant="soft" size="small" :title="`~${t.est_tokens} token`">
+            <Tag v-for="t in contextTools" :key="t.name" variant="soft" size="small" :title="`~${t.est_tokens} token`">
               {{ t.name }}
             </Tag>
           </div>
-          <details v-if="detail.tools.length" class="ctx-block">
+          <details v-if="contextTools.length" class="ctx-block">
             <summary>
               <span class="text-xs font-semibold text-slate-700">查看工具说明与参数 schema</span>
               <span class="text-[10px] font-mono text-slate-400">{{ fmtNum(detail.tools_chars) }} 字</span>
             </summary>
             <div class="px-5 pb-3 space-y-2">
-              <details v-for="t in detail.tools" :key="t.name" class="ctx-tool">
+              <details v-for="t in contextTools" :key="t.name" class="ctx-tool">
                 <summary>
                   <span class="font-mono text-[11px] text-slate-700">{{ t.name }}</span>
                   <span class="text-[10px] text-slate-400">~{{ fmtNum(t.est_tokens) }} token</span>
@@ -227,14 +227,14 @@
         <!-- 消息历史 -->
         <div>
           <div class="px-5 py-3 flex items-center justify-between gap-2">
-            <span class="tlabel">History · 消息历史（{{ detail.messages.length }} 条）</span>
+            <span class="tlabel">History · 消息历史（{{ contextMessages.length }} 条）</span>
             <span class="text-[10px] text-slate-400 font-mono">{{ fmtNum(detail.history_chars) }} 字 · ~{{ fmtNum(detail.history_tokens) }} token</span>
           </div>
-          <div v-if="!detail.messages.length" class="px-5 pb-6 text-xs text-slate-400">
+          <div v-if="!contextMessages.length" class="px-5 pb-6 text-xs text-slate-400">
             该会话还没有历史消息（或被压缩成一条摘要）
           </div>
           <ul class="divide-y divide-slate-100">
-            <li v-for="(m, i) in detail.messages" :key="i" class="ctx-msg">
+            <li v-for="(m, i) in contextMessages" :key="i" class="ctx-msg">
               <div class="flex items-center gap-1.5 flex-wrap">
                 <span class="ctx-role" :data-role="m.role">{{ roleLabel(m.role) }}</span>
                 <span class="text-[10px] font-mono text-slate-400">#{{ i + 1 }} · {{ fmtNum(m.chars) }} 字 · ~{{ fmtNum(m.est_tokens) }} token</span>
@@ -304,6 +304,13 @@ const selected = ref(new Set())
 
 const currentKey = computed(() => detail.value?.key || '')
 
+// 后端三个数组字段一律返回空数组，这里再做一次兜底：历史版本 / 异常响应返回
+// null 时页面不至于因为读 .length 直接渲染失败（曾经导致非驻留会话打不开）。
+const systemSections = computed(() => detail.value?.system || [])
+const contextTools = computed(() => detail.value?.tools || [])
+const contextMessages = computed(() => detail.value?.messages || [])
+const todoItems = computed(() => detail.value?.todo || [])
+
 const filteredSessions = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   return sessions.value.filter((s) => {
@@ -324,9 +331,9 @@ const stats = computed(() => {
   const d = detail.value
   if (!d) return []
   return [
-    { label: 'System · 系统提示词', value: `${d.system.length} 段`, sub: `${fmtNum(d.system_chars)} 字 · ~${fmtNum(d.system_tokens)} token` },
-    { label: 'History · 消息历史', value: `${d.messages.length} 条`, sub: `${fmtNum(d.history_chars)} 字 · ~${fmtNum(d.history_tokens)} token` },
-    { label: 'Tools · 工具定义', value: `${d.tools.length} 个`, sub: `${fmtNum(d.tools_chars)} 字 · ~${fmtNum(d.tools_tokens)} token` },
+    { label: 'System · 系统提示词', value: `${systemSections.value.length} 段`, sub: `${fmtNum(d.system_chars)} 字 · ~${fmtNum(d.system_tokens)} token` },
+    { label: 'History · 消息历史', value: `${contextMessages.value.length} 条`, sub: `${fmtNum(d.history_chars)} 字 · ~${fmtNum(d.history_tokens)} token` },
+    { label: 'Tools · 工具定义', value: `${contextTools.value.length} 个`, sub: `${fmtNum(d.tools_chars)} 字 · ~${fmtNum(d.tools_tokens)} token` },
     { label: '合计估算', value: `~${fmtNum(d.total_tokens)} token`, sub: `${fmtNum(d.total_chars)} 字（约 2 字符折 1 token）` },
   ]
 })
@@ -442,7 +449,10 @@ async function loadDetail(key, silent = false) {
   if (!key) return
   if (!silent) detailLoading.value = true
   try {
-    detail.value = await api.getContextDetail(key)
+    const data = await api.getContextDetail(key)
+    // 接口异常时宁可报错，也不要把不完整对象塞进详情（缺字段会让整块渲染失败）
+    if (!data || !data.key) throw new Error('接口返回的上下文数据不完整，请刷新重试')
+    detail.value = data
     msg.value = ''
   } catch (e) {
     // 会话已被删除 / 清空：回到列表空态，不把接口错误留在页面上

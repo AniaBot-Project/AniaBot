@@ -3,6 +3,7 @@ package pluginaichat
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync/atomic"
@@ -171,6 +172,17 @@ func TestContextDetailLiveAndPersisted(t *testing.T) {
 	}
 	if len(persisted.Tools) != 0 {
 		t.Fatalf("未驻留会话不应有工具定义: %+v", persisted.Tools)
+	}
+	// 三个数组字段必须序列化为 []（而非 null）：面板按数组渲染，null 会让详情页
+	// 渲染失败（非驻留会话曾经因此打不开）。
+	raw, err := json.Marshal(persisted)
+	if err != nil {
+		t.Fatalf("marshal detail: %v", err)
+	}
+	for _, nullField := range []string{`"system":null`, `"messages":null`, `"tools":null`} {
+		if strings.Contains(string(raw), nullField) {
+			t.Fatalf("详情 JSON 不应包含 %s: %s", nullField, string(raw))
+		}
 	}
 }
 
