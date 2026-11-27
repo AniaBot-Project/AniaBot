@@ -92,6 +92,7 @@
         {{ tasks.length ? '没有符合筛选条件的任务' : '暂无后台任务（子代理 / 交接 / 工作流 / 团队运行等工作会登记在这里；普通回合见 Query 日志）' }}
       </p>
       <template v-else>
+        <!-- 桌面 / 平板横屏：宽表格 -->
         <div class="task-table-wrap">
           <table class="task-table">
             <thead>
@@ -117,12 +118,12 @@
                   </p>
                 </td>
                 <td><span class="block truncate font-mono text-[11px] text-zinc-600" :title="record.session_key || ''">{{ record.session_key || '—' }}</span></td>
-                <td><span class="font-mono text-[11px] whitespace-nowrap">{{ record.tokens ? fmtInt(record.tokens) : '—' }}</span></td>
-                <td><span class="text-zinc-500 whitespace-nowrap">{{ fmtDuration(record) }}</span></td>
-                <td><span class="text-zinc-600 whitespace-nowrap" :title="fmtTimeFull(record.updated_at)">{{ fmtTime(record.updated_at) }}</span></td>
+                <td><span class="block truncate font-mono text-[11px]" :title="record.tokens ? fmtInt(record.tokens) : ''">{{ record.tokens ? fmtInt(record.tokens) : '—' }}</span></td>
+                <td><span class="block truncate text-zinc-500">{{ fmtDuration(record) }}</span></td>
+                <td><span class="block truncate text-zinc-600" :title="fmtTimeFull(record.updated_at)">{{ fmtTime(record.updated_at) }}</span></td>
                 <td>
                   <span
-                    class="text-[11px] whitespace-nowrap"
+                    class="block truncate text-[11px]"
                     :class="record.error ? 'text-[#ff3b30]' : 'text-zinc-400'"
                     :title="record.error || record.stop_reason || ''"
                   >
@@ -132,6 +133,41 @@
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <!-- 手机 / 窄屏：九列在 500px 内必然互相挤压，改成卡片列表（信息不丢，点击同样打开详情） -->
+        <div class="task-cards">
+          <div
+            v-for="record in filtered"
+            :key="record.id"
+            class="task-card"
+            role="button"
+            tabindex="0"
+            @click="openDetail(record)"
+            @keydown.enter.prevent="openDetail(record)"
+            @keydown.space.prevent="openDetail(record)"
+          >
+            <div class="task-card-top">
+              <Tag variant="solid" size="small" :color="statusColor(record.status)">{{ statusText(record.status) }}</Tag>
+              <Tag variant="outlined" size="small">{{ kindText(record.kind) }}</Tag>
+              <span class="task-card-time" :title="fmtTimeFull(record.updated_at)">{{ fmtTime(record.updated_at) }}</span>
+            </div>
+            <p class="task-card-title" :title="record.title || ''">
+              <span v-if="record.parent_id" class="text-zinc-300 mr-1" title="团队成员：归属某个团队运行">↳</span>{{ record.title || '(无标题)' }}
+            </p>
+            <div class="task-card-meta">
+              <span class="task-card-id font-mono" :title="record.id">{{ shortID(record.id) }}</span>
+              <span v-if="record.session_key" class="task-card-session font-mono" :title="record.session_key">{{ record.session_key }}</span>
+              <span v-if="record.tokens">{{ fmtInt(record.tokens) }} tok</span>
+              <span>{{ fmtDuration(record) }}</span>
+              <span
+                v-if="record.error || record.stop_reason"
+                class="task-card-note"
+                :class="record.error ? 'text-[#ff3b30]' : ''"
+                :title="record.error || record.stop_reason || ''"
+              >{{ record.error ? '错误' : stopText(record.stop_reason) }}</span>
+            </div>
+          </div>
         </div>
       </template>
     </Card>
@@ -334,14 +370,14 @@ const kindOptions = [
 ]
 
 const columns = [
-  { key: 'id', title: '任务 ID', dataIndex: 'id', width: '16%' },
-  { key: 'kind', title: '类型', dataIndex: 'kind', width: '8%' },
-  { key: 'status', title: '状态', dataIndex: 'status', width: '7%' },
+  { key: 'id', title: '任务 ID', dataIndex: 'id', width: '10%' },
+  { key: 'kind', title: '类型', dataIndex: 'kind', width: '9%' },
+  { key: 'status', title: '状态', dataIndex: 'status', width: '9%' },
   { key: 'title', title: '标题', dataIndex: 'title' },
-  { key: 'session_key', title: '会话', dataIndex: 'session_key', width: '11%' },
-  { key: 'tokens', title: 'Token', dataIndex: 'tokens', width: '7%' },
-  { key: 'duration', title: '耗时', dataIndex: 'duration', width: '7%' },
-  { key: 'updated_at', title: '更新时间', dataIndex: 'updated_at', width: '10%' },
+  { key: 'session_key', title: '会话', dataIndex: 'session_key', width: '9%' },
+  { key: 'tokens', title: 'Token', dataIndex: 'tokens', width: '8%' },
+  { key: 'duration', title: '耗时', dataIndex: 'duration', width: '8%' },
+  { key: 'updated_at', title: '更新时间', dataIndex: 'updated_at', width: '9%' },
   { key: 'note', title: '备注', dataIndex: 'note', width: '8%' },
 ]
 
@@ -478,6 +514,12 @@ function toggleField(t, name) {
 
 function kindText(k) {
   return kindLabels[k] || k || '—'
+}
+
+// 移动端卡片里的任务 ID：只显示前 10 位，完整 ID 放在 title / 详情弹窗里
+function shortID(id) {
+  if (!id) return '—'
+  return id.length > 10 ? `${id.slice(0, 10)}…` : id
 }
 
 function statusText(s) {
@@ -619,6 +661,93 @@ onUnmounted(() => {
 /* 任务表：自定义 table 以支持"点击行在对应行下方就地展开详情"（组件库 Table 无行展开能力） */
 .task-table-wrap {
   overflow-x: auto;
+}
+/* 九列表格在手机 / 竖屏平板上必然挤压（标签与数字会压到相邻列），窄屏改用卡片列表 */
+.task-cards {
+  display: none;
+}
+@media (max-width: 1279px) {
+  .task-table-wrap {
+    display: none;
+  }
+  .task-cards {
+    display: block;
+  }
+}
+/* 1280–1439 的笔记本侧栏会吃掉宽度：缩小单元格内边距，保证标签不被裁切 */
+@media (max-width: 1439px) {
+  .task-table thead th,
+  .task-table tbody td {
+    padding-left: 0.6rem;
+    padding-right: 0.6rem;
+  }
+}
+.task-card {
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid #f4f4f5;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.task-card:last-child {
+  border-bottom: 0;
+}
+.task-card:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+.task-card:focus-visible {
+  background: rgba(0, 0, 0, 0.02);
+  outline: 2px solid var(--accent, #19c8b9);
+  outline-offset: -2px;
+}
+.task-card-top {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.task-card-time {
+  margin-left: auto;
+  font-size: 11px;
+  color: #a1a1aa;
+  white-space: nowrap;
+}
+/* 卡片标题最多三行，超出省略；完整标题在悬停提示与详情弹窗中查看 */
+.task-card-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  margin: 0.5rem 0 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--ink-2, #3f3a33);
+  overflow-wrap: anywhere;
+}
+.task-card-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.75rem;
+  margin-top: 0.45rem;
+  font-size: 11px;
+  color: #a1a1aa;
+}
+.task-card-id {
+  max-width: 8.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-card-session {
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-card-note {
+  margin-left: auto;
 }
 .task-table {
   width: 100%;

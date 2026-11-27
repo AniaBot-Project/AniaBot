@@ -1471,6 +1471,31 @@
   text-align: center;
 }
 
+/* 窄屏下的全宽 Select：组件库按「右侧还剩 200px」判断是否翻到左边，手机 / 平板上一个通栏
+   下拉的右边缘几乎贴住屏幕，面板会被弹到屏幕左侧（x 为负）完全看不见。这里统一改成在
+   触发器正下方、与触发器同宽展开，超高时自身滚动。 */
+@media (max-width: 1023px) {
+  :root .animal-select.w-full .animal-select__dropdown {
+    left: 0 !important;
+    right: auto !important;
+    top: calc(100% + 6px) !important;
+    bottom: auto !important;
+    margin: 0 !important;
+    transform: none !important;
+    width: 100% !important;
+    max-width: calc(100vw - 24px);
+    max-height: 50vh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    box-sizing: border-box;
+  }
+  :root .animal-select.w-full .animal-select__option {
+    white-space: normal;
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
+}
+
 /* 表格：列宽合计超过容器宽度时（窄屏 / 列多的页）横向滚动。
    主题库 Table 只有传 scroll 属性才给容器加 overflow，未传时宽表格会被外层
    Card 的 overflow:hidden 直接裁掉右侧列（看起来「显示不全」）。这里统一兜底，
@@ -1478,6 +1503,10 @@
 :root .animal-table-wrapper {
   overflow-x: auto;
   min-width: 0;
+}
+/* 单元格里的长 ID / URL 不允许撑宽整张表：只在需要换行时才断行 */
+:root .animal-table__cell {
+  overflow-wrap: anywhere;
 }
 /* 窄屏压缩单元格内边距，同样的屏幕上能看到更多列、行高也不会被挤成一字一行 */
 @media (max-width: 767px) {

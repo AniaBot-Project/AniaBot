@@ -41,17 +41,18 @@
               row-key="group_id"
               :pagination="false"
               :scroll="{ x: '100%' }"
+              class-name="contact-table"
               :loading="listLoading"
               :empty-text="listLoading ? '正在加载群列表…' : '该平台暂无群聊'"
             >
               <template #cell-group_id="{ value }">
-                <span class="font-mono text-xs">{{ value }}</span>
+                <span class="font-mono text-xs break-all" :title="value">{{ value }}</span>
               </template>
               <template #cell-group_name="{ value }">
                 {{ value || '—' }}
               </template>
               <template #cell-member_count="{ record }">
-                {{ memberText(record) }}
+                <span class="text-xs whitespace-nowrap">{{ memberText(record) }}</span>
               </template>
             </Table>
           </template>
@@ -64,11 +65,12 @@
               row-key="user_id"
               :pagination="false"
               :scroll="{ x: '100%' }"
+              class-name="contact-table"
               :loading="listLoading"
               :empty-text="listLoading ? '正在加载好友列表…' : '该平台无好友列表（平台不支持枚举私聊对端）'"
             >
               <template #cell-user_id="{ value }">
-                <span class="font-mono text-xs">{{ value }}</span>
+                <span class="font-mono text-xs break-all" :title="value">{{ value }}</span>
               </template>
               <template #cell-nickname="{ value }">
                 {{ value || '—' }}
@@ -104,14 +106,14 @@ const contactTabs = [
   { key: 'friends', label: '好友列表' },
 ]
 const groupColumns = [
-  { title: '群 ID', dataIndex: 'group_id' },
-  { title: '群名称', dataIndex: 'group_name' },
-  { title: '成员数', dataIndex: 'member_count' },
+  { title: '群 ID', dataIndex: 'group_id', width: '42%' },
+  { title: '群名称', dataIndex: 'group_name', width: '34%' },
+  { title: '成员数', dataIndex: 'member_count', width: '24%', align: 'right' },
 ]
 const friendColumns = [
-  { title: '用户 ID', dataIndex: 'user_id' },
-  { title: '昵称', dataIndex: 'nickname' },
-  { title: '备注', dataIndex: 'remark' },
+  { title: '用户 ID', dataIndex: 'user_id', width: '42%' },
+  { title: '昵称', dataIndex: 'nickname', width: '33%' },
+  { title: '备注', dataIndex: 'remark', width: '25%' },
 ]
 
 const sources = ref([])
@@ -130,7 +132,7 @@ function platformLabel(platform) {
 
 function memberText(g) {
   if (!g.member_count && !g.max_member_count) return '—'
-  return `${g.member_count} / ${g.max_member_count}`
+  return `${g.member_count}/${g.max_member_count}`
 }
 
 async function load() {
@@ -176,3 +178,15 @@ onMounted(async () => {
   }
 })
 </script>
+
+<style scoped>
+/* 通讯录 ID（飞书 oc_ / ou_ 很长）不能撑开整张表：固定列宽 + 长串在列内换行 */
+:deep(.contact-table) {
+  table-layout: fixed;
+  width: 100%;
+}
+:deep(.contact-table .animal-table__cell) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+</style>

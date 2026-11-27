@@ -40,28 +40,31 @@
         <li v-else-if="skills.length === 0" class="py-12 text-sm text-slate-400 text-center list-none">
           暂无已加载的 skill，点击右上角上传 zip 压缩包（需包含 SKILL.md）
         </li>
-        <li v-for="s in skills" :key="s.name" class="px-5 py-4 flex items-start gap-4 transition-opacity" :class="s.disabled ? 'opacity-60' : ''">
-          <div class="w-9 h-9 rounded-lg bg-zinc-100 flex items-center justify-center shrink-0 text-zinc-500">
-            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z"/></svg>
-          </div>
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="text-sm font-semibold text-slate-800">{{ s.name }}</span>
-              <Tooltip v-if="s.builtin" title="内置技能：不可删除、不可禁用" placement="bottom">
-                <Tag variant="solid" size="small" color="app-blue">内置</Tag>
-              </Tooltip>
-              <Tooltip v-else-if="s.disabled" title="已禁用：描述不进入上下文" placement="bottom">
-                <Tag variant="solid" size="small">已禁用</Tag>
-              </Tooltip>
-              <span class="text-[11px] font-mono text-slate-400">{{ s.location }}</span>
+        <li v-for="s in skills" :key="s.name" class="px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4 transition-opacity" :class="s.disabled ? 'opacity-60' : ''">
+          <div class="flex items-start gap-3 min-w-0 flex-1">
+            <div class="w-9 h-9 rounded-lg bg-zinc-100 flex items-center justify-center shrink-0 text-zinc-500">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z"/></svg>
             </div>
-            <p v-if="s.description" class="text-xs text-slate-500 mt-0.5 leading-relaxed">{{ s.description }}</p>
-            <div v-if="(s.refs?.length || s.extras?.length)" class="flex items-center gap-1.5 mt-2 flex-wrap">
-              <Tag v-for="f in s.refs" :key="'r' + f" variant="soft" size="small" class="font-mono">{{ f }}</Tag>
-              <Tag v-for="f in s.extras" :key="'e' + f" variant="outlined" size="small" class="font-mono">{{ f }}</Tag>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-sm font-semibold text-slate-800">{{ s.name }}</span>
+                <Tooltip v-if="s.builtin" title="内置技能：不可删除、不可禁用" placement="bottom">
+                  <Tag variant="solid" size="small" color="app-blue">内置</Tag>
+                </Tooltip>
+                <Tooltip v-else-if="s.disabled" title="已禁用：描述不进入上下文" placement="bottom">
+                  <Tag variant="solid" size="small">已禁用</Tag>
+                </Tooltip>
+                <span class="text-[11px] font-mono text-slate-400 break-all">{{ s.location }}</span>
+              </div>
+              <p v-if="s.description" class="text-xs text-slate-500 mt-0.5 leading-relaxed break-words">{{ s.description }}</p>
+              <div v-if="(s.refs?.length || s.extras?.length)" class="flex items-center gap-1.5 mt-2 flex-wrap">
+                <Tag v-for="f in s.refs" :key="'r' + f" variant="soft" size="small" class="font-mono">{{ f }}</Tag>
+                <Tag v-for="f in s.extras" :key="'e' + f" variant="outlined" size="small" class="font-mono">{{ f }}</Tag>
+              </div>
             </div>
           </div>
-          <div class="flex items-center gap-1 shrink-0">
+          <!-- 手机端按钮落到描述下方独立一行；桌面端仍在右侧，避免描述被按钮挤成很窄的一列 -->
+          <div class="flex items-center gap-1 shrink-0 justify-end sm:justify-start">
             <Button type="text" size="small" @click="onDetail(s)">详情</Button>
             <Button v-if="!s.builtin" type="text" size="small" @click="onToggle(s)">
               {{ s.disabled ? '启用' : '禁用' }}

@@ -279,7 +279,7 @@
               <span class="text-zinc-400">{{ index + 1 }}</span>
             </template>
             <template #cell-target_id="{ record }">
-              <span class="text-zinc-800 font-medium whitespace-nowrap block max-w-[42vw] truncate sm:max-w-none">
+              <span class="text-zinc-800 font-medium whitespace-nowrap block max-w-[42vw] lg:max-w-[24rem] truncate">
                 <Tag variant="outlined" size="small" class="mr-2">{{ chatTypeGlyph(record.chat_type) }}</Tag>
                 {{ record.target_id }}
               </span>

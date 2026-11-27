@@ -21,30 +21,36 @@
           row-key="id"
           :pagination="false"
           :striped="false"
+          class-name="clock-table"
           :on-row="clockRowAttrs"
         >
           <template #cell-title="{ record }">
-            <span class="flex items-center gap-1.5">
+            <!-- 标题列限宽单行省略：长标题不再把「目标 / Cron / 时间」列挤出屏幕 -->
+            <div class="flex items-center gap-1.5 min-w-0">
               <span
                 class="[&>svg]:w-3 [&>svg]:h-3 text-zinc-400 transition-transform shrink-0"
                 :class="{ 'rotate-90': expanded.has(record.id) }"
                 v-html="icons.chevron"
               />
-              <span class="truncate font-medium" :title="record.title">{{ record.title || '(无标题)' }}</span>
-            </span>
-            <Tag v-if="record.run_once" variant="outlined" size="small" class="ml-4">单次</Tag>
+              <span class="truncate font-medium min-w-0" :title="record.title">{{ record.title || '(无标题)' }}</span>
+              <Tag v-if="record.run_once" variant="outlined" size="small" class="shrink-0">单次</Tag>
+            </div>
           </template>
           <template #cell-target_id="{ record }">
-            <span class="text-zinc-600 whitespace-nowrap">{{ record.target_type === 'group' ? '群' : '好友' }} {{ record.target_id }}</span>
+            <span class="block truncate text-zinc-600" :title="`${record.target_type === 'group' ? '群' : '好友'} ${record.target_id}`">
+              {{ record.target_type === 'group' ? '群' : '好友' }} {{ record.target_id }}
+            </span>
           </template>
           <template #cell-cron="{ record }">
-            <span class="text-zinc-500 whitespace-nowrap">{{ record.cron }}</span>
+            <span class="block truncate text-xs text-zinc-500 font-mono" :title="record.cron">{{ record.cron }}</span>
           </template>
           <template #cell-next_run_at="{ record }">
-            <span class="text-zinc-600 whitespace-nowrap">{{ record.enabled ? fmtTimeFull(record.next_run_at) : '—' }}</span>
+            <span class="block truncate text-xs text-zinc-600" :title="fmtTimeFull(record.next_run_at)">
+              {{ record.enabled ? fmtTableTime(record.next_run_at) : '—' }}
+            </span>
           </template>
           <template #cell-last_run_at="{ record }">
-            <span class="text-zinc-600 whitespace-nowrap">{{ fmtTimeFull(record.last_run_at) }}</span>
+            <span class="block truncate text-xs text-zinc-600" :title="fmtTimeFull(record.last_run_at)">{{ fmtTableTime(record.last_run_at) }}</span>
           </template>
           <template #cell-enabled="{ record }">
             <Switch
@@ -60,6 +66,16 @@
         <template v-for="t in clocks" :key="t.id">
           <div v-if="expanded.has(t.id)" class="border-b border-dashed border-zinc-100 last:border-0 bg-zinc-50/40 px-6 py-4">
             <dl class="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-xs">
+              <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">标题</dt>
+              <dd class="text-zinc-700 break-all">{{ t.title || '（无标题）' }}</dd>
+              <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">目标</dt>
+              <dd class="text-zinc-700 break-all">{{ t.target_type === 'group' ? '群聊' : '好友' }} {{ t.target_id }}</dd>
+              <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">Cron</dt>
+              <dd class="text-zinc-700 font-mono break-all">{{ t.cron }}</dd>
+              <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">下次执行</dt>
+              <dd class="text-zinc-700">{{ t.enabled ? fmtTimeFull(t.next_run_at) : '—' }}</dd>
+              <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">上次执行</dt>
+              <dd class="text-zinc-700">{{ fmtTimeFull(t.last_run_at) }}</dd>
               <dt class="text-[10px] tracking-[0.15em] uppercase text-zinc-400 self-center">任务内容</dt>
               <dd class="text-zinc-700 whitespace-pre-wrap break-all">{{ t.content }}</dd>
               <template v-if="t.note">
@@ -104,7 +120,7 @@
           </Button>
         </div>
       </div>
-      <div class="flex items-center gap-3">
+      <div class="flex items-center flex-wrap justify-end gap-x-3 gap-y-2 shrink-0">
         <label class="flex items-center gap-1.5 text-xs text-slate-500 select-none cursor-pointer">
           <Switch v-model="autoRefresh" size="small" />
           自动刷新
@@ -415,15 +431,29 @@ const targetTypeOptions = [
   { key: 'friend', label: '好友' },
 ]
 
-// 定时任务表格列定义（Table 组件）
-const clockColumns = [
-  { title: '任务', dataIndex: 'title' },
-  { title: '目标', dataIndex: 'target_id', width: '16%' },
-  { title: 'Cron', dataIndex: 'cron', width: '14%' },
-  { title: '下次执行', dataIndex: 'next_run_at', width: '17%' },
-  { title: '上次执行', dataIndex: 'last_run_at', width: '17%' },
-  { title: '启用', dataIndex: 'enabled', width: '10%' },
-]
+// 定时任务表格列定义（Table 组件）。
+// 窄屏只保留三列（任务 / 下次执行 / 启用），其余信息在展开详情里查看，避免六列在手机上互相挤压。
+const compactTable = ref(window.matchMedia('(max-width: 1279px)').matches)
+let layoutMq = null
+function onLayoutChange(e) {
+  compactTable.value = e.matches
+}
+const clockColumns = computed(() =>
+  compactTable.value
+    ? [
+        { title: '任务', dataIndex: 'title', width: '56%' },
+        { title: '下次执行', dataIndex: 'next_run_at', width: '30%' },
+        { title: '启用', dataIndex: 'enabled', width: '14%' },
+      ]
+    : [
+        { title: '任务', dataIndex: 'title', width: '34%' },
+        { title: '目标', dataIndex: 'target_id', width: '14%' },
+        { title: 'Cron', dataIndex: 'cron', width: '12%' },
+        { title: '下次执行', dataIndex: 'next_run_at', width: '16%' },
+        { title: '上次执行', dataIndex: 'last_run_at', width: '15%' },
+        { title: '启用', dataIndex: 'enabled', width: '9%' },
+      ],
+)
 
 const icons = {
   chevron: '<svg fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>',
@@ -679,6 +709,17 @@ function fmtTimeFull(t) {
   return d.toLocaleString('zh-CN', { hour12: false })
 }
 
+// 表格里的时间：去掉秒，给「下次执行 / 上次执行」列留出更多宽度（完整时间在 title 与详情里）。
+// 窄屏没有年份的上下文，进一步省略年份，避免 360px 宽度下被截断。
+function fmtTableTime(t) {
+  if (!t) return '—'
+  const d = new Date(t)
+  if (isNaN(d) || d.getFullYear() < 2000) return '—'
+  const p = (n) => String(n).padStart(2, '0')
+  const md = `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  return compactTable.value ? md : `${d.getFullYear()}/${md}`
+}
+
 function fmtDuration(ms) {
   if (!ms && ms !== 0) return '-'
   if (ms < 1000) return `${ms}ms`
@@ -806,6 +847,9 @@ function onVisible() {
 onMounted(() => {
   load()
   loadClocks()
+  layoutMq = window.matchMedia('(max-width: 1279px)')
+  compactTable.value = layoutMq.matches
+  layoutMq.addEventListener('change', onLayoutChange)
   timer = setInterval(() => {
     if (document.hidden) return
     if (autoRefresh.value) load()
@@ -823,6 +867,7 @@ onMounted(() => {
 onUnmounted(() => {
   clearInterval(timer)
   observer?.disconnect()
+  layoutMq?.removeEventListener('change', onLayoutChange)
   document.removeEventListener('visibilitychange', onVisible)
   document.removeEventListener('keydown', onKeydown)
 })
@@ -854,6 +899,14 @@ onUnmounted(() => {
 .form-input:disabled {
   background: rgb(244 244 245);
   color: rgb(161 161 170);
+}
+/* 定时任务表：固定布局让各列严格按百分比分配，标题列超长时省略而不是把表格撑宽 */
+:deep(.clock-table) {
+  table-layout: fixed;
+  width: 100%;
+}
+:deep(.clock-table .animal-table__cell) {
+  overflow-wrap: anywhere;
 }
 /* token 数值比标签稍深一档，配合千分位更易扫读 */
 .tokval {

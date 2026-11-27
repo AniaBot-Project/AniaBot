@@ -9,11 +9,20 @@
       <LoadingState text="正在加载扩展配置…" :rows="2" />
     </Card>
 
-    <div v-else class="flex flex-wrap items-start justify-between gap-2">
+    <div v-else class="flex flex-col lg:flex-row lg:items-start gap-3">
+      <div class="flex gap-2 justify-end shrink-0 lg:order-last">
+        <Button v-if="hasForm" type="default" size="small" @click="toggleRaw">
+          {{ rawMode ? '表单模式' : '源码模式 (JSON)' }}
+        </Button>
+        <Button v-if="!rawMode && hasForm && current !== 'prompt'" type="primary" size="small" :disabled="saving" @click="onSave">
+          {{ saving ? '保存中...' : '保存' }}
+        </Button>
+      </div>
+
       <Tabs
         :model-value="current"
         :items="tabItems"
-        class="flex-1 min-w-0"
+        class="w-full min-w-0 lg:flex-1"
         @update:modelValue="switchTab"
       >
         <template v-for="tab in tabs" :key="tab.name" #[tab.name]>
@@ -40,14 +49,14 @@
             <p class="text-xs text-slate-500">配置 AI 可调用的 MCP 服务器，修改保存后重启生效。</p>
 
             <Card v-for="(srv, i) in mcpServers" :key="i" style="padding: 0">
-              <div class="px-6 py-3.5 border-b border-white/50 flex items-center justify-between">
-                <h2 class="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                  <span class="w-2 h-2 rounded-full" :class="srv.name ? 'bg-[#34c759]' : 'bg-slate-300'" />
-                  {{ srv.name || `服务器 ${i + 1}` }}
+              <div class="px-4 sm:px-6 py-3.5 border-b border-white/50 flex items-center justify-between gap-2">
+                <h2 class="text-sm font-semibold text-slate-800 flex items-center gap-2 min-w-0">
+                  <span class="w-2 h-2 rounded-full shrink-0" :class="srv.name ? 'bg-[#34c759]' : 'bg-slate-300'" />
+                  <span class="truncate">{{ srv.name || `服务器 ${i + 1}` }}</span>
                 </h2>
-                <Button type="default" size="small" danger @click="mcpServers.splice(i, 1)">删除</Button>
+                <Button type="default" size="small" danger class="shrink-0" @click="mcpServers.splice(i, 1)">删除</Button>
               </div>
-              <div class="p-6 grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-5">
+              <div class="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-5">
                 <div>
                   <label :class="labelClass">名称 <span class="text-[#ff3b30]">*</span></label>
                   <Input v-model="srv.name" placeholder="如 weather" />
@@ -104,19 +113,19 @@
             <p class="text-xs text-slate-500">按群聊 / 好友覆盖 AI 的系统提示词，点击条目弹出编辑框，保存后立即生效（无需重启）。</p>
 
             <Card v-for="section in promptSections" :key="section.kind" style="padding: 0" class="overflow-hidden">
-              <div class="px-6 py-3.5 border-b border-white/50 flex items-center justify-between">
+              <div class="px-4 sm:px-6 py-3.5 border-b border-white/50 flex items-center justify-between gap-2">
                 <h2 class="text-sm font-semibold text-slate-800">
                   {{ section.title }}
                   <span class="ml-2 text-xs font-normal text-slate-400">{{ section.items.length }} 条</span>
                 </h2>
-                <Button type="text" size="small" @click="openPromptEditor(section.kind)">+ 添加</Button>
+                <Button type="text" size="small" class="shrink-0" @click="openPromptEditor(section.kind)">+ 添加</Button>
               </div>
-              <p v-if="section.items.length === 0" class="px-6 py-8 text-xs text-slate-400">{{ section.empty }}</p>
+              <p v-if="section.items.length === 0" class="px-4 sm:px-6 py-8 text-xs text-slate-400">{{ section.empty }}</p>
               <ul v-else class="divide-y divide-slate-100">
                 <li
                   v-for="(item, i) in section.items"
                   :key="i"
-                  class="px-5 py-3.5 flex items-start gap-4 cursor-pointer hover:bg-white/55 transition-colors"
+                  class="px-4 sm:px-5 py-3.5 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4 cursor-pointer hover:bg-white/55 transition-colors"
                   @click="openPromptEditor(section.kind, item, i)"
                 >
                   <div class="min-w-0 flex-1">
@@ -126,7 +135,7 @@
                     </div>
                     <p class="text-xs text-slate-500 leading-relaxed whitespace-pre-wrap break-all mt-1 line-clamp-2">{{ previewPrompt(item.prompt) }}</p>
                   </div>
-                  <div class="flex items-center gap-1 shrink-0">
+                  <div class="flex items-center gap-1 shrink-0 justify-end sm:justify-start">
                     <Button type="text" size="small" @click.stop="openPromptEditor(section.kind, item, i)">编辑</Button>
                     <Button type="default" size="small" danger @click.stop="deletePrompt(section.kind, i)">删除</Button>
                   </div>
@@ -138,15 +147,6 @@
           </template>
         </template>
       </Tabs>
-
-      <div class="flex gap-2">
-        <Button v-if="hasForm" type="default" size="small" @click="toggleRaw">
-          {{ rawMode ? '表单模式' : '源码模式 (JSON)' }}
-        </Button>
-        <Button v-if="!rawMode && hasForm && current !== 'prompt'" type="primary" size="small" :disabled="saving" @click="onSave">
-          {{ saving ? '保存中...' : '保存' }}
-        </Button>
-      </div>
     </div>
 
     <!-- Prompt 覆盖：新增 / 编辑弹窗 -->
@@ -217,18 +217,20 @@ const KvEditor = defineComponent({
     return () =>
       h('div', { class: 'space-y-2' }, [
         ...props.modelValue.map((row, i) =>
-          h('div', { class: 'flex items-center gap-2', key: i }, [
+          h('div', { class: 'flex flex-col gap-2 sm:flex-row sm:items-center', key: i }, [
             h(Input, {
               modelValue: row.k,
               placeholder: props.keyPlaceholder,
+              class: 'flex-1 min-w-0',
               'onUpdate:modelValue': (v) => update(i, 'k', v),
             }),
             h(Input, {
               modelValue: row.v,
               placeholder: props.valuePlaceholder,
+              class: 'flex-1 min-w-0',
               'onUpdate:modelValue': (v) => update(i, 'v', v),
             }),
-            h(Button, { type: 'default', size: 'small', danger: true, onClick: () => remove(i) }, {
+            h(Button, { type: 'default', size: 'small', danger: true, class: 'self-end sm:self-auto shrink-0', onClick: () => remove(i) }, {
               default: () => '删除',
             }),
           ])
@@ -638,3 +640,36 @@ function addServer() {
 
 onMounted(load)
 </script>
+
+<style scoped>
+/* 页签在手机上换行排列，不再被右侧操作按钮压成几个竖长块；操作栏已移到页签上方 */
+:deep(.animal-tabs) {
+  max-width: 100%;
+  min-width: 0;
+}
+:deep(.animal-tabs__list) {
+  flex-wrap: wrap;
+}
+:deep(.animal-tabs__item) {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: center;
+  white-space: nowrap;
+}
+:deep(.animal-tabs__content) {
+  min-width: 0;
+}
+@media (max-width: 767px) {
+  :deep(.animal-tabs__list) {
+    padding: 10px;
+    gap: 6px;
+  }
+  :deep(.animal-tabs__item) {
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+  :deep(.animal-tabs__content) {
+    padding: 12px;
+  }
+}
+</style>
