@@ -98,7 +98,7 @@ const (
 	msgEventMaxTimeoutSec = 86400
 )
 
-// msgEventTimeout 单条消息事件（如一次 AI 回复）的处理超时：取面板配置
+// msgEventTimeout 单条消息在插件链中的处理超时：取面板配置
 // bot.msg_event_timeout_sec，缺失/非法时兜底 MsgEventTimeout（5 分钟）。
 // 每次事件读取，配置在重启后随 viper 快照生效。
 func (ania *AniaBot) msgEventTimeout() time.Duration {
