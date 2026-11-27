@@ -563,8 +563,6 @@ func (p *AIChatPlugin) processChatBatch(ctx context.Context, b bot.Bot, id messa
 	// 平台历史消息工具（aitool）执行时经它登记拉取到的历史消息图片
 	imageReg := newImageRegistry()
 	ctx = context.WithValue(ctx, imageRegistryKey{}, imageReg)
-	// 主动发消息配额（send_message 工具）：随本次回合重置，防止长任务刷屏
-	ctx = withSendMessageBudget(ctx, sendMessageMaxPerTurn)
 	var msgFuncs llmtool.CallBackFuncs
 	if isGroup {
 		msgFuncs = MakeGroupCallback(b, id, lastMsg.Sender.UserId, batchSelfID(batch), p.Logger)

@@ -84,7 +84,7 @@ AI 可在对话中自主调用：
 | `local_image` | 读取宿主机本地图片（默认关闭） |
 | `screenshot` / `mouse_click` / `mousemove` / `mouse_scroll` / `keyboard_type` / `keyboard_press` / `active_window` / `list_windows` | 电脑操作：截图查看宿主机屏幕并控制鼠标键盘（默认关闭，仅 Windows 宿主机；可配合工具审批逐次确认） |
 | `todo_write` | 维护当前会话的任务清单，复杂多步任务逐项推进 |
-| `send_message` | 回合执行中主动给用户发一条消息（进度同步 / 中间结论），发送后继续执行、最终回复照常给出；每个回合最多 8 条 |
+| `send_message` | 回合执行中主动给用户发一条消息（关键节点的进度同步 / 中间结论），发送后继续执行、最终回复照常给出；不设条数上限，短任务或没有新进展时不必发送 |
 | `read_tool_output` | 读取因超长被落盘的工具结果（超过内联上限时完整内容自动落盘并回填预览 + handle；支持 offset/limit、关键词 pattern、from_end 读结尾） |
 
 联网搜索/浏览不再内置为工具，改由内置 `web` 技能 + CLI 提供（先 `skill_read` 读取用法，再用 `bash` 调用；需开启 bash 工具，并至少配置一个搜索平台的 Key：`DEEPSEEK_API_KEY` / `TAVILY_API_KEY` / `EXA_API_KEY` / `FIRECRAWL_API_KEY` / `JINA_API_KEY`，脚本会自动检测已配置的平台）。另有内置 `aniabot` 技能，让 AI 了解自身框架的配置、面板、指令与排障路径，可直接指导用户改配置。内置技能不可删除/禁用，外置技能可在面板「技能管理」页启用/禁用。

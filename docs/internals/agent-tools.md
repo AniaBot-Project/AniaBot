@@ -63,7 +63,7 @@ type SessionToolExecutor struct { // 会话层：每个会话独立
 | `CreateToolsWithMCP()` | 追加 MCP 工具（`mcpLazyLoad` 决定发现/加载模式或全量注册） |
 | `CreateToolsWithSkill()` | 追加 `skill_read` / `skill_reload` 工具与 SkillManager（同时加载内置技能） |
 
-另由 aichat 插件在会话层注册：`config_get`/`config_set`（配置中心读写，敏感字段掩码、仅注册键可写、重启生效——重启由管理员发送 `/reboot` 命令执行，AI 只负责引导）、`config_file_get`/`config_file_set`（扩展配置读写：`files.mcp_json`/`files.prompt_json`/`files.hooks_json`/`files.commands_json`，只校验 JSON 语法，hooks/commands/prompt 保存后数秒热生效、mcp 重启生效）、`mcp_list`/`mcp_add`/`mcp_remove`/`mcp_reconnect`（MCP 服务器自管理，写 `files.mcp_json` 持久化 + 运行时热注册/注销）、会话绑定的 clock/memory/knowledge/team/subagent 工具，以及主会话的 `send_message`（执行中主动发消息：发送走 `SendText` 语义，`|||` 拆分多条、群聊 @ 发起人、合并转发等与普通回复一致，每个回合最多 8 条）、`task_handoff`（后台交接）、`goal_create/update/status`（SQL + `goal.enable`）、`workflow_run`（`subagent.enable`）、`team_task_create/list/claim/complete`（任务存储可用）。其中配置修改类工具（`config_set`/`config_file_set`）执行前恒需管理员审批（与审批开关无关，请求者本人不能批准）。
+另由 aichat 插件在会话层注册：`config_get`/`config_set`（配置中心读写，敏感字段掩码、仅注册键可写、重启生效——重启由管理员发送 `/reboot` 命令执行，AI 只负责引导）、`config_file_get`/`config_file_set`（扩展配置读写：`files.mcp_json`/`files.prompt_json`/`files.hooks_json`/`files.commands_json`，只校验 JSON 语法，hooks/commands/prompt 保存后数秒热生效、mcp 重启生效）、`mcp_list`/`mcp_add`/`mcp_remove`/`mcp_reconnect`（MCP 服务器自管理，写 `files.mcp_json` 持久化 + 运行时热注册/注销）、会话绑定的 clock/memory/knowledge/team/subagent 工具，以及主会话的 `send_message`（执行中主动发消息：发送走 `SendText` 语义，`|||` 拆分多条、群聊 @ 发起人、合并转发等与普通回复一致；不做条数限制，靠工具描述约束发送时机——只同步关键节点、不逐步汇报、不能代替最终回复）、`task_handoff`（后台交接）、`goal_create/update/status`（SQL + `goal.enable`）、`workflow_run`（`subagent.enable`）、`team_task_create/list/claim/complete`（任务存储可用）。其中配置修改类工具（`config_set`/`config_file_set`）执行前恒需管理员审批（与审批开关无关，请求者本人不能批准）。
 
 ### 回调桥（CallBackFuncs）
 
@@ -209,7 +209,7 @@ AI 消息入口不再在框架事件 goroutine 里跑完整个回合（`runner.g
 - **图片可加载**：插话消息中的图片登记到本轮请求的图片注册表，`load_images` 可按哈希加载。
 - **Query 日志可审计**：注入的插话在注入时追加到本次 Query 日志的 `Query` 字段（原始输入保留，每段以 `【处理中插话】` 开头、带发送者前缀；经 `Logger.Update` 增量落盘，与工具明细的增量写互不覆盖），面板「Query 日志」、导出 JSON 与关键词筛选都能看到。
 - **前缀归属**：`ChatOptions.Steer` 的契约是「回调返回的文本原样作为 user 消息追加」，编排层不再追加 `[追加指令]` 前缀——子代理 steering 的 `[追加指令]` 由 `subagent.go` 的 `steerDrain` 自己加，主会话插话加 `【用户插话】`/`【后台消息】`。
-- **`send_message`**：主会话工具（`sendtool.go`，`getChat` 注册），参数 `text`，经既有 `SendText` 回调发送，因此 `|||` 拆分多条、群聊 @ 发起人、合并转发阈值等语义与普通回复一致；每个回合最多 8 条，超出返回错误结果；发送后 AI 必须继续执行并照常给出最终回复。不注册给子代理、定时任务与面板试聊室，计划模式不拦截（不是副作用操作）。
+- **`send_message`**：主会话工具（`sendtool.go`，`getChat` 注册），参数 `text`，经既有 `SendText` 回调发送，因此 `|||` 拆分多条、群聊 @ 发起人、合并转发阈值等语义与普通回复一致；不做条数限制（长任务关键节点该同步就同步），发送时机由工具描述约束：只发有信息量的进展、不逐步汇报、不能代替最终回复；发送后 AI 必须继续执行并照常给出最终回复。不注册给子代理、定时任务与面板试聊室，计划模式不拦截（不是副作用操作）。
 
 ## 子代理（subagent）
 

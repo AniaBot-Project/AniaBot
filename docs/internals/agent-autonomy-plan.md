@@ -1,6 +1,6 @@
 # AI 引擎自主性升级方案（设计提案）
 
-> **状态**：**P0+P1+P2 的已实现项已完成**（分支 `feat/agent-autonomy`，P2 落地见提交 `88b560a`）。P2 中仍未实现：**Session fork / 任务级 session 历史**（当前 `/resume` 用主会话续接，不是 fork）、**交付物 `present` / 文件附件主动推送**。已实现的 P2 能力有几处刻意简化，文档按实际口径记录：goal 的 `blocked` 语义简化（没有 DSH「同一阻塞条件连续 ≥3 轮」的门槛，AI 说明原因即可）；子代理 steering 是「下一次 LLM 请求前注入」，不是 DSH 的完整 inbox/消息队列；主会话的运行中插话同样采用「下一次 LLM 请求前注入」（`【用户插话】`/`【后台消息】` 前缀），并已落地 `send_message` 让 AI 在回合执行中主动发消息（每个回合最多 8 条）；子代理没有独立会话历史落库。实现细节以代码与 `AGENTS.md` 为准；本文保留设计背景与取舍，第 10 节待决策问题已按最终决策就地标注。Goal 续跑配置节已在 P2 重新加入（`plugin.ai_chat_bot.goal.*`，默认开启、`max_rounds=64`）。
+> **状态**：**P0+P1+P2 的已实现项已完成**（分支 `feat/agent-autonomy`，P2 落地见提交 `88b560a`）。P2 中仍未实现：**Session fork / 任务级 session 历史**（当前 `/resume` 用主会话续接，不是 fork）、**交付物 `present` / 文件附件主动推送**。已实现的 P2 能力有几处刻意简化，文档按实际口径记录：goal 的 `blocked` 语义简化（没有 DSH「同一阻塞条件连续 ≥3 轮」的门槛，AI 说明原因即可）；子代理 steering 是「下一次 LLM 请求前注入」，不是 DSH 的完整 inbox/消息队列；主会话的运行中插话同样采用「下一次 LLM 请求前注入」（`【用户插话】`/`【后台消息】` 前缀），并已落地 `send_message` 让 AI 在回合执行中主动发消息（不做条数限制，靠工具描述约束只在关键节点发送）；子代理没有独立会话历史落库。实现细节以代码与 `AGENTS.md` 为准；本文保留设计背景与取舍，第 10 节待决策问题已按最终决策就地标注。Goal 续跑配置节已在 P2 重新加入（`plugin.ai_chat_bot.goal.*`，默认开启、`max_rounds=64`）。
 > **范围**：`bot/component/aichat`、`bot/plugins/pluginaichat`、`bot/core` 的事件预算、子代理/任务编排、提示词与面板。
 > **参考实现**：DeepSeek Harness（`E:\repo\deepseek-harness`）与 super-agent 原型（`E:\repo\dsh-superagent-prototype`），下称 DSH / 原型。
 

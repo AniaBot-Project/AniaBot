@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/jeanhua/AniaBot/bot/component/llmtool"
 )
@@ -16,16 +15,14 @@ import (
 // 工具显式发送；send_message 就是它在会话工具层的薄封装，因此天然支持 |||
 // 拆分多条、群聊 @ 发起人、合并转发等既有发送语义。
 //
+// 不做条数限制：长任务可能跨很多轮工具循环，关键节点该同步就得同步，卡一个
+// 数字反而让模型在真正需要时发不出消息。防刷屏交给工具描述里的语义约束
+// （只发有信息量的节点、不要逐步汇报、不能代替最终回复），由模型自行判断。
+//
 // 仅注册到主会话（getChat）：子代理的 SendText 被替换为丢弃（结果经工具结果
 // 回灌主 AI），定时任务只统一推送最终回复，它们注册该工具没有意义。
 
-const (
-	sendMessageToolName = "send_message"
-	// sendMessageMaxPerTurn 单次回合（一批请求，含其中多轮工具循环）内主动发
-	// 消息的条数上限：防止长任务里频繁发送刷屏。按批次（processChatBatch →
-	// chat.Chat）重置，经请求 ctx 传递。
-	sendMessageMaxPerTurn = 8
-)
+const sendMessageToolName = "send_message"
 
 // sendMessageParams send_message 工具参数。
 type sendMessageParams struct {
@@ -37,15 +34,16 @@ type sendMessageTool struct {
 	llmtool.BaseTool[sendMessageParams]
 }
 
-// newSendMessageTool 创建主会话的 send_message 工具。
+// newSendMessageTool 创建主会话的 send_message 工具。工具描述即发送时机语义：
+// 适合关键节点与实质进展，不适合逐步汇报或替代最终回复。
 func newSendMessageTool() llmtool.Tool {
 	return &sendMessageTool{BaseTool: llmtool.MakeBaseTool(sendMessageToolName,
-		"在当前回合执行过程中立刻给用户发送一条消息（进度同步、中间结论、或先回答简单问题）。发送后你仍必须继续完成当前任务，并在回合结束时给出最终回复；不要用它代替最终回复，短任务也不需要，避免刷屏。群聊中会自动 @ 发起本次请求的用户。每个回合最多发送 8 条",
+		"在当前回合执行过程中立刻给用户发送一条消息，用于同步进展或先给出部分结论。适合：长任务的关键节点（已排查清楚问题、完成一个阶段、开始耗时操作）、用户明显在等且有实质进展、或用户顺带问了可以先回答的简单问题。发送后你必须继续完成当前任务，并在回合结束时给出最终回复。不要把每个工具调用都汇报一遍，不要用中途消息代替最终回复，没有新进展不要重复发送；短任务直接给最终回复即可。群聊中会自动 @ 发起本次请求的用户。",
 		sendMessageParams{})}
 }
 
-// Execute 发送一条中途消息。预算耗尽、空文本或平台不支持时返回错误文本给模型
-// （工具错误会回填为工具结果，模型可据此调整）。
+// Execute 发送一条中途消息。空文本或平台不支持时返回错误文本给模型（工具错误
+// 会回填为工具结果，模型可据此调整）。发送不依赖请求级状态，不查任何配额。
 func (t *sendMessageTool) Execute(ctx context.Context, params any, callbacks llmtool.CallBackFuncs) (string, error) {
 	p, _ := params.(*sendMessageParams)
 	if p == nil {
@@ -58,43 +56,8 @@ func (t *sendMessageTool) Execute(ctx context.Context, params any, callbacks llm
 	if callbacks.SendText == nil {
 		return "", fmt.Errorf("当前会话不支持主动发送消息")
 	}
-	if budget, ok := ctx.Value(sendMessageBudgetKey{}).(*sendMessageBudget); ok {
-		if !budget.take() {
-			return "", fmt.Errorf("本次回合的主动消息条数已达上限（%d 条），请继续执行并直接给出最终回复，下一回合再发送", sendMessageMaxPerTurn)
-		}
-	}
 	if _, err := callbacks.SendText(text); err != nil {
 		return "", fmt.Errorf("发送失败: %w", err)
 	}
 	return "发送成功。注意：这是回合中途的主动消息，请继续完成当前任务，最终回复仍需在回合结束时给出", nil
-}
-
-// ---- 单次回合内的主动消息配额（经请求 ctx 传递） ----
-
-// sendMessageBudgetKey 请求 ctx 中挂 sendMessageBudget 的键。
-type sendMessageBudgetKey struct{}
-
-// sendMessageBudget 单次回合内剩余可发送条数（工具批次并行执行，需加锁）。
-type sendMessageBudget struct {
-	mu   sync.Mutex
-	left int
-}
-
-// withSendMessageBudget 给本次请求挂上主动消息配额；n<=0 时不挂（不加限制）。
-func withSendMessageBudget(ctx context.Context, n int) context.Context {
-	if n <= 0 {
-		return ctx
-	}
-	return context.WithValue(ctx, sendMessageBudgetKey{}, &sendMessageBudget{left: n})
-}
-
-// take 消耗一个配额；返回 false 表示已用完。
-func (b *sendMessageBudget) take() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.left <= 0 {
-		return false
-	}
-	b.left--
-	return true
 }

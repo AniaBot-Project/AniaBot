@@ -736,7 +736,8 @@ Registration hierarchy:
    enabled — `skill_*` management (`skill_tool.enable`) and `mcp_*` management
    (`mcp_tool.enable`, persists to `files.mcp_json` and hot-registers/unregisters). Main sessions
    additionally get `todo_write` (`todo.enable`), `send_message` (mid-turn proactive message to
-   the user; max 8 per turn, keeps working afterwards and still gives the final reply),
+   the user at real progress milestones; no per-turn cap — the tool description sets the semantics:
+   sync milestones only, never replace the final reply — and it keeps working afterwards),
    `subagent_run/list/send/cancel`, `task_handoff`, `team_run/create/list/delete` (the first two
    only when `subagent.enable=true`), `goal_create/update/status` (SQL + `goal.enable`),
    `workflow_run` (`subagent.enable`), and `team_task_create/list/claim/complete` (task store
@@ -869,6 +870,8 @@ segments and `Keyboard(rows ...[]message.InlineButton)`.
 - **Changelog**: only behavior changes relative to a released version go into `CHANGELOG.md`
   (features, fixes, behavior changes; no trivial tweaks, no bugs introduced+fixed within the same
   unreleased version). One concise sentence per entry under the unreleased/next version section.
+  State the change directly — no "not X but Y" / "rather than" contrast, and no rationale or
+  trade-off discussion.
 - **Tests**: table-driven; extract pure logic; `-race` when touching shared state; degradation
   paths (SQL probe failure, missing config, nil managers) must be tested or at least nil-checked.
 
