@@ -40,18 +40,23 @@
       </div>
       <div class="nav-divider mx-4" />
 
-      <nav class="flex-1 px-2.5 py-3 space-y-0.5 overflow-y-auto">
-        <RouterLink
-          v-for="item in navItems"
-          :key="item.to"
-          :to="item.to"
-          class="group relative flex items-center gap-3 px-3 h-10 rounded-xl text-[13px] font-semibold border-2 border-transparent transition-all duration-150"
-          :class="$route.path === item.to ? 'nav-active' : 'nav-link'"
-        >
-          <span v-html="item.icon" class="shrink-0 [&>svg]:w-[18px] [&>svg]:h-[18px]" />
-          {{ item.label }}
-          <span v-if="$route.path === item.to" class="nav-active-dot ml-auto" />
-        </RouterLink>
+      <nav class="flex-1 px-2.5 py-3 overflow-y-auto">
+        <div v-for="group in navGroups" :key="group.label" class="nav-group">
+          <div class="nav-group-label">{{ group.label }}</div>
+          <div class="space-y-0.5">
+            <RouterLink
+              v-for="item in group.items"
+              :key="item.to"
+              :to="item.to"
+              class="group relative flex items-center gap-3 px-3 h-9 rounded-xl text-[13px] font-semibold border-2 border-transparent transition-all duration-150"
+              :class="isNavActive(item) ? 'nav-active' : 'nav-link'"
+            >
+              <span v-html="item.icon" class="shrink-0 [&>svg]:w-[17px] [&>svg]:h-[17px]" />
+              {{ item.label }}
+              <span v-if="isNavActive(item)" class="nav-active-dot ml-auto" />
+            </RouterLink>
+          </div>
+        </div>
       </nav>
 
       <div class="nav-footer px-4 py-4 flex items-center justify-between">
@@ -135,7 +140,7 @@
 <script setup>
 import { confirmAction } from './ui/confirm'
 import { onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Button, Input, Modal, Notification, NotificationContainer, Tag } from 'animal-island-vue'
 import { api, auth } from './api.js'
 import ConfirmDialog from './ui/ConfirmDialog.vue'
@@ -143,6 +148,7 @@ import Login from './views/Login.vue'
 import Wizard from './views/Wizard.vue'
 
 const router = useRouter()
+const route = useRoute()
 
 // 演示模式标记：正式构建中为静态 false，徽章不渲染
 const isDemo = import.meta.env.MODE === 'demo'
@@ -178,29 +184,57 @@ const icons = {
   logout: '<svg fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"/></svg>',
 }
 
-const navItems = [
-  { to: '/', label: '状态总览', icon: icons.dashboard },
-  { to: '/console', label: '控制台日志', icon: icons.terminal },
-  { to: '/oplogs', label: '操作日志', icon: icons.audit },
-  { to: '/msglogs', label: '消息日志', icon: icons.chat },
-  { to: '/chatconsole', label: '试聊室', icon: icons.trychat },
-  { to: '/contexts', label: '上下文管理', icon: icons.context },
-  { to: '/querylogs', label: 'Query 日志', icon: icons.query },
-  { to: '/tokenstats', label: 'Token 统计', icon: icons.chart },
-  { to: '/quota', label: '配额管理', icon: icons.gauge },
-  { to: '/tasklogs', label: '定时任务', icon: icons.task },
-  { to: '/agent-tasks', label: '后台任务', icon: icons.agenttask },
-  { to: '/skills', label: '技能管理', icon: icons.skills },
-  { to: '/memory', label: '记忆管理', icon: icons.memory },
-  { to: '/knowledge', label: '知识库', icon: icons.book },
-  { to: '/team', label: 'Agent 团队', icon: icons.team },
-  { to: '/config', label: '配置管理', icon: icons.config },
-  { to: '/files', label: '扩展配置', icon: icons.files },
-  { to: '/contacts', label: '通讯录', icon: icons.contacts },
-  { to: '/marketplace', label: '插件市场', icon: icons.store },
-  { to: '/update', label: '自动更新', icon: icons.update },
-  { to: '/appearance', label: '外观设置', icon: icons.palette },
+// 侧边栏导航：按用途分组，一个分组入口对应一组页面。
+// 合并页（消息与操作日志 / AI 运行记录 / Token 用量 / 记忆与知识库 / 配置管理）
+// 在页内用 PageTabs 切分页签，侧边栏只留一个入口；match 列出该入口覆盖的全部路由，
+// 保证切到组内任一页签时侧边栏仍高亮当前分组。
+const navGroups = [
+  {
+    label: '总览',
+    items: [
+      { to: '/', label: '状态总览', icon: icons.dashboard },
+      { to: '/tokenstats', label: 'Token 用量', icon: icons.chart, match: ['/tokenstats', '/quota'] },
+    ],
+  },
+  {
+    label: '对话',
+    items: [
+      { to: '/chatconsole', label: '试聊室', icon: icons.trychat },
+      { to: '/contexts', label: '会话上下文', icon: icons.context },
+    ],
+  },
+  {
+    label: '日志',
+    items: [
+      { to: '/console', label: '控制台日志', icon: icons.terminal },
+      { to: '/msglogs', label: '消息与操作日志', icon: icons.chat, match: ['/msglogs', '/oplogs'] },
+      { to: '/querylogs', label: 'AI 运行记录', icon: icons.query, match: ['/querylogs', '/agent-tasks'] },
+    ],
+  },
+  {
+    label: 'AI 能力',
+    items: [
+      { to: '/tasklogs', label: 'AI 定时任务', icon: icons.task },
+      { to: '/memory', label: '记忆与知识库', icon: icons.memory, match: ['/memory', '/knowledge'] },
+      { to: '/skills', label: '技能管理', icon: icons.skills },
+      { to: '/team', label: 'Agent 团队', icon: icons.team },
+    ],
+  },
+  {
+    label: '系统',
+    items: [
+      { to: '/config', label: '配置管理', icon: icons.config, match: ['/config', '/files'] },
+      { to: '/contacts', label: '通讯录', icon: icons.contacts },
+      { to: '/marketplace', label: '插件市场', icon: icons.store },
+      { to: '/update', label: '自动更新', icon: icons.update },
+    ],
+  },
 ]
+
+// 当前路由是否属于该入口（合并页按其 match 列表判断）
+function isNavActive(item) {
+  return (item.match || [item.to]).includes(route.path)
+}
 
 const showPwd = ref(false)
 const pwdForm = reactive({ next: '', msg: '', ok: false })
@@ -310,6 +344,21 @@ async function onChangePwd() {
   height: 2px;
   border-radius: 999px;
   background: var(--sidebar-divider);
+}
+
+/* 导航分组标题：小号字距标签，弱化到「分隔」层级，不抢选中项的视觉 */
+.nav-group-label {
+  padding: 10px 12px 4px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.4;
+  letter-spacing: 0.16em;
+  color: var(--sidebar-ink);
+  opacity: 0.6;
+  user-select: none;
+}
+.nav-group:first-child .nav-group-label {
+  padding-top: 2px;
 }
 
 /* 顶部工具栏：纸张色贴纸条 */

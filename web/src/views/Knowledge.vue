@@ -1,5 +1,7 @@
 <template>
   <div class="space-y-4">
+    <PageTabs :tabs="MEMORY_TABS" />
+
     <!-- 操作栏 -->
     <div class="flex items-center justify-between flex-wrap gap-3">
       <div class="text-xs text-slate-500">
@@ -185,6 +187,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { Button, Card, Input, Modal, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
 import LoadingState from '../components/LoadingState.vue'
+import PageTabs from '../components/PageTabs.vue'
+import { MEMORY_TABS } from '../navTabs.js'
 
 const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow'
 

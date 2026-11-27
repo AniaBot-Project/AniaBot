@@ -197,7 +197,7 @@ AI 消息入口不再在框架事件 goroutine 里跑完整个回合（`runner.g
 - **重启恢复**：启动时 `MarkInterrupted` 把残留的 `queued/running/waiting` 标记为 `interrupted`；默认不自动续跑，用户发 `/resume <任务ID>` 把本会话的 `interrupted` 子代理/交接任务重新入队（任务目标作为系统来源消息），由主 AI 带着会话历史继续。
 - **清理**：按 `task.retention_days`（默认 7 天）每 6 小时删除已结束且过期的任务记录。
 - **用户命令**：`/tasks`（本会话运行中子代理 + 最近后台任务 + 最近回合，含状态/耗时/类型/停止原因/token）、`/stop`（取消当前回合并清空本会话排队、暂停自动续跑目标）、`/stop <任务ID 或名字>`（只取消指定后台子代理）、`/resume <任务ID>`、`/goal [status|pause|resume|clear]`。
-- **面板**：`taskpanel.go` 实现 `adminpanel.TaskSource` / `TaskAdminSource` / `GoalSource`：展示最近后台任务（`GET /api/agent-tasks`，默认 100 条、上限 500；返回 `parent_id` 与 `prompt`）与 active 目标（`GET /api/agent-goals`），对应面板「后台任务」页；`AgentTasksExport` / `AgentTasksClear` 支撑 `GET /api/agent-tasks/export`（按状态/类型/关键词导出全部命中记录）与 `DELETE /api/agent-tasks`（只清除已结束行，运行中/排队中保留），对应页面右上角的导出/清除按钮。`AgentTasks` 的 SQL 用 `kind <> 'turn'` 排除升级前的历史回合行（普通回合的完整过程在 Query 日志），并支持 `?task=` 深链定位。团队运行（`team_run` 父记录）、团队成员（`team_member` 子记录）与异步子代理的详情里可直接看到任务指令、成员产出摘要与工具调用步骤（`meta.tool_calls`；参数/结果完整保存、不截断，与 Query 日志同口径，明细也不限条数）；工具步骤在执行中即按约 3 秒节流增量落盘（`taskStore.UpdateProgress` 只改 `meta`/`updated_at`，`finished_at = 0` 保证迟到的进度写不会覆盖终态），面板轮询即可看到进度，收尾时再写全量。任务行点击弹出详情窗（与 Query 日志一致，避免就地展开占高度），Query 日志详情里的 `task_id` 可跳回本页。
+- **面板**：`taskpanel.go` 实现 `adminpanel.TaskSource` / `TaskAdminSource` / `GoalSource`：展示最近后台任务（`GET /api/agent-tasks`，默认 100 条、上限 500；返回 `parent_id` 与 `prompt`）与 active 目标（`GET /api/agent-goals`），对应面板「AI 运行记录 → 后台任务」页签；`AgentTasksExport` / `AgentTasksClear` 支撑 `GET /api/agent-tasks/export`（按状态/类型/关键词导出全部命中记录）与 `DELETE /api/agent-tasks`（只清除已结束行，运行中/排队中保留），对应页面右上角的导出/清除按钮。`AgentTasks` 的 SQL 用 `kind <> 'turn'` 排除升级前的历史回合行（普通回合的完整过程在 Query 日志），并支持 `?task=` 深链定位。团队运行（`team_run` 父记录）、团队成员（`team_member` 子记录）与异步子代理的详情里可直接看到任务指令、成员产出摘要与工具调用步骤（`meta.tool_calls`；参数/结果完整保存、不截断，与 Query 日志同口径，明细也不限条数）；工具步骤在执行中即按约 3 秒节流增量落盘（`taskStore.UpdateProgress` 只改 `meta`/`updated_at`，`finished_at = 0` 保证迟到的进度写不会覆盖终态），面板轮询即可看到进度，收尾时再写全量。任务行点击弹出详情窗（与 Query 日志一致，避免就地展开占高度），Query 日志详情里的 `task_id` 可跳回本页。
 
 ### 运行中插话（next-step 注入）与 send_message
 
@@ -207,7 +207,7 @@ AI 消息入口不再在框架事件 goroutine 里跑完整个回合（`runner.g
 - **逐条注入、同批下发**：一次排空到的多条消息（无论来自同一人还是不同人）按到达顺序**逐条**作为独立 user 消息注入，各自保留【用户插话】/【后台消息】前缀与发送者信息，不会先拼成一条长文本（便于模型区分谁说了什么、也便于历史追溯）；但它们在同一次「下一次 LLM 请求前」一起进入上下文，不会为每条消息单独触发一次模型请求。
 - **剩余消息是下一批**：注入只发生在两次模型请求之间；最后一批 LLM 请求开始后才到达的消息留在队列里，由同一会话运行器在本批结束后作为**下一批**处理（正常路径不丢失、不重复消费）。`/stop`、取消与错误路径维持旧行为：清空待处理队列。`#新对话` 属于批次级语义（整批开始前清空历史）不能在回合中途执行，遇到时连同其后的消息一起放回队列、留到下一批处理。消息**到达时**（`submitTurn`）即先停止该会话运行中的异步子代理/工作流与 `team_run` 成员（`stopSessionBackground`），批次开始时再兜底停一次，避免旧后台任务的结果回灌进新对话；进行中的长任务目标也会被暂停（`/goal resume` 可恢复），否则回合结束后会立刻自动续跑旧目标。历史清空、动态 MCP 工具卸载、落盘结果删除与会话 token 换新仍在批次开始时执行。
 - **图片可加载**：插话消息中的图片登记到本轮请求的图片注册表，`load_images` 可按哈希加载。
-- **Query 日志可审计**：注入的插话在注入时追加到本次 Query 日志的 `Query` 字段（原始输入保留，每段以 `【处理中插话】` 开头、带发送者前缀；经 `Logger.Update` 增量落盘，与工具明细的增量写互不覆盖），面板「Query 日志」、导出 JSON 与关键词筛选都能看到。
+- **Query 日志可审计**：注入的插话在注入时追加到本次 Query 日志的 `Query` 字段（原始输入保留，每段以 `【处理中插话】` 开头、带发送者前缀；经 `Logger.Update` 增量落盘，与工具明细的增量写互不覆盖），面板「AI 运行记录 → 对话记录」、导出 JSON 与关键词筛选都能看到。
 - **前缀归属**：`ChatOptions.Steer` 的契约是「回调返回的文本原样作为 user 消息追加」，编排层不再追加 `[追加指令]` 前缀——子代理 steering 的 `[追加指令]` 由 `subagent.go` 的 `steerDrain` 自己加，主会话插话加 `【用户插话】`/`【后台消息】`。
 - **`send_message`**：主会话工具（`sendtool.go`，`getChat` 注册），参数 `text`，经既有 `SendText` 回调发送，因此 `|||` 拆分多条、群聊 @ 发起人、合并转发阈值等语义与普通回复一致；不做条数限制（长任务关键节点该同步就同步），发送时机由工具描述约束：只发有信息量的进展、不逐步汇报、不能代替最终回复；发送后 AI 必须继续执行并照常给出最终回复。不注册给子代理、定时任务与面板试聊室，计划模式不拦截（不是副作用操作）。
 
@@ -283,7 +283,7 @@ clock 任务里注册的是**异步**子代理变体（`clocksubagent.go`）：�
 - 团队按 scope（`g:` / `f:` / 全局 `global`）隔离，`team:` 命名空间 KV 存取；团队名严格校验（中文/字母/数字/下划线/连字符）
 - `team_run` 让多个成员**并行**执行（上限 `teamMaxMembers`=5，防并发风暴），每个成员复用 `runSubagentWithOptions` 并只传角色提示词——模型与执行参数（超时/轮数）全部与普通子代理一致（即跟随主模型）
 - 成员结果汇总返回主 AI；团队定义可保存复用（`team_create/list/delete`），面板提供管理页
-- **运行记录**：每次 `team_run` 写一条 `kind=team_run` 父记录（总体任务、汇总报告、成员合计 token/耗时、成员摘要），每个成员写一条 `kind=team_member` 子记录（`parent_id` 指向父记录，含任务指令、成员产出、状态、耗时与工具调用步骤；执行中按约 3 秒增量刷新），面板「后台任务」页点击行可查看；taskStore 不可用时整体降级为不记录
+- **运行记录**：每次 `team_run` 写一条 `kind=team_run` 父记录（总体任务、汇总报告、成员合计 token/耗时、成员摘要），每个成员写一条 `kind=team_member` 子记录（`parent_id` 指向父记录，含任务指令、成员产出、状态、耗时与工具调用步骤；执行中按约 3 秒增量刷新），面板「AI 运行记录 → 后台任务」页签点击行可查看；taskStore 不可用时整体降级为不记录
 - 团队成员的一次性会话不注册团队工具（防递归组建团队）
 
 ## 知识库（knowledge）
@@ -300,13 +300,13 @@ clock 任务里注册的是**异步**子代理变体（`clocksubagent.go`）：�
 
 - **quotaManager**：按「每会话每日」+「全局每日」两个维度限制 token 消耗，键 `daily:<日期>:<会话key>` 天然按天过期；Check-Add 为宽松语义（非硬实时），面板可查看用量
 - **usageAcc**：goroutine 安全的派生用量累加器，归集主循环之外的消耗（异步子代理、team 成员、备用识图），收尾并入统计与配额
-- **Query 日志**：一次「触发 → 最终响应」的完整记录（`ania_query_log` 行级），含用户输入、发送者、工具调用明细（工具结果记录统一长度治理后的文本，超长结果以预览 + handle 落盘）、token、状态（running/success/skipped/stopped/timeout/error），日志不淘汰，面板「Query 日志」页按条件筛选并支持导出/清除；主动互动的执行同样落在这里（`kind=proactive`，以触发说明替代用户输入，保持安静时状态为 skipped 并在 note 记录原因），Token 统计按来源单列。发送者列表忽略合成消息（`qq:0`，如子代理完成通知），整批都是合成消息时回退为会话目标 ID。普通对话回合回填 `stop_reason`（completed/aborted/max_tokens/error/watchdog/timeout/user_stop）；`task_id` 为历史关联字段（普通回合已不再写任务表，新记录为空），面板详情可跳转「后台任务」页，并支持 `GET /api/querylogs?task_id=…` 过滤。两列在老库上通过幂等迁移（SQLite PRAGMA / MySQL information_schema 探测后 ALTER）补出
+- **Query 日志**：一次「触发 → 最终响应」的完整记录（`ania_query_log` 行级），含用户输入、发送者、工具调用明细（工具结果记录统一长度治理后的文本，超长结果以预览 + handle 落盘）、token、状态（running/success/skipped/stopped/timeout/error），日志不淘汰，面板「AI 运行记录 → 对话记录」页签按条件筛选并支持导出/清除；主动互动的执行同样落在这里（`kind=proactive`，以触发说明替代用户输入，保持安静时状态为 skipped 并在 note 记录原因），Token 统计按来源单列。发送者列表忽略合成消息（`qq:0`，如子代理完成通知），整批都是合成消息时回退为会话目标 ID。普通对话回合回填 `stop_reason`（completed/aborted/max_tokens/error/watchdog/timeout/user_stop）；`task_id` 为历史关联字段（普通回合已不再写任务表，新记录为空），面板详情可跳转「AI 运行记录 → 后台任务」页签，并支持 `GET /api/querylogs?task_id=…` 过滤。两列在老库上通过幂等迁移（SQLite PRAGMA / MySQL information_schema 探测后 ALTER）补出
 
 ## 钩子系统（hooks）
 
 `bot/component/agenthook` 提供会话生命周期钩子，两种形态共存：
 
-- **Shell 钩子**（管理员配置）：面板「扩展配置」页编辑 `files.hooks_json`，在事件触发时执行配置的命令。载荷经 **stdin 以 JSON** 传入（`hook_event_name/session_id/agent_kind/tool_name/tool_input/tool_result/prompt`），退出码语义对齐 Claude Code：**0=通过**（stdout 作为上下文注入）、**2=阻断**（stderr 作为原因）、**其他=非阻断错误**（仅记日志）；超时（默认 10s，按条可覆盖，上限 60s）按非阻断错误处理
+- **Shell 钩子**（管理员配置）：面板「配置管理 → 扩展配置」编辑 `files.hooks_json`，在事件触发时执行配置的命令。载荷经 **stdin 以 JSON** 传入（`hook_event_name/session_id/agent_kind/tool_name/tool_input/tool_result/prompt`），退出码语义对齐 Claude Code：**0=通过**（stdout 作为上下文注入）、**2=阻断**（stderr 作为原因）、**其他=非阻断错误**（仅记日志）；超时（默认 10s，按条可覆盖，上限 60s）按非阻断错误处理
 - **Go 钩子**（插件开发者）：插件实现 `agenthook.Handler` 接口（`OnAgentHook(ctx, event, payload) Result`），core 在启动后收集所有实现者，经 `HandlerRegistry` 扇出注入 pluginaichat；Go 钩子先于 shell 钩子执行，panic 自动隔离
 
 事件一览：

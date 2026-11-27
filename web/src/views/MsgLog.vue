@@ -1,347 +1,350 @@
 <template>
-  <div class="msglog-shell" :class="{ 'chat-open': mobileChat }">
-    <!-- 左侧会话列表：按群聊 / 私聊 / 系统通知分类 -->
-    <aside class="conv-pane">
-      <div class="conv-head">
-        <div class="conv-heading">
-          <span class="conv-heading-title">消息会话</span>
-          <span class="conv-heading-count">{{ sessions.length }}</span>
-        </div>
-        <Input v-model="search" size="small" placeholder="搜索群 / 好友 / 消息" allow-clear class="conv-search">
-          <template #prefix><Icon name="Search" :size="13" /></template>
-        </Input>
-      </div>
-
-      <div class="conv-scroll">
-        <button type="button" class="conv-item" :class="{ active: isAll }" @click="selectSession('all')">
-          <div class="conv-avatar all-avatar"><Icon name="Chat" :size="18" /></div>
-          <div class="conv-main">
-            <div class="conv-row">
-              <span class="conv-name">全部消息</span>
-              <span class="conv-time">{{ allTime }}</span>
-            </div>
-            <div class="conv-row">
-              <span class="conv-preview">{{ allPreview }}</span>
-            </div>
+  <div class="msglog-page">
+    <PageTabs :tabs="LOG_TABS" class="mb-3" />
+    <div class="msglog-shell" :class="{ 'chat-open': mobileChat }">
+      <!-- 左侧会话列表：按群聊 / 私聊 / 系统通知分类 -->
+      <aside class="conv-pane">
+        <div class="conv-head">
+          <div class="conv-heading">
+            <span class="conv-heading-title">消息会话</span>
+            <span class="conv-heading-count">{{ sessions.length }}</span>
           </div>
-        </button>
-
-        <div v-if="loading && !sessions.length" class="conv-loading">加载会话中…</div>
-
-        <template v-else>
-          <section v-if="groups.length" class="conv-section">
-            <div class="conv-section-title">
-              <span>群聊</span>
-              <span class="conv-section-count">{{ groups.length }}</span>
-            </div>
-            <button
-              v-for="s in groups"
-              :key="s.key"
-              type="button"
-              class="conv-item"
-              :class="{ active: activeKey === s.key }"
-              @click="selectSession(s.key)"
-              @contextmenu.prevent="openSessionMenu($event, s)"
-            >
-              <div class="conv-avatar" :style="avatarGradient(sessionAvatarKey(s))">
-                <img
-                  v-if="sessionAvatarUrl(s) && !avatarBroken[s.key]"
-                  class="conv-avatar-img"
-                  :src="sessionAvatarUrl(s)"
-                  alt=""
-                  loading="lazy"
-                  referrerpolicy="no-referrer"
-                  @error="markAvatarBroken(s)"
-                />
-                <template v-else>{{ avatarInitials(sessionName(s)) }}</template>
-                <i v-if="isUnread(s)" class="unread-dot" />
-              </div>
-              <div class="conv-main">
-                <div class="conv-row">
-                  <span class="conv-name" :class="{ unread: isUnread(s) }">{{ sessionName(s) }}</span>
-                  <span class="conv-time">{{ sideTime(s.last_time) }}</span>
-                </div>
-                <div class="conv-row">
-                  <span class="conv-preview">{{ sessionPreview(s) }}</span>
-                  <span v-if="isUnread(s)" class="unread-mark">新</span>
-                </div>
-              </div>
-            </button>
-          </section>
-
-          <section v-if="friends.length" class="conv-section">
-            <div class="conv-section-title">
-              <span>私聊</span>
-              <span class="conv-section-count">{{ friends.length }}</span>
-            </div>
-            <button
-              v-for="s in friends"
-              :key="s.key"
-              type="button"
-              class="conv-item"
-              :class="{ active: activeKey === s.key }"
-              @click="selectSession(s.key)"
-              @contextmenu.prevent="openSessionMenu($event, s)"
-            >
-              <div class="conv-avatar" :style="avatarGradient(sessionAvatarKey(s))">
-                <img
-                  v-if="sessionAvatarUrl(s) && !avatarBroken[s.key]"
-                  class="conv-avatar-img"
-                  :src="sessionAvatarUrl(s)"
-                  alt=""
-                  loading="lazy"
-                  referrerpolicy="no-referrer"
-                  @error="markAvatarBroken(s)"
-                />
-                <template v-else>{{ avatarInitials(sessionName(s)) }}</template>
-                <i v-if="isUnread(s)" class="unread-dot" />
-              </div>
-              <div class="conv-main">
-                <div class="conv-row">
-                  <span class="conv-name" :class="{ unread: isUnread(s) }">{{ sessionName(s) }}</span>
-                  <span class="conv-time">{{ sideTime(s.last_time) }}</span>
-                </div>
-                <div class="conv-row">
-                  <span class="conv-preview">{{ sessionPreview(s) }}</span>
-                  <span v-if="isUnread(s)" class="unread-mark">新</span>
-                </div>
-              </div>
-            </button>
-          </section>
-
-          <section v-if="systems.length" class="conv-section">
-            <div class="conv-section-title">
-              <span>系统通知</span>
-              <span class="conv-section-count">{{ systems.length }}</span>
-            </div>
-            <button
-              v-for="s in systems"
-              :key="s.key"
-              type="button"
-              class="conv-item"
-              :class="{ active: activeKey === s.key }"
-              @click="selectSession(s.key)"
-              @contextmenu.prevent="openSessionMenu($event, s)"
-            >
-              <div class="conv-avatar system-avatar" :style="avatarGradient('system')">
-                <Icon name="Bell" :size="17" />
-                <i v-if="isUnread(s)" class="unread-dot" />
-              </div>
-              <div class="conv-main">
-                <div class="conv-row">
-                  <span class="conv-name" :class="{ unread: isUnread(s) }">{{ sessionName(s) }}</span>
-                  <span class="conv-time">{{ sideTime(s.last_time) }}</span>
-                </div>
-                <div class="conv-row">
-                  <span class="conv-preview">{{ sessionPreview(s) }}</span>
-                  <span v-if="isUnread(s)" class="unread-mark">新</span>
-                </div>
-              </div>
-            </button>
-          </section>
-
-          <div v-if="!sessions.length" class="conv-empty">
-            <span class="conv-empty-ico"><Icon name="Inbox" :size="22" /></span>
-            还没有任何会话
-            <small>Bot 收发消息或通知后会在这里出现</small>
-          </div>
-          <div v-else-if="!visibleSessions.length" class="conv-empty">
-            <span class="conv-empty-ico"><Icon name="Search" :size="20" /></span>
-            没有匹配「{{ search }}」的会话
-          </div>
-        </template>
-      </div>
-    </aside>
-
-    <!-- 右侧聊天视图 -->
-    <section class="chat-pane">
-      <header class="chat-head">
-        <button type="button" class="back-btn" title="返回会话列表" @click="mobileChat = false">
-          <Icon name="ChevronLeft" :size="18" />
-        </button>
-
-        <div v-if="isAll" class="head-avatar all-avatar"><Icon name="Chat" :size="19" /></div>
-        <div v-else class="head-avatar" :style="headAvatarStyle">
-          <img
-            v-if="headAvatarSrc && !avatarBroken[activeKey]"
-            class="head-avatar-img"
-            :src="headAvatarSrc"
-            alt=""
-            referrerpolicy="no-referrer"
-            @error="markAvatarBroken(activeSession)"
-          />
-          <template v-else>{{ headInitials }}</template>
+          <Input v-model="search" size="small" placeholder="搜索群 / 好友 / 消息" allow-clear class="conv-search">
+            <template #prefix><Icon name="Search" :size="13" /></template>
+          </Input>
         </div>
 
-        <div class="head-main">
-          <div class="head-title">{{ headName }}</div>
-          <div class="head-sub">{{ headSubtitle }}</div>
-        </div>
-
-        <div class="head-actions">
-          <div v-if="isAll" class="type-tabs">
-            <button
-              v-for="t in typeTabs"
-              :key="t.value"
-              type="button"
-              :class="{ active: typeFilter === t.value }"
-              @click="typeFilter = t.value"
-            >
-              {{ t.label }}
-            </button>
-          </div>
-          <label class="auto-refresh">
-            <Switch v-model="autoRefresh" size="small" />
-            <span>自动刷新</span>
-          </label>
-          <button type="button" class="icon-btn" title="立即刷新" @click="manualRefresh">
-            <Icon name="Refresh" :size="16" />
+        <div class="conv-scroll">
+          <button type="button" class="conv-item" :class="{ active: isAll }" @click="selectSession('all')">
+            <div class="conv-avatar all-avatar"><Icon name="Chat" :size="18" /></div>
+            <div class="conv-main">
+              <div class="conv-row">
+                <span class="conv-name">全部消息</span>
+                <span class="conv-time">{{ allTime }}</span>
+              </div>
+              <div class="conv-row">
+                <span class="conv-preview">{{ allPreview }}</span>
+              </div>
+            </div>
           </button>
-        </div>
-      </header>
 
-      <div class="chat-body">
-        <div ref="listEl" class="chat-scroll" @scroll.passive="onScroll">
-          <!-- 首次加载 / 切换会话：请求未返回前显示加载中，避免误判为没有消息 -->
-          <div v-if="viewLoading" class="chat-empty">
-            <span class="empty-spinner" />
-            <p>正在加载消息…</p>
-          </div>
+          <div v-if="loading && !sessions.length" class="conv-loading">加载会话中…</div>
 
-          <div v-else-if="viewError" class="chat-empty">
-            <span class="empty-ico"><Icon name="Chat" :size="30" /></span>
-            <p>消息加载失败</p>
-            <small>{{ viewError }}</small>
-            <Button type="text" size="small" @click="retryActive">重试</Button>
-          </div>
+          <template v-else>
+            <section v-if="groups.length" class="conv-section">
+              <div class="conv-section-title">
+                <span>群聊</span>
+                <span class="conv-section-count">{{ groups.length }}</span>
+              </div>
+              <button
+                v-for="s in groups"
+                :key="s.key"
+                type="button"
+                class="conv-item"
+                :class="{ active: activeKey === s.key }"
+                @click="selectSession(s.key)"
+                @contextmenu.prevent="openSessionMenu($event, s)"
+              >
+                <div class="conv-avatar" :style="avatarGradient(sessionAvatarKey(s))">
+                  <img
+                    v-if="sessionAvatarUrl(s) && !avatarBroken[s.key]"
+                    class="conv-avatar-img"
+                    :src="sessionAvatarUrl(s)"
+                    alt=""
+                    loading="lazy"
+                    referrerpolicy="no-referrer"
+                    @error="markAvatarBroken(s)"
+                  />
+                  <template v-else>{{ avatarInitials(sessionName(s)) }}</template>
+                  <i v-if="isUnread(s)" class="unread-dot" />
+                </div>
+                <div class="conv-main">
+                  <div class="conv-row">
+                    <span class="conv-name" :class="{ unread: isUnread(s) }">{{ sessionName(s) }}</span>
+                    <span class="conv-time">{{ sideTime(s.last_time) }}</span>
+                  </div>
+                  <div class="conv-row">
+                    <span class="conv-preview">{{ sessionPreview(s) }}</span>
+                    <span v-if="isUnread(s)" class="unread-mark">新</span>
+                  </div>
+                </div>
+              </button>
+            </section>
 
-          <div v-else-if="!rows.length" class="chat-empty">
-            <span class="empty-ico"><Icon name="Chat" :size="30" /></span>
-            <p>{{ isAll ? '暂无消息记录' : '这个会话还没有消息' }}</p>
-            <small v-if="isAll">日志保存在缓存存储中（memory 驱动重启后清空，Redis 驱动可持久化，最多保留最近 5000 条）</small>
-            <small v-else>收发消息后会自动出现在这里</small>
-          </div>
+            <section v-if="friends.length" class="conv-section">
+              <div class="conv-section-title">
+                <span>私聊</span>
+                <span class="conv-section-count">{{ friends.length }}</span>
+              </div>
+              <button
+                v-for="s in friends"
+                :key="s.key"
+                type="button"
+                class="conv-item"
+                :class="{ active: activeKey === s.key }"
+                @click="selectSession(s.key)"
+                @contextmenu.prevent="openSessionMenu($event, s)"
+              >
+                <div class="conv-avatar" :style="avatarGradient(sessionAvatarKey(s))">
+                  <img
+                    v-if="sessionAvatarUrl(s) && !avatarBroken[s.key]"
+                    class="conv-avatar-img"
+                    :src="sessionAvatarUrl(s)"
+                    alt=""
+                    loading="lazy"
+                    referrerpolicy="no-referrer"
+                    @error="markAvatarBroken(s)"
+                  />
+                  <template v-else>{{ avatarInitials(sessionName(s)) }}</template>
+                  <i v-if="isUnread(s)" class="unread-dot" />
+                </div>
+                <div class="conv-main">
+                  <div class="conv-row">
+                    <span class="conv-name" :class="{ unread: isUnread(s) }">{{ sessionName(s) }}</span>
+                    <span class="conv-time">{{ sideTime(s.last_time) }}</span>
+                  </div>
+                  <div class="conv-row">
+                    <span class="conv-preview">{{ sessionPreview(s) }}</span>
+                    <span v-if="isUnread(s)" class="unread-mark">新</span>
+                  </div>
+                </div>
+              </button>
+            </section>
 
-          <div v-else class="chat-inner">
-            <div class="load-tip">
-              <span v-if="loadingMore">正在加载更早的消息…</span>
-              <span v-else-if="hasMoreActive">滚动到顶部加载更早的消息</span>
-              <span v-else>已经是最早的消息了</span>
+            <section v-if="systems.length" class="conv-section">
+              <div class="conv-section-title">
+                <span>系统通知</span>
+                <span class="conv-section-count">{{ systems.length }}</span>
+              </div>
+              <button
+                v-for="s in systems"
+                :key="s.key"
+                type="button"
+                class="conv-item"
+                :class="{ active: activeKey === s.key }"
+                @click="selectSession(s.key)"
+                @contextmenu.prevent="openSessionMenu($event, s)"
+              >
+                <div class="conv-avatar system-avatar" :style="avatarGradient('system')">
+                  <Icon name="Bell" :size="17" />
+                  <i v-if="isUnread(s)" class="unread-dot" />
+                </div>
+                <div class="conv-main">
+                  <div class="conv-row">
+                    <span class="conv-name" :class="{ unread: isUnread(s) }">{{ sessionName(s) }}</span>
+                    <span class="conv-time">{{ sideTime(s.last_time) }}</span>
+                  </div>
+                  <div class="conv-row">
+                    <span class="conv-preview">{{ sessionPreview(s) }}</span>
+                    <span v-if="isUnread(s)" class="unread-mark">新</span>
+                  </div>
+                </div>
+              </button>
+            </section>
+
+            <div v-if="!sessions.length" class="conv-empty">
+              <span class="conv-empty-ico"><Icon name="Inbox" :size="22" /></span>
+              还没有任何会话
+              <small>Bot 收发消息或通知后会在这里出现</small>
             </div>
-
-            <template v-for="row in rows" :key="row.key">
-              <div v-if="row.kind === 'day'" class="day-divider"><span>{{ row.label }}</span></div>
-              <div v-else-if="row.kind === 'time'" class="time-divider"><span>{{ row.label }}</span></div>
-              <MsgLogBubble
-                v-else
-                :log="row.log"
-                :show-avatar="row.showAvatar"
-                :show-name="row.showName"
-                :context="row.context"
-                @preview="openPreview"
-                @media-load="onMediaLoad"
-                @contextmenu="openContextMenu"
-              />
-            </template>
-          </div>
+            <div v-else-if="!visibleSessions.length" class="conv-empty">
+              <span class="conv-empty-ico"><Icon name="Search" :size="20" /></span>
+              没有匹配「{{ search }}」的会话
+            </div>
+          </template>
         </div>
+      </aside>
 
-        <button v-if="pendingNew > 0" type="button" class="new-pill" @click="jumpToLatest">
-          ↓ {{ pendingNew }} 条新消息
-        </button>
-      </div>
+      <!-- 右侧聊天视图 -->
+      <section class="chat-pane">
+        <header class="chat-head">
+          <button type="button" class="back-btn" title="返回会话列表" @click="mobileChat = false">
+            <Icon name="ChevronLeft" :size="18" />
+          </button>
 
-      <footer class="chat-foot">
-        <span class="live-dot" :class="{ paused: !autoRefresh }" />
-        <span>{{ autoRefresh ? '实时监听中' : '自动刷新已暂停' }}</span>
-        <span class="foot-sep">·</span>
-        <span>最后更新 {{ lastUpdatedText }}</span>
-        <span class="foot-sep foot-sep-hint">|</span>
-        <span class="foot-hint">右键会话可删除记录，右键消息可复制或删除</span>
-        <span class="foot-actions">
-          <button type="button" @click="jumpToLatest">回到最新</button>
-        </span>
-      </footer>
-    </section>
-
-    <!-- 图片预览 -->
-    <Teleport to="body">
-      <Transition name="fade">
-        <div v-if="lightboxCurrent" class="lightbox" @click.self="closePreview">
-          <figure class="lightbox-figure">
+          <div v-if="isAll" class="head-avatar all-avatar"><Icon name="Chat" :size="19" /></div>
+          <div v-else class="head-avatar" :style="headAvatarStyle">
             <img
-              :src="lightboxCurrent.src || msgMediaUrl(lightboxCurrent.media.url, '', false, lightboxCurrent.ref)"
-              :alt="lightboxCurrent.media.name || '图片'"
+              v-if="headAvatarSrc && !avatarBroken[activeKey]"
+              class="head-avatar-img"
+              :src="headAvatarSrc"
+              alt=""
               referrerpolicy="no-referrer"
+              @error="markAvatarBroken(activeSession)"
             />
-            <figcaption class="lightbox-bar">
-              <span class="lightbox-name">{{ lightboxCurrent.media.name || '图片' }}</span>
-              <span class="lightbox-index" v-if="lightbox.items.length > 1">
-                {{ lightbox.index + 1 }} / {{ lightbox.items.length }}
-              </span>
-              <a
-                :href="lightboxCurrent.src || msgMediaUrl(lightboxCurrent.media.url, '', false, lightboxCurrent.ref)"
-                target="_blank"
-                rel="noopener noreferrer"
-              >打开原图</a>
-              <a :href="msgMediaUrl(lightboxCurrent.media.url, lightboxCurrent.media.name || 'image', true, lightboxCurrent.ref)">下载</a>
-              <button type="button" @click="closePreview">关闭</button>
-            </figcaption>
-          </figure>
-          <button
-            v-if="lightbox.items.length > 1"
-            type="button"
-            class="lightbox-nav prev"
-            title="上一张"
-            @click.stop="stepPreview(-1)"
-          >
-            ‹
-          </button>
-          <button
-            v-if="lightbox.items.length > 1"
-            type="button"
-            class="lightbox-nav next"
-            title="下一张"
-            @click.stop="stepPreview(1)"
-          >
-            ›
+            <template v-else>{{ headInitials }}</template>
+          </div>
+
+          <div class="head-main">
+            <div class="head-title">{{ headName }}</div>
+            <div class="head-sub">{{ headSubtitle }}</div>
+          </div>
+
+          <div class="head-actions">
+            <div v-if="isAll" class="type-tabs">
+              <button
+                v-for="t in typeTabs"
+                :key="t.value"
+                type="button"
+                :class="{ active: typeFilter === t.value }"
+                @click="typeFilter = t.value"
+              >
+                {{ t.label }}
+              </button>
+            </div>
+            <label class="auto-refresh">
+              <Switch v-model="autoRefresh" size="small" />
+              <span>自动刷新</span>
+            </label>
+            <button type="button" class="icon-btn" title="立即刷新" @click="manualRefresh">
+              <Icon name="Refresh" :size="16" />
+            </button>
+          </div>
+        </header>
+
+        <div class="chat-body">
+          <div ref="listEl" class="chat-scroll" @scroll.passive="onScroll">
+            <!-- 首次加载 / 切换会话：请求未返回前显示加载中，避免误判为没有消息 -->
+            <div v-if="viewLoading" class="chat-empty">
+              <span class="empty-spinner" />
+              <p>正在加载消息…</p>
+            </div>
+
+            <div v-else-if="viewError" class="chat-empty">
+              <span class="empty-ico"><Icon name="Chat" :size="30" /></span>
+              <p>消息加载失败</p>
+              <small>{{ viewError }}</small>
+              <Button type="text" size="small" @click="retryActive">重试</Button>
+            </div>
+
+            <div v-else-if="!rows.length" class="chat-empty">
+              <span class="empty-ico"><Icon name="Chat" :size="30" /></span>
+              <p>{{ isAll ? '暂无消息记录' : '这个会话还没有消息' }}</p>
+              <small v-if="isAll">日志保存在缓存存储中（memory 驱动重启后清空，Redis 驱动可持久化，最多保留最近 5000 条）</small>
+              <small v-else>收发消息后会自动出现在这里</small>
+            </div>
+
+            <div v-else class="chat-inner">
+              <div class="load-tip">
+                <span v-if="loadingMore">正在加载更早的消息…</span>
+                <span v-else-if="hasMoreActive">滚动到顶部加载更早的消息</span>
+                <span v-else>已经是最早的消息了</span>
+              </div>
+
+              <template v-for="row in rows" :key="row.key">
+                <div v-if="row.kind === 'day'" class="day-divider"><span>{{ row.label }}</span></div>
+                <div v-else-if="row.kind === 'time'" class="time-divider"><span>{{ row.label }}</span></div>
+                <MsgLogBubble
+                  v-else
+                  :log="row.log"
+                  :show-avatar="row.showAvatar"
+                  :show-name="row.showName"
+                  :context="row.context"
+                  @preview="openPreview"
+                  @media-load="onMediaLoad"
+                  @contextmenu="openContextMenu"
+                />
+              </template>
+            </div>
+          </div>
+
+          <button v-if="pendingNew > 0" type="button" class="new-pill" @click="jumpToLatest">
+            ↓ {{ pendingNew }} 条新消息
           </button>
         </div>
-      </Transition>
-    </Teleport>
 
-    <!-- 右键菜单：消息（复制 / 删除单条）与会话（复制会话 ID / 删除整个会话） -->
-    <Teleport to="body">
-      <div
-        v-if="contextMenu"
-        class="ctx-menu"
-        :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
-        @contextmenu.prevent
-        @mousedown.stop
-      >
-        <div class="ctx-hint">{{ contextMenuLabel }}</div>
-        <template v-if="contextMenu.type === 'session'">
-          <button type="button" class="ctx-item" @click="copySessionId(contextMenu.session)">
-            <Icon name="Copy" :size="13" />
-            复制会话 ID
-          </button>
-          <button type="button" class="ctx-item danger" @click="deleteSession(contextMenu.session)">
-            <Icon name="Trash" :size="13" />
-            删除会话记录
-          </button>
-        </template>
-        <template v-else>
-          <button type="button" class="ctx-item" @click="copyLogText(contextMenu.log)">
-            <Icon name="Copy" :size="13" />
-            复制文本
-          </button>
-          <button type="button" class="ctx-item danger" @click="deleteLog(contextMenu.log)">
-            <Icon name="Trash" :size="13" />
-            删除消息
-          </button>
-        </template>
-      </div>
-    </Teleport>
+        <footer class="chat-foot">
+          <span class="live-dot" :class="{ paused: !autoRefresh }" />
+          <span>{{ autoRefresh ? '实时监听中' : '自动刷新已暂停' }}</span>
+          <span class="foot-sep">·</span>
+          <span>最后更新 {{ lastUpdatedText }}</span>
+          <span class="foot-sep foot-sep-hint">|</span>
+          <span class="foot-hint">右键会话可删除记录，右键消息可复制或删除</span>
+          <span class="foot-actions">
+            <button type="button" @click="jumpToLatest">回到最新</button>
+          </span>
+        </footer>
+      </section>
+
+      <!-- 图片预览 -->
+      <Teleport to="body">
+        <Transition name="fade">
+          <div v-if="lightboxCurrent" class="lightbox" @click.self="closePreview">
+            <figure class="lightbox-figure">
+              <img
+                :src="lightboxCurrent.src || msgMediaUrl(lightboxCurrent.media.url, '', false, lightboxCurrent.ref)"
+                :alt="lightboxCurrent.media.name || '图片'"
+                referrerpolicy="no-referrer"
+              />
+              <figcaption class="lightbox-bar">
+                <span class="lightbox-name">{{ lightboxCurrent.media.name || '图片' }}</span>
+                <span class="lightbox-index" v-if="lightbox.items.length > 1">
+                  {{ lightbox.index + 1 }} / {{ lightbox.items.length }}
+                </span>
+                <a
+                  :href="lightboxCurrent.src || msgMediaUrl(lightboxCurrent.media.url, '', false, lightboxCurrent.ref)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >打开原图</a>
+                <a :href="msgMediaUrl(lightboxCurrent.media.url, lightboxCurrent.media.name || 'image', true, lightboxCurrent.ref)">下载</a>
+                <button type="button" @click="closePreview">关闭</button>
+              </figcaption>
+            </figure>
+            <button
+              v-if="lightbox.items.length > 1"
+              type="button"
+              class="lightbox-nav prev"
+              title="上一张"
+              @click.stop="stepPreview(-1)"
+            >
+              ‹
+            </button>
+            <button
+              v-if="lightbox.items.length > 1"
+              type="button"
+              class="lightbox-nav next"
+              title="下一张"
+              @click.stop="stepPreview(1)"
+            >
+              ›
+            </button>
+          </div>
+        </Transition>
+      </Teleport>
+
+      <!-- 右键菜单：消息（复制 / 删除单条）与会话（复制会话 ID / 删除整个会话） -->
+      <Teleport to="body">
+        <div
+          v-if="contextMenu"
+          class="ctx-menu"
+          :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+          @contextmenu.prevent
+          @mousedown.stop
+        >
+          <div class="ctx-hint">{{ contextMenuLabel }}</div>
+          <template v-if="contextMenu.type === 'session'">
+            <button type="button" class="ctx-item" @click="copySessionId(contextMenu.session)">
+              <Icon name="Copy" :size="13" />
+              复制会话 ID
+            </button>
+            <button type="button" class="ctx-item danger" @click="deleteSession(contextMenu.session)">
+              <Icon name="Trash" :size="13" />
+              删除会话记录
+            </button>
+          </template>
+          <template v-else>
+            <button type="button" class="ctx-item" @click="copyLogText(contextMenu.log)">
+              <Icon name="Copy" :size="13" />
+              复制文本
+            </button>
+            <button type="button" class="ctx-item danger" @click="deleteLog(contextMenu.log)">
+              <Icon name="Trash" :size="13" />
+              删除消息
+            </button>
+          </template>
+        </div>
+      </Teleport>
+    </div>
   </div>
 </template>
 
@@ -353,6 +356,8 @@ import { confirmAction } from '../ui/confirm'
 import { avatarGradient, avatarInitials, sessionAvatarKey, sessionAvatarUrl } from '../utils/avatar.js'
 import { friendlyPreview, shortId } from '../utils/messageText.js'
 import MsgLogBubble from '../components/MsgLogBubble.vue'
+import PageTabs from '../components/PageTabs.vue'
+import { LOG_TABS } from '../navTabs.js'
 
 const PAGE = 50
 // MAX_KEEP 前端最多保留的消息条数（与服务端留存上限一致）：面板常开时新消息会不断
@@ -1311,9 +1316,14 @@ onUnmounted(() => {
 
 <style scoped>
 /* ================= 外层骨架 ================= */
+/* 页面 = 页签条（同组的「操作日志」入口）+ 聊天式双栏；高度扣掉页签条占位 */
+.msglog-page {
+  display: flex;
+  flex-direction: column;
+}
 .msglog-shell {
   display: flex;
-  height: calc(100dvh - 9rem);
+  height: calc(100dvh - 12rem);
   min-height: 520px;
   border-radius: 22px;
   border: 2px solid var(--line-strong);
@@ -1994,7 +2004,7 @@ onUnmounted(() => {
 /* ================= 响应式 ================= */
 @media (max-width: 1023px) {
   .msglog-shell {
-    height: calc(100dvh - 8.25rem);
+    height: calc(100dvh - 11.25rem);
   }
   .conv-pane {
     width: 100%;

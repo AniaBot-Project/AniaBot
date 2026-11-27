@@ -237,13 +237,13 @@
 - 用户命令：`/goal`、`/goal pause`、`/goal resume`、`/goal clear`（群聊需 @）。`/stop` 会暂停目标。
 - **进程重启后目标仍 active 但不会自动续跑**（续跑武装状态不落库），需用户 `/goal resume`；`blocked` 只要 AI 说明原因即可，没有「连续多轮」门槛。
 - 计划模式阻断 `goal_create`/`goal_update`，`goal_status` 放行。
-- 每轮续跑仍是普通回合（不单独登记任务），面板「后台任务」页下方可看进行中的目标，`/goal` 看轮次与状态。
+- 每轮续跑仍是普通回合（不单独登记任务），面板「AI 运行记录 → 后台任务」页签下方可看进行中的目标，`/goal` 看轮次与状态。
 
 ### 工作流（workflow）与团队任务板（team_task）
 
 - **工作流** `workflow_run(goal?, steps=[{id,task,depends_on}], concurrency?)`：1~8 个步骤、ID 唯一、依赖无环；并发 1~4（默认 2）；后台执行（每步一个子代理，按依赖调度，失败后继 `skipped`），全部结束后汇总结果回灌会话；任务类型 `workflow`，`/stop` 可取消；仅 `subagent.enable=true` 时注册；计划模式阻断。无独立配置项。
 - **团队任务板** `team_task_create/list/claim/complete`：会话级持久任务清单，`blocked_by` 依赖未完成不能认领，`write_scopes` 仅建议不做锁；每会话最多 20 个未完成任务；复用任务表（类型 `team_task`），需要 SQL 持久化；计划模式阻断 create/claim/complete、放行 list。无独立配置项。
-- 两者都可以在面板「后台任务」页或 `/tasks` 里观察（面板可导出/清除日志）。
+- 两者都可以在面板「AI 运行记录 → 后台任务」页签或 `/tasks` 里观察（面板可导出/清除日志）。
 
 ### 任务记录（task）
 
@@ -251,7 +251,7 @@
 | --- | --- | --- |
 | `task.retention_days` | `7` | 已结束任务记录保留天数，每 6 小时清理一次；0 不清理 |
 
-任务记录存于 SQL 表 `ania_agent_task`（需要 SQL 持久化，建表失败自动降级为不持久化），记子代理/交接/工作流/团队任务/团队运行/团队成员（`subagent`/`handoff`/`workflow`/`team_task`/`team_run`/`team_member`）；普通回合不再写任务表（完整过程看 Query 日志），旧库可能残留 `turn` 行。进程重启时遗留任务标记 `interrupted`，用户用 `/resume <任务ID>` 恢复；`/tasks` 查看本会话运行中子代理、最近后台任务与最近回合，`/stop` 取消当前回合并清空排队，`/stop <任务ID>` 取消指定后台子代理。面板「后台任务」页可按筛选条件导出 JSON 或清除已结束记录（运行中/排队中的任务保留），任务指令、结果、错误与工具步骤完整保存、不截断。`#新对话` 会先停止本会话运行中的子代理/工作流与团队运行、暂停长任务目标（`/goal resume` 可恢复），再清空上下文。
+任务记录存于 SQL 表 `ania_agent_task`（需要 SQL 持久化，建表失败自动降级为不持久化），记子代理/交接/工作流/团队任务/团队运行/团队成员（`subagent`/`handoff`/`workflow`/`team_task`/`team_run`/`team_member`）；普通回合不再写任务表（完整过程看「AI 运行记录 → 对话记录」），旧库可能残留 `turn` 行。进程重启时遗留任务标记 `interrupted`，用户用 `/resume <任务ID>` 恢复；`/tasks` 查看本会话运行中子代理、最近后台任务与最近回合，`/stop` 取消当前回合并清空排队，`/stop <任务ID>` 取消指定后台子代理。面板「AI 运行记录 → 后台任务」页签可按筛选条件导出 JSON 或清除已结束记录（运行中/排队中的任务保留），任务指令、结果、错误与工具步骤完整保存、不截断。`#新对话` 会先停止本会话运行中的子代理/工作流与团队运行、暂停长任务目标（`/goal resume` 可恢复），再清空上下文。
 
 
 ### 备用识图（主模型不支持多模态时把图片转文字）
@@ -320,7 +320,7 @@
 
 ## 七、扩展配置（四份 JSON）
 
-面板「扩展配置」页管理，对应配置键 `files.mcp_json` / `files.prompt_json` / `files.hooks_json` / `files.commands_json`。AI 侧对应 `config_file_get` / `config_file_set`。
+面板「配置管理 → 扩展配置」页签管理，对应配置键 `files.mcp_json` / `files.prompt_json` / `files.hooks_json` / `files.commands_json`。AI 侧对应 `config_file_get` / `config_file_set`。
 
 **`mcp`（`files.mcp_json`）—— MCP 服务器列表，改完重启生效**
 

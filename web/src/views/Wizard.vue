@@ -289,7 +289,7 @@
             <Title size="middle" color="app-green">配置完成</Title>
             <p class="text-sm text-slate-500 leading-relaxed">
               配置已保存到数据库，<b>重启后生效</b>。<br />
-              插件、MCP 服务器、Prompt 覆盖等更多配置可在「配置管理」与「扩展配置」页继续完善。
+              插件、MCP 服务器、Prompt 覆盖等更多配置可在「配置管理」页（参数配置 / 扩展配置）继续完善。
             </p>
           </template>
           <template v-else>

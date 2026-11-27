@@ -119,7 +119,7 @@ flowchart LR
 
 ### 面板查看与重置（上下文管理）
 
-面板「上下文管理」页（`/#/contexts`）把每个会话真正持有的上下文原样展示出来：system prompt 三段（静态提示词 / available_skills / 场景描述）、消息历史（含工具调用与工具结果）与工具定义，并给出各段字符数与 token 粗估（约 2 字符折 1 token）。
+面板「会话上下文」页（`/#/contexts`）把每个会话真正持有的上下文原样展示出来：system prompt 三段（静态提示词 / available_skills / 场景描述）、消息历史（含工具调用与工具结果）与工具定义，并给出各段字符数与 token 粗估（约 2 字符折 1 token）。
 
 - **快照来源**：`ChatBot.ContextSnapshot()` 用 `TryLock` 读消息窗口——回合执行中窗口被本轮占用，读不到时退回持久化历史（`source=persisted`），面板请求不会被长回合阻塞。为此 `ChatBot` 的窗口操作（`Chat` / `LoadHistory` / `AppendHistory` / `ClearHistory`）统一持有一把互斥锁；插件层本来就按会话串行调用它们，加锁只为旁路只读安全。
 - **每轮注入不可见**：记忆 / 知识库 / 待办提醒 / 计划模式附言只拼到当轮用户消息上、不写入历史，因此不会出现在快照里（重置时会一并清掉待办清单）。
@@ -139,7 +139,7 @@ flowchart LR
 - **语义向量**：可选 embedding（与知识库共享 `embedder`），入库时计算向量，检索时语义加分；embedding 服务不可用时静默降级为纯关键词
 - **注入语**：`memory.auto_inject` 注入块除「可参考」外还提示发现不符或过时时用 `memory_update` 更正，让 AI 在使用中顺手维护
 - **存储**：每条记忆一行（`ania_memory`，`(scope,id)` PK，tags/embedding JSON 列，`created_at` 定宽 UTC 文本使文本序 = 时间序）；SQL 探测或建表失败时记忆功能整体禁用
-- 面板实现 `adminpanel.MemorySource`，可在「记忆管理」页直接增删改查，scope 校验 `^[gf]:\d+$` 防越界
+- 面板实现 `adminpanel.MemorySource`，可在「记忆与知识库 → 长期记忆」页签直接增删改查，scope 校验 `^[gf]:\d+$` 防越界
 
 ## 备用识图（OCR）
 

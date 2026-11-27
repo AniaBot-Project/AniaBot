@@ -1,5 +1,7 @@
 <template>
   <div class="space-y-6">
+    <PageTabs :tabs="USAGE_TABS" />
+
     <!-- ===== 总览（全量口径，不随筛选变化） ===== -->
     <div class="space-y-4">
       <div class="flex items-center justify-between">
@@ -317,6 +319,8 @@ import TokenChart from '../ui/TokenChart.vue'
 import { fmtInt, fmtPct } from '../utils/format.js'
 import { api } from '../api.js'
 import LoadingState from '../components/LoadingState.vue'
+import PageTabs from '../components/PageTabs.vue'
+import { USAGE_TABS } from '../navTabs.js'
 
 // 时间维度筛选选项（与后端 resolveTokenRange 对应）
 const RANGE_OPTIONS = [

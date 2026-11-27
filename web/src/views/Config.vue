@@ -1,370 +1,373 @@
 <template>
-  <div class="flex flex-col lg:flex-row lg:items-start gap-6">
-    <!-- 分组导航：移动端隐藏，改用上方下拉选择 -->
-    <aside v-if="!rawMode" class="hidden lg:block w-52 shrink-0 sticky top-24 space-y-5 max-h-[calc(100vh-8rem)] overflow-y-auto pr-1">
-      <Input v-model="search" placeholder="搜索配置项..." allow-clear>
-        <template #prefix>
-          <span class="[&>svg]:w-4 [&>svg]:h-4" v-html="iconSearch" />
-        </template>
-      </Input>
+  <div class="flex flex-col gap-5">
+    <PageTabs :tabs="CONFIG_TABS" />
+    <div class="flex flex-col lg:flex-row lg:items-start gap-6">
+      <!-- 分组导航：移动端隐藏，改用上方下拉选择 -->
+      <aside v-if="!rawMode" class="hidden lg:block w-52 shrink-0 sticky top-24 space-y-5 max-h-[calc(100vh-8rem)] overflow-y-auto pr-1">
+        <Input v-model="search" placeholder="搜索配置项..." allow-clear>
+          <template #prefix>
+            <span class="[&>svg]:w-4 [&>svg]:h-4" v-html="iconSearch" />
+          </template>
+        </Input>
 
-      <div v-for="cat in cards" :key="cat.name">
-        <Button
-          block
-          size="small"
-          :type="activeCategory === cat.name ? 'primary' : 'text'"
-          class="mb-1.5 [&>span]:w-full"
-          @click="selectCategory(cat.name)"
-        >
-          <span class="flex items-center justify-between gap-2 w-full uppercase tracking-wider">
-            <span class="truncate">{{ cat.name }}</span>
-            <span class="font-normal normal-case tracking-normal">{{ cat.total }} 项</span>
-          </span>
-        </Button>
-        <nav class="space-y-0.5">
-          <template v-for="node in cat.nodes" :key="node.name">
-            <!-- 插件卡片（多个子分组）：父行可折叠，子分组缩进显示 -->
-            <template v-if="foldable(node)">
-              <Tooltip :title="navOpen(node) ? '收起子分组' : '展开子分组'" class="w-full [&>span]:w-full">
-                <Button
-                  block
-                  size="small"
-                  :type="navHasActive(node) ? 'default' : 'text'"
-                  class="[&>span]:w-full"
-                  :aria-expanded="navOpen(node)"
-                  @click="toggleNav(node.name)"
-                >
-                  <span class="flex items-center justify-between gap-2 w-full">
-                    <span class="flex items-center gap-1 min-w-0">
-                      <svg
-                        class="w-3 h-3 shrink-0 transition-transform duration-200"
-                        :class="navOpen(node) ? 'rotate-90' : ''"
-                        fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"
-                      >
-                        <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-                      </svg>
-                      <span class="truncate">{{ node.name }}</span>
+        <div v-for="cat in cards" :key="cat.name">
+          <Button
+            block
+            size="small"
+            :type="activeCategory === cat.name ? 'primary' : 'text'"
+            class="mb-1.5 [&>span]:w-full"
+            @click="selectCategory(cat.name)"
+          >
+            <span class="flex items-center justify-between gap-2 w-full uppercase tracking-wider">
+              <span class="truncate">{{ cat.name }}</span>
+              <span class="font-normal normal-case tracking-normal">{{ cat.total }} 项</span>
+            </span>
+          </Button>
+          <nav class="space-y-0.5">
+            <template v-for="node in cat.nodes" :key="node.name">
+              <!-- 插件卡片（多个子分组）：父行可折叠，子分组缩进显示 -->
+              <template v-if="foldable(node)">
+                <Tooltip :title="navOpen(node) ? '收起子分组' : '展开子分组'" class="w-full [&>span]:w-full">
+                  <Button
+                    block
+                    size="small"
+                    :type="navHasActive(node) ? 'default' : 'text'"
+                    class="[&>span]:w-full"
+                    :aria-expanded="navOpen(node)"
+                    @click="toggleNav(node.name)"
+                  >
+                    <span class="flex items-center justify-between gap-2 w-full">
+                      <span class="flex items-center gap-1 min-w-0">
+                        <svg
+                          class="w-3 h-3 shrink-0 transition-transform duration-200"
+                          :class="navOpen(node) ? 'rotate-90' : ''"
+                          fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"
+                        >
+                          <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                        </svg>
+                        <span class="truncate">{{ node.name }}</span>
+                      </span>
+                      <span class="ml-2 shrink-0">{{ cardCount(node) }}</span>
                     </span>
+                  </Button>
+                </Tooltip>
+                <Transition name="fade">
+                  <div v-show="navOpen(node)" class="space-y-0.5">
+                    <Button
+                      v-for="s in node.sections"
+                      :key="s.name"
+                      block
+                      size="small"
+                      :type="activeGroup === s.name ? 'default' : 'text'"
+                      class="[&>span]:w-full"
+                      @click="jumpTo(s.name)"
+                    >
+                      <span class="flex items-center justify-between gap-2 w-full pl-5">
+                        <span class="truncate">{{ s.label }}</span>
+                        <span class="ml-2 shrink-0">{{ s.fields.length }}</span>
+                      </span>
+                    </Button>
+                  </div>
+                </Transition>
+              </template>
+              <!-- 只有一个子分组：父行直接跳到该分节 -->
+              <template v-else-if="hasSubs(node)">
+                <Button block size="small" :type="navHasActive(node) ? 'default' : 'text'" class="[&>span]:w-full" @click="jumpTo(node.sections[0].name)">
+                  <span class="flex items-center justify-between gap-2 w-full">
+                    <span class="truncate">{{ node.name }}</span>
                     <span class="ml-2 shrink-0">{{ cardCount(node) }}</span>
                   </span>
                 </Button>
-              </Tooltip>
-              <Transition name="fade">
-                <div v-show="navOpen(node)" class="space-y-0.5">
-                  <Button
-                    v-for="s in node.sections"
-                    :key="s.name"
-                    block
-                    size="small"
-                    :type="activeGroup === s.name ? 'default' : 'text'"
-                    class="[&>span]:w-full"
-                    @click="jumpTo(s.name)"
-                  >
-                    <span class="flex items-center justify-between gap-2 w-full pl-5">
-                      <span class="truncate">{{ s.label }}</span>
-                      <span class="ml-2 shrink-0">{{ s.fields.length }}</span>
-                    </span>
-                  </Button>
-                </div>
-              </Transition>
-            </template>
-            <!-- 只有一个子分组：父行直接跳到该分节 -->
-            <template v-else-if="hasSubs(node)">
-              <Button block size="small" :type="navHasActive(node) ? 'default' : 'text'" class="[&>span]:w-full" @click="jumpTo(node.sections[0].name)">
+                <Button
+                  v-for="s in node.sections"
+                  :key="s.name"
+                  block
+                  size="small"
+                  :type="activeGroup === s.name ? 'default' : 'text'"
+                  class="[&>span]:w-full"
+                  @click="jumpTo(s.name)"
+                >
+                  <span class="flex items-center justify-between gap-2 w-full pl-5">
+                    <span class="truncate">{{ s.label }}</span>
+                    <span class="ml-2 shrink-0">{{ s.fields.length }}</span>
+                  </span>
+                </Button>
+              </template>
+              <!-- 无子分组的平铺分组 -->
+              <Button
+                v-else
+                block
+                size="small"
+                :type="activeGroup === node.name ? 'default' : 'text'"
+                class="[&>span]:w-full"
+                @click="jumpTo(node.name)"
+              >
                 <span class="flex items-center justify-between gap-2 w-full">
                   <span class="truncate">{{ node.name }}</span>
                   <span class="ml-2 shrink-0">{{ cardCount(node) }}</span>
                 </span>
               </Button>
-              <Button
-                v-for="s in node.sections"
-                :key="s.name"
-                block
-                size="small"
-                :type="activeGroup === s.name ? 'default' : 'text'"
-                class="[&>span]:w-full"
-                @click="jumpTo(s.name)"
-              >
-                <span class="flex items-center justify-between gap-2 w-full pl-5">
-                  <span class="truncate">{{ s.label }}</span>
-                  <span class="ml-2 shrink-0">{{ s.fields.length }}</span>
-                </span>
-              </Button>
             </template>
-            <!-- 无子分组的平铺分组 -->
-            <Button
-              v-else
-              block
-              size="small"
-              :type="activeGroup === node.name ? 'default' : 'text'"
-              class="[&>span]:w-full"
-              @click="jumpTo(node.name)"
-            >
-              <span class="flex items-center justify-between gap-2 w-full">
-                <span class="truncate">{{ node.name }}</span>
-                <span class="ml-2 shrink-0">{{ cardCount(node) }}</span>
-              </span>
-            </Button>
-          </template>
-        </nav>
-      </div>
-      <p v-if="cards.length === 0" class="px-3 text-xs text-slate-400">没有匹配「{{ search }}」的配置项</p>
-    </aside>
-
-    <!-- 配置主体 -->
-    <div class="flex-1 min-w-0 space-y-5">
-      <!-- 移动端分组选择（桌面端用左侧导航） -->
-      <div v-if="!rawMode" class="lg:hidden">
-        <Select v-model="activeCategory" class="w-full" :options="categoryOptions" @change="selectCategory" />
-      </div>
-
-      <Transition name="fade">
-        <Card v-if="saved" color="app-green" style="padding: 12px 20px" class="flex items-center gap-2 text-sm">
-          <span class="[&>svg]:w-4 [&>svg]:h-4" v-html="iconCheck" />
-          配置已保存到数据库，将在 <b>重启 Bot 后生效</b>。
-        </Card>
-      </Transition>
-
-      <!-- 微信扫码登录卡片：适配器在运行，或已勾选启用（待重启）时显示 -->
-      <QrLoginCard :weixin-enabled="form['bot.platform.weixin.enable'] === true" />
-
-      <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <div class="min-w-0">
-          <p class="text-sm text-slate-500">配置存储在数据库中，修改保存后重启生效。</p>
-          <p class="text-xs text-slate-400 mt-0.5">共 {{ schema.length }} 项配置</p>
+          </nav>
         </div>
-        <div class="flex items-center gap-2 shrink-0">
-          <Tooltip title="导出完整配置为 JSON 文件（含密钥等敏感字段，请妥善保管）">
-            <Button type="default" size="small" @click="onExportConfig">导出 JSON</Button>
-          </Tooltip>
-          <Button type="default" size="small" @click="rawMode = !rawMode">
-            {{ rawMode ? '表单模式' : '高级模式 (JSON)' }}
-          </Button>
-        </div>
-      </div>
+        <p v-if="cards.length === 0" class="px-3 text-xs text-slate-400">没有匹配「{{ search }}」的配置项</p>
+      </aside>
 
-      <!-- 配置预设 -->
-      <Card v-if="!rawMode" style="padding: 0" class="overflow-hidden">
-        <Button type="text" block class="[&>span]:w-full" @click="presetsOpen = !presetsOpen">
-          <span class="flex items-center justify-between gap-3 w-full">
-            <span class="flex items-center gap-2.5">
-              <span class="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs bg-zinc-700 [&>svg]:w-4 [&>svg]:h-4" v-html="iconBookmark" />
-              配置预设
-              <span class="text-xs font-normal text-slate-400">{{ presets.length }} 个</span>
-            </span>
-            <span class="flex items-center gap-1.5 text-xs font-normal text-slate-400">
-              {{ presetsOpen ? '收起' : '展开' }}
-              <svg class="w-4 h-4 transition-transform duration-200" :class="presetsOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
-            </span>
-          </span>
-        </Button>
+      <!-- 配置主体 -->
+      <div class="flex-1 min-w-0 space-y-5">
+        <!-- 移动端分组选择（桌面端用左侧导航） -->
+        <div v-if="!rawMode" class="lg:hidden">
+          <Select v-model="activeCategory" class="w-full" :options="categoryOptions" @change="selectCategory" />
+        </div>
+
         <Transition name="fade">
-          <div v-show="presetsOpen" class="p-4 sm:p-6 space-y-4 border-t border-white/50">
-            <p class="text-xs text-slate-500">把当前全部配置（含密钥、MCP / Prompt 覆盖）保存为一份快照，之后可一键切换。应用预设后重启生效。</p>
-
-            <div class="flex gap-2">
-              <Input
-                v-model="presetName"
-                placeholder="预设名称，如：DeepSeek 日常"
-                @keyup.enter="onSavePreset()"
-              />
-              <Button
-                type="primary"
-                size="small"
-                class="shrink-0"
-                :disabled="presetSaving || !presetName.trim()"
-                @click="onSavePreset()"
-              >
-                {{ presetSaving ? '保存中...' : '保存当前配置' }}
-              </Button>
-            </div>
-
-            <p v-if="presets.length === 0" class="text-sm text-slate-400">还没有预设。调整好配置后，在上方输入名称即可保存。</p>
-            <ul v-else class="divide-y divide-slate-100 border border-white/60 rounded-lg">
-              <li v-for="p in presets" :key="p.name" class="flex items-center gap-3 px-4 py-3">
-                <div class="min-w-0 flex-1">
-                  <p class="text-sm font-medium text-slate-800 truncate">{{ p.name }}</p>
-                  <p class="text-xs text-slate-400 mt-0.5">{{ p.key_count }} 项配置 · 更新于 {{ formatPresetTime(p.updated_at) }}</p>
-                </div>
-                <Button type="primary" size="small" class="shrink-0" @click="onApplyPreset(p)">应用</Button>
-                <Tooltip title="用当前配置覆盖该预设">
-                  <Button type="default" size="small" class="shrink-0" @click="onSavePreset(p.name)">更新</Button>
-                </Tooltip>
-                <Button type="default" size="small" danger class="shrink-0" @click="onDeletePreset(p)">删除</Button>
-              </li>
-            </ul>
-          </div>
+          <Card v-if="saved" color="app-green" style="padding: 12px 20px" class="flex items-center gap-2 text-sm">
+            <span class="[&>svg]:w-4 [&>svg]:h-4" v-html="iconCheck" />
+            配置已保存到数据库，将在 <b>重启 Bot 后生效</b>。
+          </Card>
         </Transition>
-      </Card>
 
-      <!-- 表单模式 -->
-      <template v-if="!rawMode">
-        <!-- 分类页签 -->
-        <div v-if="!searching" class="flex items-center gap-2 flex-wrap">
-          <Button
-            v-for="cat in cards"
-            :key="cat.name"
-            size="small"
-            :type="activeCategory === cat.name ? 'primary' : 'default'"
-            @click="selectCategory(cat.name)"
-          >
-            {{ cat.name }}
-            <span class="ml-1.5">{{ cat.total }} 项</span>
-          </Button>
-          <Button type="default" size="small" class="ml-auto" @click="toggleAll">
-            {{ allOpen ? '收起全部' : '展开全部' }}
-          </Button>
+        <!-- 微信扫码登录卡片：适配器在运行，或已勾选启用（待重启）时显示 -->
+        <QrLoginCard :weixin-enabled="form['bot.platform.weixin.enable'] === true" />
+
+        <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div class="min-w-0">
+            <p class="text-sm text-slate-500">配置存储在数据库中，修改保存后重启生效。</p>
+            <p class="text-xs text-slate-400 mt-0.5">共 {{ schema.length }} 项配置</p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <Tooltip title="导出完整配置为 JSON 文件（含密钥等敏感字段，请妥善保管）">
+              <Button type="default" size="small" @click="onExportConfig">导出 JSON</Button>
+            </Tooltip>
+            <Button type="default" size="small" @click="rawMode = !rawMode">
+              {{ rawMode ? '表单模式' : '高级模式 (JSON)' }}
+            </Button>
+          </div>
         </div>
 
-        <Card
-          v-for="node in displayCards"
-          :key="node.name"
-          :id="sectionId(node.name)"
-          style="padding: 0"
-          class="scroll-mt-24 overflow-hidden"
-        >
-          <Button type="text" block class="[&>span]:w-full" @click="toggleGroup(node.name)">
+        <!-- 配置预设 -->
+        <Card v-if="!rawMode" style="padding: 0" class="overflow-hidden">
+          <Button type="text" block class="[&>span]:w-full" @click="presetsOpen = !presetsOpen">
             <span class="flex items-center justify-between gap-3 w-full">
-              <span class="flex items-center gap-2.5 min-w-0">
-                <span class="w-7 h-7 rounded-lg flex items-center justify-center text-white shrink-0 [&>svg]:w-4 [&>svg]:h-4" :class="groupColor(node)" v-html="groupIcon(node)" />
-                <span class="truncate">{{ node.name }}</span>
-                <span class="shrink-0 font-normal">{{ cardCount(node) }} 项</span>
+              <span class="flex items-center gap-2.5">
+                <span class="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs bg-zinc-700 [&>svg]:w-4 [&>svg]:h-4" v-html="iconBookmark" />
+                配置预设
+                <span class="text-xs font-normal text-slate-400">{{ presets.length }} 个</span>
               </span>
-              <span class="flex items-center gap-3 shrink-0">
-                <span v-if="groupChanged(node)" class="text-[11px] text-[#ff9f0a]">● 有修改</span>
-                <svg class="w-4 h-4 transition-transform duration-200" :class="isOpen(node) ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
+              <span class="flex items-center gap-1.5 text-xs font-normal text-slate-400">
+                {{ presetsOpen ? '收起' : '展开' }}
+                <svg class="w-4 h-4 transition-transform duration-200" :class="presetsOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
               </span>
             </span>
           </Button>
-
           <Transition name="fade">
-            <div v-show="isOpen(node)" class="p-4 sm:p-6 border-t border-white/50" :class="{ 'space-y-5': hasSubs(node) }">
-              <!-- 子分组分节：线框归类；平铺分组只有一个无名分节，直接铺字段 -->
-              <div
-                v-for="s in node.sections"
-                :key="s.name"
-                :id="s.name !== node.name ? sectionId(s.name) : undefined"
-                :class="hasSubs(node) ? 'rounded-lg border border-white/60 p-5 scroll-mt-24' : ''"
-              >
-                <p v-if="s.label" class="flex items-center gap-2 text-xs font-semibold text-slate-500 mb-4">
-                  <span class="w-1 h-3.5 rounded-full bg-zinc-400" />
-                  {{ s.label }}
-                  <span class="text-[10px] font-normal text-slate-400">{{ s.fields.length }} 项</span>
-                </p>
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-5">
-                  <div v-for="field in s.fields" :key="field.key" :class="{ 'lg:col-span-2': ['text', 'strings', 'ints', 'multiselect', 'slider'].includes(field.type) }">
-                    <label class="block text-xs font-medium text-slate-700 mb-1.5">
-                      {{ field.label }}
-                      <span class="text-slate-400 font-normal ml-1">{{ field.key }}</span>
-                    </label>
+            <div v-show="presetsOpen" class="p-4 sm:p-6 space-y-4 border-t border-white/50">
+              <p class="text-xs text-slate-500">把当前全部配置（含密钥、MCP / Prompt 覆盖）保存为一份快照，之后可一键切换。应用预设后重启生效。</p>
 
-                    <Input v-if="field.type === 'string'" v-model="form[field.key]" :placeholder="placeholderOf(field)" />
-                    <div v-else-if="field.type === 'password'" class="flex gap-2">
-                      <Input v-model="form[field.key]" type="password" :placeholder="placeholderOf(field)" @update:modelValue="cleared[field.key] = false" />
-                      <Button
-                        v-if="valueOf(field.key) === MASK"
-                        type="default"
-                        size="small"
-                        class="shrink-0"
-                        @click="clearField(field)"
-                      >清除</Button>
-                    </div>
-                    <!-- int / float 的表单值本身就是字符串（保存时 parseInt/parseFloat 解析），保持原类型 -->
-                    <Input v-else-if="field.type === 'int'" v-model="form[field.key]" type="number" :placeholder="placeholderOf(field)" />
-                    <Input v-else-if="field.type === 'float'" v-model="form[field.key]" type="number" :placeholder="placeholderOf(field)" />
-                    <Select v-else-if="field.type === 'select'" v-model="form[field.key]" class="w-full" :options="selectOptions(field)" />
-                    <div v-else-if="field.type === 'multiselect'" class="space-y-2">
-                      <Checkbox v-model="form[field.key]" :options="checkboxOptions(field)" />
-                      <div class="flex items-center gap-2.5">
-                        <span>已选 {{ selectedCount(field) }}/{{ (field.options || []).length }}</span>
-                        <span class="h-3 w-px bg-slate-300/70" />
-                        <Button type="link" size="small" @click="selectAllOptions(field)">全选</Button>
-                        <Button type="link" size="small" @click="clearOptions(field)">清空</Button>
-                      </div>
-                    </div>
-
-                    <div v-else-if="field.type === 'bool'" class="flex items-center gap-2.5 py-1">
-                      <Switch v-model="form[field.key]" />
-                      <span class="text-sm">{{ form[field.key] ? '已启用' : '已关闭' }}</span>
-                    </div>
-
-                    <!-- 滑条：数值型配置的简化输入，刻度标签可直接点击落到对应档位 -->
-                    <div v-else-if="field.type === 'slider'" class="pt-0.5">
-                      <div class="flex items-center gap-3">
-                        <div class="flex-1 min-w-0">
-                          <input
-                            type="range"
-                            class="block w-full cursor-pointer"
-                            :min="field.min ?? 0"
-                            :max="field.max ?? 100"
-                            :step="field.step || 1"
-                            :value="form[field.key]"
-                            :style="{ '--slider-pct': sliderPercent(field) + '%' }"
-                            @input="form[field.key] = Number($event.target.value)"
-                          />
-                          <div v-if="(field.ticks || []).length" class="flex justify-between gap-2 mt-0.5">
-                            <button
-                              v-for="(tick, i) in field.ticks"
-                              :key="tick"
-                              type="button"
-                              class="text-[11px] leading-none transition-colors"
-                              :class="Number(form[field.key]) >= tickValue(field, i) ? 'text-[#11a89b] font-semibold' : 'text-slate-400 hover:text-slate-600'"
-                              @click="form[field.key] = tickValue(field, i)"
-                            >{{ tick }}</button>
-                          </div>
-                        </div>
-                        <span class="w-12 shrink-0 text-right text-sm font-semibold tabular-nums text-slate-700">{{ form[field.key] }}</span>
-                      </div>
-                    </div>
-
-                    <!-- 多行文本没有对应的组件库控件，保留原生 textarea -->
-                    <textarea v-else-if="field.type === 'text'" v-model="form[field.key]" rows="4" :placeholder="placeholderOf(field)" :class="inputClass + ' font-mono'" />
-                    <textarea v-else-if="field.type === 'strings' || field.type === 'ints'" v-model="form[field.key]" rows="3" placeholder="每行一个" :class="inputClass + ' font-mono'" />
-
-                    <p v-if="field.help" class="text-xs text-slate-400 mt-1.5">{{ field.help }}</p>
-                    <p
-                      v-if="field.key === 'bot.admin_panel.enable' && form[field.key] === false"
-                      class="text-xs text-[#ff9f0a] mt-1.5"
-                    >
-                      关闭并重启后将无法访问本面板。如需重新开启，可设置环境变量
-                      <code class="font-mono bg-amber-50 px-1 rounded">ANIA_BOT_ADMIN_PANEL_ENABLE=true</code>
-                      覆盖配置后重启 Bot。
-                    </p>
-                  </div>
-                </div>
+              <div class="flex gap-2">
+                <Input
+                  v-model="presetName"
+                  placeholder="预设名称，如：DeepSeek 日常"
+                  @keyup.enter="onSavePreset()"
+                />
+                <Button
+                  type="primary"
+                  size="small"
+                  class="shrink-0"
+                  :disabled="presetSaving || !presetName.trim()"
+                  @click="onSavePreset()"
+                >
+                  {{ presetSaving ? '保存中...' : '保存当前配置' }}
+                </Button>
               </div>
+
+              <p v-if="presets.length === 0" class="text-sm text-slate-400">还没有预设。调整好配置后，在上方输入名称即可保存。</p>
+              <ul v-else class="divide-y divide-slate-100 border border-white/60 rounded-lg">
+                <li v-for="p in presets" :key="p.name" class="flex items-center gap-3 px-4 py-3">
+                  <div class="min-w-0 flex-1">
+                    <p class="text-sm font-medium text-slate-800 truncate">{{ p.name }}</p>
+                    <p class="text-xs text-slate-400 mt-0.5">{{ p.key_count }} 项配置 · 更新于 {{ formatPresetTime(p.updated_at) }}</p>
+                  </div>
+                  <Button type="primary" size="small" class="shrink-0" @click="onApplyPreset(p)">应用</Button>
+                  <Tooltip title="用当前配置覆盖该预设">
+                    <Button type="default" size="small" class="shrink-0" @click="onSavePreset(p.name)">更新</Button>
+                  </Tooltip>
+                  <Button type="default" size="small" danger class="shrink-0" @click="onDeletePreset(p)">删除</Button>
+                </li>
+              </ul>
             </div>
           </Transition>
         </Card>
-      </template>
 
-      <!-- 高级模式：原始 JSON -->
-      <Card v-else class="space-y-3">
-        <p class="text-xs text-slate-500">全部配置键的扁平 JSON 视图（键为小写点分路径）。编辑后点击保存。</p>
-        <textarea v-model="rawText" rows="24" spellcheck="false" class="w-full bg-slate-950/85 text-slate-200 rounded-lg px-4 py-3 text-xs font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30" />
-        <div class="flex items-center gap-3">
-          <Button type="default" size="small" @click="formatRaw">格式化</Button>
-          <Button type="primary" size="small" :disabled="saving" @click="onSaveRaw">保存</Button>
-          <span v-if="rawError" class="text-sm text-[#ff3b30]">{{ rawError }}</span>
-        </div>
-      </Card>
+        <!-- 表单模式 -->
+        <template v-if="!rawMode">
+          <!-- 分类页签 -->
+          <div v-if="!searching" class="flex items-center gap-2 flex-wrap">
+            <Button
+              v-for="cat in cards"
+              :key="cat.name"
+              size="small"
+              :type="activeCategory === cat.name ? 'primary' : 'default'"
+              @click="selectCategory(cat.name)"
+            >
+              {{ cat.name }}
+              <span class="ml-1.5">{{ cat.total }} 项</span>
+            </Button>
+            <Button type="default" size="small" class="ml-auto" @click="toggleAll">
+              {{ allOpen ? '收起全部' : '展开全部' }}
+            </Button>
+          </div>
+
+          <Card
+            v-for="node in displayCards"
+            :key="node.name"
+            :id="sectionId(node.name)"
+            style="padding: 0"
+            class="scroll-mt-24 overflow-hidden"
+          >
+            <Button type="text" block class="[&>span]:w-full" @click="toggleGroup(node.name)">
+              <span class="flex items-center justify-between gap-3 w-full">
+                <span class="flex items-center gap-2.5 min-w-0">
+                  <span class="w-7 h-7 rounded-lg flex items-center justify-center text-white shrink-0 [&>svg]:w-4 [&>svg]:h-4" :class="groupColor(node)" v-html="groupIcon(node)" />
+                  <span class="truncate">{{ node.name }}</span>
+                  <span class="shrink-0 font-normal">{{ cardCount(node) }} 项</span>
+                </span>
+                <span class="flex items-center gap-3 shrink-0">
+                  <span v-if="groupChanged(node)" class="text-[11px] text-[#ff9f0a]">● 有修改</span>
+                  <svg class="w-4 h-4 transition-transform duration-200" :class="isOpen(node) ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
+                </span>
+              </span>
+            </Button>
+
+            <Transition name="fade">
+              <div v-show="isOpen(node)" class="p-4 sm:p-6 border-t border-white/50" :class="{ 'space-y-5': hasSubs(node) }">
+                <!-- 子分组分节：线框归类；平铺分组只有一个无名分节，直接铺字段 -->
+                <div
+                  v-for="s in node.sections"
+                  :key="s.name"
+                  :id="s.name !== node.name ? sectionId(s.name) : undefined"
+                  :class="hasSubs(node) ? 'rounded-lg border border-white/60 p-5 scroll-mt-24' : ''"
+                >
+                  <p v-if="s.label" class="flex items-center gap-2 text-xs font-semibold text-slate-500 mb-4">
+                    <span class="w-1 h-3.5 rounded-full bg-zinc-400" />
+                    {{ s.label }}
+                    <span class="text-[10px] font-normal text-slate-400">{{ s.fields.length }} 项</span>
+                  </p>
+                  <div class="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-5">
+                    <div v-for="field in s.fields" :key="field.key" :class="{ 'lg:col-span-2': ['text', 'strings', 'ints', 'multiselect', 'slider'].includes(field.type) }">
+                      <label class="block text-xs font-medium text-slate-700 mb-1.5">
+                        {{ field.label }}
+                        <span class="text-slate-400 font-normal ml-1">{{ field.key }}</span>
+                      </label>
+
+                      <Input v-if="field.type === 'string'" v-model="form[field.key]" :placeholder="placeholderOf(field)" />
+                      <div v-else-if="field.type === 'password'" class="flex gap-2">
+                        <Input v-model="form[field.key]" type="password" :placeholder="placeholderOf(field)" @update:modelValue="cleared[field.key] = false" />
+                        <Button
+                          v-if="valueOf(field.key) === MASK"
+                          type="default"
+                          size="small"
+                          class="shrink-0"
+                          @click="clearField(field)"
+                        >清除</Button>
+                      </div>
+                      <!-- int / float 的表单值本身就是字符串（保存时 parseInt/parseFloat 解析），保持原类型 -->
+                      <Input v-else-if="field.type === 'int'" v-model="form[field.key]" type="number" :placeholder="placeholderOf(field)" />
+                      <Input v-else-if="field.type === 'float'" v-model="form[field.key]" type="number" :placeholder="placeholderOf(field)" />
+                      <Select v-else-if="field.type === 'select'" v-model="form[field.key]" class="w-full" :options="selectOptions(field)" />
+                      <div v-else-if="field.type === 'multiselect'" class="space-y-2">
+                        <Checkbox v-model="form[field.key]" :options="checkboxOptions(field)" />
+                        <div class="flex items-center gap-2.5">
+                          <span>已选 {{ selectedCount(field) }}/{{ (field.options || []).length }}</span>
+                          <span class="h-3 w-px bg-slate-300/70" />
+                          <Button type="link" size="small" @click="selectAllOptions(field)">全选</Button>
+                          <Button type="link" size="small" @click="clearOptions(field)">清空</Button>
+                        </div>
+                      </div>
+
+                      <div v-else-if="field.type === 'bool'" class="flex items-center gap-2.5 py-1">
+                        <Switch v-model="form[field.key]" />
+                        <span class="text-sm">{{ form[field.key] ? '已启用' : '已关闭' }}</span>
+                      </div>
+
+                      <!-- 滑条：数值型配置的简化输入，刻度标签可直接点击落到对应档位 -->
+                      <div v-else-if="field.type === 'slider'" class="pt-0.5">
+                        <div class="flex items-center gap-3">
+                          <div class="flex-1 min-w-0">
+                            <input
+                              type="range"
+                              class="block w-full cursor-pointer"
+                              :min="field.min ?? 0"
+                              :max="field.max ?? 100"
+                              :step="field.step || 1"
+                              :value="form[field.key]"
+                              :style="{ '--slider-pct': sliderPercent(field) + '%' }"
+                              @input="form[field.key] = Number($event.target.value)"
+                            />
+                            <div v-if="(field.ticks || []).length" class="flex justify-between gap-2 mt-0.5">
+                              <button
+                                v-for="(tick, i) in field.ticks"
+                                :key="tick"
+                                type="button"
+                                class="text-[11px] leading-none transition-colors"
+                                :class="Number(form[field.key]) >= tickValue(field, i) ? 'text-[#11a89b] font-semibold' : 'text-slate-400 hover:text-slate-600'"
+                                @click="form[field.key] = tickValue(field, i)"
+                              >{{ tick }}</button>
+                            </div>
+                          </div>
+                          <span class="w-12 shrink-0 text-right text-sm font-semibold tabular-nums text-slate-700">{{ form[field.key] }}</span>
+                        </div>
+                      </div>
+
+                      <!-- 多行文本没有对应的组件库控件，保留原生 textarea -->
+                      <textarea v-else-if="field.type === 'text'" v-model="form[field.key]" rows="4" :placeholder="placeholderOf(field)" :class="inputClass + ' font-mono'" />
+                      <textarea v-else-if="field.type === 'strings' || field.type === 'ints'" v-model="form[field.key]" rows="3" placeholder="每行一个" :class="inputClass + ' font-mono'" />
+
+                      <p v-if="field.help" class="text-xs text-slate-400 mt-1.5">{{ field.help }}</p>
+                      <p
+                        v-if="field.key === 'bot.admin_panel.enable' && form[field.key] === false"
+                        class="text-xs text-[#ff9f0a] mt-1.5"
+                      >
+                        关闭并重启后将无法访问本面板。如需重新开启，可设置环境变量
+                        <code class="font-mono bg-amber-50 px-1 rounded">ANIA_BOT_ADMIN_PANEL_ENABLE=true</code>
+                        覆盖配置后重启 Bot。
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Transition>
+          </Card>
+        </template>
+
+        <!-- 高级模式：原始 JSON -->
+        <Card v-else class="space-y-3">
+          <p class="text-xs text-slate-500">全部配置键的扁平 JSON 视图（键为小写点分路径）。编辑后点击保存。</p>
+          <textarea v-model="rawText" rows="24" spellcheck="false" class="w-full bg-slate-950/85 text-slate-200 rounded-lg px-4 py-3 text-xs font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30" />
+          <div class="flex items-center gap-3">
+            <Button type="default" size="small" @click="formatRaw">格式化</Button>
+            <Button type="primary" size="small" :disabled="saving" @click="onSaveRaw">保存</Button>
+            <span v-if="rawError" class="text-sm text-[#ff3b30]">{{ rawError }}</span>
+          </div>
+        </Card>
+      </div>
+
+      <!-- 浮动保存条 -->
+      <Transition name="fade">
+        <Card
+          v-if="!rawMode && dirty"
+          color="app-yellow"
+          style="padding: 8px 8px 8px 20px"
+          class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 shadow-xl"
+        >
+          <span class="text-sm font-semibold">有未保存的修改</span>
+          <Button type="text" size="small" @click="resetForm">放弃</Button>
+          <Button type="primary" size="small" :disabled="saving" @click="onSave">
+            {{ saving ? '保存中...' : '保存修改' }}
+          </Button>
+        </Card>
+      </Transition>
     </div>
-
-    <!-- 浮动保存条 -->
-    <Transition name="fade">
-      <Card
-        v-if="!rawMode && dirty"
-        color="app-yellow"
-        style="padding: 8px 8px 8px 20px"
-        class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 shadow-xl"
-      >
-        <span class="text-sm font-semibold">有未保存的修改</span>
-        <Button type="text" size="small" @click="resetForm">放弃</Button>
-        <Button type="primary" size="small" :disabled="saving" @click="onSave">
-          {{ saving ? '保存中...' : '保存修改' }}
-        </Button>
-      </Card>
-    </Transition>
   </div>
 </template>
 
@@ -374,6 +377,8 @@ import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { Button, Card, Checkbox, Input, Notification, Select, Switch, Tooltip } from 'animal-island-vue'
 import { api } from '../api.js'
 import QrLoginCard from '../components/QrLoginCard.vue'
+import PageTabs from '../components/PageTabs.vue'
+import { CONFIG_TABS } from '../navTabs.js'
 
 const MASK = '********'
 const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow'

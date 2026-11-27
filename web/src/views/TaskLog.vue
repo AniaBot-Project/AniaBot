@@ -3,7 +3,7 @@
     <!-- 定时任务管理 -->
     <Card style="padding: 0" class="overflow-hidden">
       <div class="px-6 py-4 border-b border-zinc-100 flex items-center justify-between">
-        <h2 class="text-[10px] tracking-[0.15em] uppercase text-zinc-800 font-medium">定时任务</h2>
+        <h2 class="text-[10px] tracking-[0.15em] uppercase text-zinc-800 font-medium">AI 定时任务</h2>
         <div class="flex items-center gap-3">
           <Button type="text" size="small" @click="loadClocks">刷新</Button>
           <Button type="primary" size="small" @click="openCreate">新建任务</Button>
@@ -732,7 +732,7 @@ function fmtInt(n) {
   return v.toLocaleString('en-US')
 }
 
-// 缓存命中率 = 命中 token / 输入 token（与「Token 统计」页口径一致：cached / prompt）
+// 缓存命中率 = 命中 token / 输入 token（与「Token 用量 → 用量统计」页口径一致：cached / prompt）
 function cacheRate(log) {
   const prompt = Number(log?.prompt_tokens) || 0
   const cached = Number(log?.cached_tokens) || 0

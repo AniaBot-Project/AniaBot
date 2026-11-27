@@ -205,7 +205,7 @@ historical viper keys (`plugin.ai_chat_bot.base_url`, …), values JSON-encoded,
   `ANIA_<KEY_UPPERCASED>` (dots/dashes → underscores), e.g. `ANIA_BOT_ADMIN_PANEL_LISTEN`,
   `ANIA_PLUGIN_AI_CHAT_BOT_API_KEY`. Non-strings are parsed as JSON. Startup logs each override.
   This takes precedence over the DB value and is the escape hatch when the panel is disabled.
-- **`files.*` JSON keys** (raw JSON text, edited via the panel 扩展配置 page or the AI's
+- **`files.*` JSON keys** (raw JSON text, edited via the panel 配置管理 → 扩展配置 tab or the AI's
   `config_file_get/set` tools): `files.mcp_json` (MCP servers), `files.prompt_json` (per-group/
   friend prompt overrides), `files.hooks_json` (AI agent hooks), `files.commands_json` (custom
   slash commands). `prompt`/`hooks`/`commands` hot-reload within seconds (TTL re-read); `mcp`
@@ -367,12 +367,12 @@ Rules that most often break plugins:
   `MsgLogMediaSource`, `MsgLogDeleteSource`, `MsgLogSessionDeleteSource`) while collecting,
   turning them into plain function pointers on the panel options. Core also probes
   `adminpanel.TaskSource` / `adminpanel.GoalSource` (implemented by `pluginaichat` via
-  `taskpanel.go`) into `AgentTasks` / `AgentGoals` panel options for the 后台任务 page. The panel
-  server itself then
-  probes `SkillToggleSource`/`SkillDetailSource` (on the skill provider) and
+  `taskpanel.go`) into `AgentTasks` / `AgentGoals` panel options for the 后台任务 tab of the
+  AI 运行记录 page. The panel server itself then probes
+  `SkillToggleSource`/`SkillDetailSource` (on the skill provider) and
   `MemoryBatchDeleteSource`/`KnowledgeBatchDeleteSource` (on the memory/KB providers) for the
   multi-select and detail pages. Core also probes `adminpanel.ContextSource` (implemented by
-  `pluginaichat` via `contextpanel.go`) into `Options.Contexts` for the 上下文管理 page.
+  `pluginaichat` via `contextpanel.go`) into `Options.Contexts` for the 会话上下文 page.
   Adapters may implement `adapter.ContactsExt` (address book) and
   `adminpanel.QRLoginSource` (WeChat QR login) — core collects all of them across adapters.
 
@@ -576,7 +576,7 @@ up in a snapshot. Tests: `contextpanel_test.go`, `adminpanel/contexts_test.go`.
   unblocked. Caps: 20 unfinished board tasks per session, list returns 50 rows. Plan mode blocks
   create/claim/complete but allows list.
 - **Panel task view** (`taskpanel.go`): implements `adminpanel.TaskSource` / `TaskAdminSource` /
-  `GoalSource` for the panel 后台任务 page: `AgentTasks(limit)` reads the most recent
+  `GoalSource` for the panel 后台任务 tab (AI 运行记录 page): `AgentTasks(limit)` reads the most recent
   `ania_agent_task` rows (`GET /api/agent-tasks?limit=…`, default 100, 1–500) including
   `parent_id` and `prompt`, so team runs / members and subagents can be inspected with their task
   instructions, member summaries and tool-call steps; `AgentTasksExport`/`AgentTasksClear` back
@@ -617,7 +617,7 @@ up in a snapshot. Tests: `contextpanel_test.go`, `adminpanel/contexts_test.go`.
   background rows + the last few turns from an in-process ring (`recentTurns`, lost on restart);
   `/resume <id>` re-queues an interrupted subagent/handoff task as a synthetic message (this
   session only); a janitor deletes finished rows past `task.retention_days` (default 7, every 6h).
-  The panel 后台任务 page exports the full rows as JSON and clears finished rows (running/queued
+  The panel 后台任务 tab exports the full rows as JSON and clears finished rows (running/queued
   rows are never deleted); task `prompt`/`result`/`error` and `meta.tool_calls` are stored
   untruncated, the same policy as the Query log.
   If the SQL probe/DDL fails, task persistence degrades to in-memory/no-op without blocking
@@ -628,7 +628,7 @@ up in a snapshot. Tests: `contextpanel_test.go`, `adminpanel/contexts_test.go`.
   prompt. `team_run` runs members in parallel as ephemeral agents and synthesizes their outputs;
   each run also writes a `team_run` parent row plus one `team_member` child row per member
   (task instruction, output, status, tokens, duration and capped tool-call steps in `meta`), so
-  the panel 后台任务 page is the run log for both teams and subagents.
+  the panel 后台任务 tab is the run log for both teams and subagents.
   `team_create`/`team_list`/`team_delete` manage teams; caps: 20 teams/scope, 10 stored
   members, 5 concurrent members, name ≤20 runes, role ≤500 runes.
 - **Todo list** (`todo.go`): `todo_write` (main sessions, `todo.enable`, default on) replaces the
@@ -686,7 +686,7 @@ up in a snapshot. Tests: `contextpanel_test.go`, `adminpanel/contexts_test.go`.
   `quota.global_daily_tokens`); exceeding rejects new AI requests. Panel can reset.
 - **Logs**: every AI request writes a query-log row (`querylog`, kinds chat/proactive, chat
   types group/friend/panel), clock runs write task-log rows (`tasklog`), management actions write
-  op-log rows (`oplog`). Token stats and the panel's Token 统计 page derive from the query log.
+  op-log rows (`oplog`). Token stats and the panel's Token 用量 page derive from the query log.
   Query-log `senders` ignore synthetic messages (sender `qq:0`, e.g. subagent completion) and fall
   back to the session target id, so the panel never shows `来自 qq:0`.
 
@@ -805,15 +805,15 @@ cross-compile friendly.
 | Component | Backing store | Panel page |
 | --- | --- | --- |
 | `consollog` | in-memory ring (~2000 entries), wraps slog + `log` | 控制台日志 (`/#/console`) |
-| `msglog` | `p.Storage` (memory: cleared on restart; redis: survives) | 消息日志 (`/#/msglogs`) |
-| `oplog` | SQL `ania_op_log` (package singleton) | 操作日志 (`/#/oplogs`) |
+| `msglog` | `p.Storage` (memory: cleared on restart; redis: survives) | 消息与操作日志 · 消息日志 (`/#/msglogs`) |
+| `oplog` | SQL `ania_op_log` (package singleton) | 消息与操作日志 · 操作日志 (`/#/oplogs`) |
 | `tasklog` | SQL `ania_task_log` | AI 定时任务 (`/#/tasklogs`) |
-| `querylog` | SQL `ania_query_log` | Query 日志 (`/#/querylogs`) |
+| `querylog` | SQL `ania_query_log` | AI 运行记录 · 对话记录 (`/#/querylogs`) |
 
 `msglog` records inbound group/friend messages, notice events and Bot-sent messages (including
 merge-forwards and stream replies, with failure flags) through a chat-style session index; the
 panel proxies media and refreshes expired QQ URLs via `bot.MediaRefresher`. Only `pluginlog`
-writes to it. `querylog` feeds Token 统计/配额 pages; each normal-chat row also carries
+writes to it. `querylog` feeds the Token 用量 page (用量统计 / 配额限制 tabs); each normal-chat row also carries
 `stop_reason` (`completed|aborted|max_tokens|error|watchdog|timeout|user_stop`) and, for
 historical rows, `task_id` (the related `t-…` row in `ania_agent_task`) — stop reason is filled in
 when the turn finishes (normal completion, cancellation, hard deadline, watchdog, ordinary error);
@@ -830,14 +830,22 @@ the panel Query-log list/detail and export show them, and `task_id` doubles as a
   router, default `http://127.0.0.1:7700` (`bot.admin_panel.listen`; env override
   `ANIA_BOT_ADMIN_PANEL_ENABLE` if the panel is disabled in config). Same process as the bot;
   session cookie `ania_session`, 24h sliding; login lockout. `-set-password` CLI helper.
-- Pages: 状态总览, 控制台日志, 操作日志, 消息日志, 试聊室, 上下文管理 (`/#/contexts`: per-session
-  full context — system prompt sections / message history with tool calls / tool definitions,
-  with token estimates; clear one/selected/all, delete a session, JSON export; busy sessions
-  need `terminate` confirmation), Query 日志, Token 统计, 配额管理,
-  AI 定时任务, 后台任务 (`/#/agent-tasks`, task registry + active goals, JSON export + clear
-  finished rows), 技能管理,
-  记忆管理, 知识库, Agent 团队, 配置管理 (with export + presets),
-  扩展配置 (`mcp`/`prompt`/`hooks`/`commands`), 通讯录, 插件市场, 自动更新, 外观设置.
+- Pages are grouped in the sidebar, one entry per group; pages of a group share a `PageTabs`
+  strip and keep their own routes, so old links, bookmarks and deep links (`?task=` /
+  `?task_id=`) still work:
+  **总览** 状态总览, Token 用量 (`/#/tokenstats` 用量统计 + `/#/quota` 配额限制);
+  **对话** 试聊室, 会话上下文 (`/#/contexts`: per-session full context — system prompt
+  sections / message history with tool calls / tool definitions, with token estimates; clear
+  one/selected/all, delete a session, JSON export; busy sessions need `terminate`
+  confirmation);
+  **日志** 控制台日志, 消息与操作日志 (`/#/msglogs` 消息日志 + `/#/oplogs` 操作日志),
+  AI 运行记录 (`/#/querylogs` 对话记录 + `/#/agent-tasks` 后台任务: task registry + active
+  goals, JSON export + clear finished rows);
+  **AI 能力** AI 定时任务, 记忆与知识库 (`/#/memory` 长期记忆 + `/#/knowledge` 知识库),
+  技能管理, Agent 团队;
+  **系统** 配置管理 (`/#/config` 参数配置 with export + presets + `/#/files` 扩展配置:
+  `mcp`/`prompt`/`hooks`/`commands`), 通讯录, 插件市场, 自动更新.
+  外观设置 (`/#/appearance`) is a sidebar-footer shortcut only, not a nav item.
 - First run: `meta.setup_pending=true` → panel forces the setup wizard and adapters do **not
   connect** until it completes and the bot restarts.
 - Marketplace (`bot/marketplace`): reads the AniaBot-Plugins GitHub repo (cached), supports

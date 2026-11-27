@@ -566,7 +566,7 @@ const SKILLS = [
     content: '---\nname: aniabot\ndescription: AniaBot 自身说明书（配置项与生效时机、Web 面板、聊天指令、排障）\n---\n\n# AniaBot 自身说明书\n\n你跑在 AniaBot 上。全部配置存在数据库里，改完重启生效；重启由管理员发送 /reboot 或面板点重启。\n\n- 查配置用 config_get（需开启配置管理工具），改配置用 config_set（需管理员审批，重启生效）\n- 扩展配置 config_file_get/set 管理 mcp / prompt / hooks / commands 四份 JSON，prompt/hooks/commands 数秒生效，mcp 需重启\n- 详细键表见 reference/config.md，面板页面见 reference/panel.md，排障见 reference/troubleshooting.md\n',
     files: [
       { name: 'reference/config.md', kind: 'reference', size: 13041, content: '# AniaBot 配置全景\n\n配置全部存在数据库（ania_kv 表），修改后重启生效。详见 reference/config.md 的键表。\n' },
-      { name: 'reference/panel.md', kind: 'reference', size: 3270, content: '# Web 控制面板地图\n\n默认 http://127.0.0.1:7700，页面：状态总览、控制台日志、Query 日志、技能管理、配置管理、扩展配置、插件市场……\n' },
+      { name: 'reference/panel.md', kind: 'reference', size: 3270, content: '# Web 控制面板地图\n\n默认 http://127.0.0.1:7700，侧边栏分组：总览（状态总览、Token 用量）、对话（试聊室、会话上下文）、日志（控制台日志、消息与操作日志、AI 运行记录）、AI 能力（AI 定时任务、记忆与知识库、技能管理、Agent 团队）、系统（配置管理、通讯录、插件市场、自动更新）。\n' },
       { name: 'reference/troubleshooting.md', kind: 'reference', size: 5570, content: '# 排障手册\n\n先看面板「控制台日志」，再区分是没连上、没配置、被拦住、超时还是外部接口报错。\n' },
     ],
   },

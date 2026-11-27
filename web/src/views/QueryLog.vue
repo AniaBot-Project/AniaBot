@@ -1,5 +1,7 @@
 <template>
   <div class="space-y-4">
+    <PageTabs :tabs="AI_RUN_TABS" />
+
     <!-- 筛选与操作栏 -->
     <div class="flex items-center justify-between flex-wrap gap-3">
       <div class="flex items-center gap-2 flex-wrap">
@@ -102,7 +104,7 @@
     <section class="space-y-3">
       <!-- 首次加载 / 切换筛选：先显示加载中，避免请求返回前误判为没有数据 -->
       <Card v-if="loading && !logs.length" style="padding: 0">
-        <LoadingState text="正在加载 Query 日志…" :rows="3" />
+        <LoadingState text="正在加载对话记录…" :rows="3" />
       </Card>
 
       <Card v-else-if="loadError && !logs.length" style="padding: 0">
@@ -114,7 +116,7 @@
 
       <Card v-else-if="logs.length === 0" style="padding: 0">
         <div class="py-12 text-sm text-slate-400 text-center">
-          暂无符合条件的 Query 记录（@ 机器人、私聊或面板试聊触发 AI 回复、或主动互动发言后在此展示）
+          暂无符合条件的对话记录（@ 机器人、私聊或面板试聊触发 AI 回复、或主动互动发言后在此展示）
         </div>
       </Card>
 
@@ -317,6 +319,8 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { Button, Card, Input, Modal, Notification, Switch, Tag, Tooltip } from 'animal-island-vue'
 import { api } from '../api.js'
 import LoadingState from '../components/LoadingState.vue'
+import PageTabs from '../components/PageTabs.vue'
+import { AI_RUN_TABS } from '../navTabs.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -432,7 +436,7 @@ function resetList() {
   loadError.value = ''
 }
 
-// 按当前筛选条件导出 Query 日志（后端返回 JSON 附件，含完整工具结果）
+// 按当前筛选条件导出对话记录（后端返回 JSON 附件，含完整工具结果）
 async function exportLogs() {
   if (exporting.value) return
   exporting.value = true
@@ -445,11 +449,11 @@ async function exportLogs() {
   }
 }
 
-// 清除当前筛选条件下的 Query 日志（无筛选时清空全部），不可恢复
+// 清除当前筛选条件下的对话记录（无筛选时清空全部），不可恢复
 async function clearLogs() {
   if (clearing.value) return
   const scope = hasFilter.value ? '当前筛选条件下的' : '全部'
-  if (!await confirmAction(`确定清除${scope} Query 日志吗？清除后不可恢复，建议先导出备份。`)) return
+  if (!await confirmAction(`确定清除${scope}对话记录吗？清除后不可恢复，建议先导出备份。`)) return
   clearing.value = true
   try {
     const res = await api.clearQueryLogs({ ...applied })
@@ -517,7 +521,7 @@ function fmtInt(n) {
   return v.toLocaleString('en-US')
 }
 
-// 缓存命中率 = 命中 token / 输入 token（与「Token 统计」页口径一致：cached / prompt）
+// 缓存命中率 = 命中 token / 输入 token（与「Token 用量 → 用量统计」页口径一致：cached / prompt）
 function cacheRate(log) {
   const prompt = Number(log?.prompt_tokens) || 0
   const cached = Number(log?.cached_tokens) || 0

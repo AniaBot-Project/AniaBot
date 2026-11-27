@@ -1,5 +1,7 @@
 <template>
   <div class="space-y-5">
+    <PageTabs :tabs="CONFIG_TABS" />
+
     <Transition name="fade">
       <div v-if="saved" class="bg-[#34c759]/10 border border-[#34c759]/40 text-[#248a3d] text-sm rounded-xl px-4 py-3" v-html="savedHint" />
     </Transition>
@@ -195,6 +197,8 @@ import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue'
 import { Button, Card, Input, Modal, Select, Tabs } from 'animal-island-vue'
 import { api } from '../api.js'
 import LoadingState from '../components/LoadingState.vue'
+import PageTabs from '../components/PageTabs.vue'
+import { CONFIG_TABS } from '../navTabs.js'
 
 const inputClass = 'w-full border border-slate-300/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0071e3]/30 focus:border-[#0071e3]/50 transition-shadow'
 const labelClass = 'block text-xs font-medium text-slate-600 mb-1.5'

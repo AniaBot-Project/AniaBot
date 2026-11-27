@@ -1,5 +1,7 @@
 <template>
   <div class="space-y-6">
+    <PageTabs :tabs="USAGE_TABS" />
+
     <!-- 头部 -->
     <div class="flex items-center justify-between flex-wrap gap-3">
       <span class="text-xs text-zinc-500">
@@ -105,6 +107,8 @@ import { computed, onMounted, ref } from 'vue'
 import { Button, Card, Progress, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
 import LoadingState from '../components/LoadingState.vue'
+import PageTabs from '../components/PageTabs.vue'
+import { USAGE_TABS } from '../navTabs.js'
 
 const data = ref({})
 const notEnabled = ref(false)

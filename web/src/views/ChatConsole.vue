@@ -211,7 +211,7 @@
           <span class="composer-hint">
             <template v-if="busy">AI 正在生成回复，可以先输入下一条消息，生成结束后再发送</template>
             <template v-else>
-              试聊会真实执行 AI 选中的工具（含文件 / 命令类），回复不会发送到任何平台；每轮对话会记入 Query 日志并计入 Token 统计
+              试聊会真实执行 AI 选中的工具（含文件 / 命令类），回复不会发送到任何平台；每轮对话会记入「AI 运行记录 → 对话记录」并计入 Token 用量
             </template>
           </span>
           <Button

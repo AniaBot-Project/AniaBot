@@ -1,5 +1,7 @@
 <template>
   <div class="space-y-4">
+    <PageTabs :tabs="AI_RUN_TABS" />
+
     <!-- 统计卡：运行中 / 等待 / 完成 / 失败 -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <Card v-for="s in stats" :key="s.key" style="padding: 0">
@@ -52,13 +54,13 @@
           <span>
             未在最近 {{ tasks.length }} 条后台任务中找到
             <span class="font-mono text-slate-700">{{ linkedTaskID }}</span>（可能已过保留期或不在最近记录中）。
-            普通回合不写入任务表，完整过程可在 Query 日志查看。
+            普通回合不写入任务表，完整过程可在「对话记录」查看。
           </span>
           <RouterLink
             class="text-[#0071e3] hover:underline"
             :to="{ path: '/querylogs', query: { task_id: linkedTaskID } }"
           >
-            查看 Query 日志 →
+            查看对话记录 →
           </RouterLink>
         </template>
         <template v-else>
@@ -76,7 +78,7 @@
       <div class="px-6 py-4 border-b border-zinc-100 flex items-center justify-between gap-3">
         <div class="min-w-0">
           <h2 class="text-[10px] tracking-[0.15em] uppercase text-zinc-800 font-medium">后台任务</h2>
-          <p class="text-[11px] text-zinc-400 mt-1">子代理 / 交接 / 工作流 / 团队运行等后台工作的完整执行记录都在这里；普通回合的完整过程请到「Query 日志」查看</p>
+          <p class="text-[11px] text-zinc-400 mt-1">子代理 / 交接 / 工作流 / 团队运行等后台工作的完整执行记录都在这里；普通回合的完整过程请到「对话记录」查看</p>
         </div>
         <span class="text-[11px] text-zinc-400 shrink-0">
           最近 {{ tasks.length }} 条<template v-if="filtered.length !== tasks.length"> · 筛选后 {{ filtered.length }} 条</template>
@@ -91,7 +93,7 @@
         <Button class="ml-2" type="text" size="small" @click="load">重试</Button>
       </p>
       <p v-else-if="!filtered.length" class="px-6 py-8 text-xs text-zinc-400 text-center tracking-wide">
-        {{ tasks.length ? '没有符合筛选条件的任务' : '暂无后台任务（子代理 / 交接 / 工作流 / 团队运行等工作会登记在这里；普通回合见 Query 日志）' }}
+        {{ tasks.length ? '没有符合筛选条件的任务' : '暂无后台任务（子代理 / 交接 / 工作流 / 团队运行等工作会登记在这里；普通回合见「对话记录」）' }}
       </p>
       <template v-else>
         <!-- 桌面 / 平板横屏：宽表格 -->
@@ -325,6 +327,8 @@ import { Button, Card, Input, Modal, Notification, Select, Switch, Tag } from 'a
 import { api } from '../api.js'
 import { confirmAction } from '../ui/confirm'
 import LoadingState from '../components/LoadingState.vue'
+import PageTabs from '../components/PageTabs.vue'
+import { AI_RUN_TABS } from '../navTabs.js'
 
 const route = useRoute()
 const router = useRouter()

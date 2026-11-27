@@ -46,15 +46,15 @@ AniaBot 是一个用 Go 写的插件驱动型多平台机器人框架，**你自
 | 管理员是谁、谁有权限 | 配置管理 → Bot 基础 → `bot.admin_ids`（每行一个，QQ 写 `qq:QQ号`） |
 | AI 模型 / API Key / API 格式 / 多模态 | 配置管理 → AI 对话 · 模型（`plugin.ai_chat_bot.base_url` / `api_key` / `model` / `api_format`） |
 | AI 人设、说话风格 | 配置管理 → AI 对话 · 模型 → 系统提示词 `plugin.ai_chat_bot.prompt` |
-| 只给某个群/某个人换人设 | 扩展配置 → `prompt`（`files.prompt_json`，键是 `qq:群号` / `fs:oc_xxx` 这类带前缀 ID） |
+| 只给某个群/某个人换人设 | 配置管理 → 扩展配置 → `prompt`（`files.prompt_json`，键是 `qq:群号` / `fs:oc_xxx` 这类带前缀 ID） |
 | 让 AI 能执行命令 / 读写文件 / 截图 | AI 对话 · 工具（`bash.enable`、`file_tools.enable`、`computer_use.enable` 等，默认全关） |
 | 让 AI 能改配置 / 管理技能 / 管理 MCP | AI 对话 · 工具（`config_tool.enable`、`skill_tool.enable`、`mcp_tool.enable`，默认全关） |
 | 技能的白名单、目录、启用禁用 | AI 对话 · 工具（`skills_dir` / `skills`），启停用面板「技能管理」页 |
-| 接一个 MCP 服务器 | 扩展配置 → `mcp`，或（已开启时）你的 `mcp_add` 工具；MCP 改动**重启后生效** |
+| 接一个 MCP 服务器 | 配置管理 → 扩展配置 → `mcp`，或（已开启时）你的 `mcp_add` 工具；MCP 改动**重启后生效** |
 | 定时提醒 / 周期任务 | 会话里 `/clock`，或你已注册的 `clock_*` 工具；面板「AI 定时任务」页可看执行记录 |
 | 让 AI 主动开口 | 配置管理 → AI 对话 · 主动互动（总开关 + 活跃度滑条），再按会话 `/proactive on` |
-| 记忆 / 知识库内容 | 面板「记忆管理」「知识库」页；会话里用 memory_* / kb_* 工具 |
-| Token 用量、每日配额 | AI 对话 · 配额（`quota.enable` / `daily_tokens` / `global_daily_tokens`）；面板「配额管理」「Token 统计」 |
+| 记忆 / 知识库内容 | 面板「记忆与知识库」（长期记忆 / 知识库 两个页签）；会话里用 memory_* / kb_* 工具 |
+| Token 用量、每日配额 | AI 对话 · 配额（`quota.enable` / `daily_tokens` / `global_daily_tokens`）；面板「Token 用量」（用量统计 / 配额限制 两个页签） |
 | 谁能用 AI（黑白名单） | 请求拦截插件（`plugin.interceptor.*`，按群/按用户/按群内成员） |
 | 复读机开关 | 复读机插件（`plugin.repeat.*`），或群内 `/close repeat`、`/enable repeat` |
 | 每日新闻推送 | 每日新闻插件（`plugin.dailynews.*`：cron、群列表），或 `/news` |
@@ -63,13 +63,13 @@ AniaBot 是一个用 Go 写的插件驱动型多平台机器人框架，**你自
 | AI 回复跑太久、复杂任务被打断 | AI 回合已不再受 `bot.msg_event_timeout_sec` 限制：软截止提醒 / 硬截止 / 无进展看门狗在 `plugin.ai_chat_bot.turn.*`（硬截止默认 4 小时），单次请求超时在 `plugin.ai_chat_bot.llm.*`；后台任务见 `/tasks` |
 | 多步骤任务、有依赖的流程怎么交给 AI | 直接描述目标即可，AI 会用 `subagent_run`（单个）/ `workflow_run`（有依赖的 1~8 步 DAG）/ `team_run`（多人并行）编排；可用 `team_task_*` 维护会话内持久任务板 |
 | 让 AI 持续推进一个长期目标 | 直接描述目标，AI 用 `goal_create` 登记；续跑开关与轮数上限在 AI 对话 · 回合与任务（`plugin.ai_chat_bot.goal.enable` / `goal.max_rounds`，默认 64 轮）；用户可用 `/goal` 查看/暂停/恢复/清除 |
-| 看后台任务、子代理、团队运行、目标进度 | 面板「后台任务」页（`/#/agent-tasks`：后台任务状态/类型/停止原因/结果与进行中的目标；普通回合看 Query 日志；团队运行与团队成员、子代理点击行可看任务指令、成员产出与工具调用步骤；可按筛选条件导出 JSON 或清除已结束记录），或会话里 `/tasks`（含最近回合） |
-| 看 AI 到底拿到了什么上下文 / 让某个会话忘掉历史 | 面板「上下文管理」页（`/#/contexts`：系统提示词三段、消息历史（含工具调用与结果）、工具定义与 token 估算；可清空单个/多个/全部会话的上下文、删除会话、导出 JSON；会话正在执行请求时会先确认再终止请求）；会话里发 `#新对话` 只清当前会话 |
+| 看后台任务、子代理、团队运行、目标进度 | 面板「AI 运行记录 → 后台任务」（`/#/agent-tasks`：后台任务状态/类型/停止原因/结果与进行中的目标；普通回合看「对话记录」页签；团队运行与团队成员、子代理点击行可看任务指令、成员产出与工具调用步骤；可按筛选条件导出 JSON 或清除已结束记录），或会话里 `/tasks`（含最近回合） |
+| 看 AI 到底拿到了什么上下文 / 让某个会话忘掉历史 | 面板「会话上下文」（`/#/contexts`：系统提示词三段、消息历史（含工具调用与结果）、工具定义与 token 估算；可清空单个/多个/全部会话的上下文、删除会话、导出 JSON；会话正在执行请求时会先确认再终止请求）；会话里发 `#新对话` 只清当前会话 |
 | 定时任务推送失败、发送超时 | 对应适配器的请求/上传超时（如 NapCat `bot.adapter.request_timeout_sec`） |
 | 装第三方插件 | 面板「插件市场」（安装/升级/卸载都会自动编译重启） |
 | 升级 AniaBot 本体 | 面板「自动更新」（需先在配置里填 `bot.update.source_dir` 源码目录） |
 | 忘掉面板密码 | 停掉 Bot 后执行 `./AniaBot -set-password 新密码`，再正常启动 |
-| 看日志 / 排查故障 | 面板「控制台日志」「操作日志」「Query 日志」「消息日志」+ `reference/troubleshooting.md` |
+| 看日志 / 排查故障 | 面板「控制台日志」「消息与操作日志」「AI 运行记录」+ `reference/troubleshooting.md` |
 
 ## 四、生效时机（最容易答错的地方）
 
@@ -77,8 +77,8 @@ AniaBot 是一个用 Go 写的插件驱动型多平台机器人框架，**你自
 | --- | --- |
 | 绝大多数配置键（模型、平台连接、工具开关、超时、面板地址……） | **重启后**（管理员 `/reboot` 或面板重启） |
 | `config_set` 写入的任何键 | **重启后** |
-| 扩展配置 `prompt` / `hooks` / `commands` | 保存后**数秒内自动生效**（无需重启） |
-| 扩展配置 `mcp` | **重启后** |
+| 扩展配置 `prompt` / `hooks` / `commands`（配置管理 → 扩展配置） | 保存后**数秒内自动生效**（无需重启） |
+| 扩展配置 `mcp`（配置管理 → 扩展配置） | **重启后** |
 | 面板「技能管理」里的启用/禁用 | 立即生效（写入 `plugin.ai_chat_bot.skills_disabled`） |
 | `/proactive on` / `/proactive off` | 立即生效，并写回 `plugin.ai_chat_bot.proactive.scopes`；面板手改该键后可用 `/proactive reload` 免重启重读 |
 | `plugin.ai_chat_bot.skills`（白名单） | **重启后**（面板上传/删除技能会自动热重载，但白名单本身在启动时读） |
@@ -117,8 +117,8 @@ AniaBot 是一个用 Go 写的插件驱动型多平台机器人框架，**你自
 | 启动后平台一直没连上 | 是否卡在首次设置向导（`meta.setup_pending` 未完成时**不连接任何平台**）；平台 `enable` 与连接参数（ws 地址 / token）是否正确 |
 | 改了配置没反应 | 99% 是没重启；只有第四节列的热生效项例外 |
 | 成员/群被拦了、AI 不回某人 | 查请求拦截插件名单（`plugin.interceptor.*`，含按平台的「可用平台」勾选） |
-| 回复很慢或中途停下 | 长任务已改为后台执行且默认不限轮数：面板「Query 日志」看卡在哪一步；`turn.*` 看软/硬截止与看门狗，`llm.*` 看单次请求/流空闲超时；用 `/tasks` 看后台任务与 `/resume` 恢复被中断任务 |
-| 429 / 上下文超限 / 余额不足 | 面板「Query 日志」「Token 统计」看消耗；上下文压缩模型（`compressor.*`）是否可用；`max_context_tokens` 是否偏小 |
+| 回复很慢或中途停下 | 长任务已改为后台执行且默认不限轮数：面板「AI 运行记录 → 对话记录」看卡在哪一步；`turn.*` 看软/硬截止与看门狗，`llm.*` 看单次请求/流空闲超时；用 `/tasks` 看后台任务与 `/resume` 恢复被中断任务 |
+| 429 / 上下文超限 / 余额不足 | 面板「AI 运行记录 → 对话记录」「Token 用量」看消耗；上下文压缩模型（`compressor.*`）是否可用；`max_context_tokens` 是否偏小 |
 | 图片看不懂 | `plugin.ai_chat_bot.multimodal`（主模型是否支持图片）+ 备用识图 `ocr.*` |
 | MCP 工具没出现 | `files.mcp_json` 格式/命令是否正确（MCP 改动要重启）；懒加载模式下先 `mcp_discover_*` 再 `mcp_load_*` |
 | 技能没起作用 | 白名单 `plugin.ai_chat_bot.skills` 是否漏了它、是否被禁用；外置技能改完文件要 `skill_reload` |

@@ -1,5 +1,7 @@
 <template>
   <div class="space-y-4">
+    <PageTabs :tabs="LOG_TABS" />
+
     <!-- 筛选与操作栏 -->
     <div class="flex items-center justify-between flex-wrap gap-3">
       <div class="filter-group overflow-x-auto">
@@ -87,6 +89,8 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { Button, Card, Input, Switch, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
 import LoadingState from '../components/LoadingState.vue'
+import PageTabs from '../components/PageTabs.vue'
+import { LOG_TABS } from '../navTabs.js'
 
 const categoryTabs = [
   { value: '', label: '全部' },
