@@ -18,8 +18,24 @@ import (
 	"github.com/jeanhua/AniaBot/common/plugininfo"
 )
 
-// rebootDelay /reboot 重启前的延迟，给回复消息留出发送时间
-const rebootDelay = 2 * time.Second
+// rebootForceFlag 判断 /reboot 是否带强制重启参数（force / -f）。
+func rebootForceFlag(args []string) bool {
+	for _, a := range args {
+		if strings.EqualFold(strings.TrimSpace(a), "force") || a == "-f" {
+			return true
+		}
+	}
+	return false
+}
+
+// rebootReplyText 重启命令的回复文案：默认走优雅重启（等待进行中的请求完成），
+// 强制模式立即重启。
+func rebootReplyText(force bool) string {
+	if force {
+		return "AniaBot 将立即强制重启，重启期间将短暂离线..."
+	}
+	return "AniaBot 即将重启：有正在处理的消息会先等待其完成，重启期间将短暂离线...（管理员可用 /reboot force 立即重启）"
+}
 
 type PluginSys struct {
 	plugin.Meta
@@ -88,18 +104,23 @@ func (p *PluginSys) OnFriendMsg(ctx context.Context, bot bot.Bot, cmd command.Co
 			}
 			return false, nil
 		}
+		force := rebootForceFlag(cmd.Args)
 		builder := msgchain.Builder().Friend()
-		builder.Text("AniaBot即将重启，重启期间将短暂离线...")
+		builder.Text(rebootReplyText(force))
 		_, ok := bot.SendFriendMsg(msg.Sender.UserId, builder.Build())
 		if !ok {
 			p.Logger.Error("Bot消息发送失败，无法响应 /reboot")
 		}
-		oplog.Record(oplog.CategorySystem, "restart", fmt.Sprintf("管理员 %s 通过 /reboot 命令重启 Bot", msg.Sender.UserId))
-		// 延迟重启：先让回复走完发送流程，再替换进程
-		go func() {
-			time.Sleep(rebootDelay)
-			sysrestart.Self(p.Logger)
-		}()
+		detail := fmt.Sprintf("管理员 %s 通过 /reboot 命令重启 Bot", msg.Sender.UserId)
+		if force {
+			detail += "（强制立即重启）"
+		}
+		oplog.Record(oplog.CategorySystem, "restart", detail)
+		sysrestart.RequestRestart(p.Logger, sysrestart.RestartOptions{
+			Source: "command",
+			Reason: "管理员 /reboot 命令",
+			Force:  force,
+		})
 		return false, nil
 	}
 	return true, nil
@@ -142,17 +163,22 @@ func (p *PluginSys) OnGroupMsg(ctx context.Context, bot bot.Bot, cmd command.Com
 			}
 			return false, nil
 		}
-		c.Text(" AniaBot即将重启，重启期间将短暂离线...")
+		force := rebootForceFlag(cmd.Args)
+		c.Text(" " + rebootReplyText(force))
 		_, ok := bot.SendGroupMsg(msg.GroupId, c.Build())
 		if !ok {
 			p.Logger.Error("Bot消息发送失败，无法响应 /reboot")
 		}
-		oplog.Record(oplog.CategorySystem, "restart", fmt.Sprintf("管理员 %s 通过 /reboot 命令重启 Bot（群 %s）", msg.Sender.UserId, msg.GroupId))
-		// 延迟重启：先让回复走完发送流程，再替换进程
-		go func() {
-			time.Sleep(rebootDelay)
-			sysrestart.Self(p.Logger)
-		}()
+		detail := fmt.Sprintf("管理员 %s 通过 /reboot 命令重启 Bot（群 %s）", msg.Sender.UserId, msg.GroupId)
+		if force {
+			detail += "（强制立即重启）"
+		}
+		oplog.Record(oplog.CategorySystem, "restart", detail)
+		sysrestart.RequestRestart(p.Logger, sysrestart.RestartOptions{
+			Source: "command",
+			Reason: "管理员 /reboot 命令",
+			Force:  force,
+		})
 		return false, nil
 	}
 	return true, nil

@@ -23,6 +23,7 @@ import (
 	"github.com/jeanhua/AniaBot/common/msgchain"
 	"github.com/jeanhua/AniaBot/common/plugininfo"
 	"github.com/jeanhua/AniaBot/common/storage"
+	"github.com/jeanhua/AniaBot/common/workstate"
 	"github.com/robfig/cron/v3"
 )
 
@@ -643,6 +644,9 @@ func (m *clockManager) runTask(task *ClockTask) {
 	}
 	m.bot.Go("clock:"+task.ID, func() {
 		defer m.finishTask(task.ID)
+		// 登记为进行中的 AI 请求：重启前等待本次定时任务执行完成
+		endWork := workstate.Begin(workstate.KindClock, "定时任务「"+task.Title+"」")
+		defer endWork()
 		start := time.Now()
 		// 任务目标会话（与对话 sessionKey 一致，配额按此归集）
 		isGroup := task.TargetType == clockTargetGroup

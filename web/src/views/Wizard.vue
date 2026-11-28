@@ -529,18 +529,42 @@ async function onSkip() {
   auth.setupRequired = false
 }
 
+// waitRestartDone 等待进程重启完成：优先比较进程实例标识（boot），
+// 服务短暂不可用后恢复也算完成。
+async function waitRestartDone(baseline) {
+  const deadline = Date.now() + 180000
+  let sawDown = false
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 1200))
+    try {
+      const s = await api.getRestartStatus()
+      if ((baseline && s.boot && s.boot !== baseline) || (!baseline && sawDown)) return true
+      sawDown = false
+    } catch {
+      sawDown = true
+    }
+  }
+  return false
+}
+
 async function onRestart() {
   restarting.value = true
   try {
+    // 先记下当前进程实例：重启入口是优雅重启，接口返回后进程可能还会
+    // 等待进行中的任务，不能只靠「服务是否可访问」判断重启完成
+    const before = await api.getRestartStatus().catch(() => null)
+    const baseline = before?.boot || ''
     await api.restart()
-  } catch { /* 进程可能已开始退出 */ }
-  auth.setupRequired = false
-  const up = await api.waitUntilUp()
-  if (up) {
-    location.reload()
-  } else {
+    auth.setupRequired = false
+    if (await waitRestartDone(baseline)) {
+      location.reload()
+      return
+    }
     restarting.value = false
     error.value = '等待重启超时，请检查 Bot 运行状态'
+  } catch (e) {
+    restarting.value = false
+    error.value = e.message || '重启请求失败'
   }
 }
 </script>

@@ -8,6 +8,7 @@ import (
 	"github.com/jeanhua/AniaBot/common/adapter"
 	"github.com/jeanhua/AniaBot/common/model/message"
 	"github.com/jeanhua/AniaBot/common/plugin"
+	"github.com/jeanhua/AniaBot/common/workstate"
 )
 
 // onInteraction 内联按钮点击回调路由：回调数据约定为「插件名:载荷」
@@ -21,6 +22,9 @@ func (ania *AniaBot) onInteraction(e *adapterEntry, ev message.InteractionEvent)
 			Logger().Error("按钮点击事件触发错误: ", err)
 		}
 	}()
+	// 登记为进行中的工作：重启前等待按钮回调在插件中处理完
+	endWork := workstate.Begin(workstate.KindPlatform, "按钮点击事件")
+	defer endWork()
 	if pluginName, payload, ok := strings.Cut(ev.Data, ":"); ok {
 		ev.Data = payload
 		for _, p := range ania.plugins {

@@ -17,6 +17,7 @@ import (
 	"github.com/jeanhua/AniaBot/common/bot"
 	"github.com/jeanhua/AniaBot/common/model/message"
 	"github.com/jeanhua/AniaBot/common/storage"
+	"github.com/jeanhua/AniaBot/common/workstate"
 )
 
 // teamScopeGlobal 全局团队作用域。与知识库的全局库一致：所有会话都可引用
@@ -470,6 +471,9 @@ func (p *AIChatPlugin) launchAsyncTeam(ctx context.Context, b bot.Bot, id messag
 
 	b.Go("team:"+runID, func() {
 		defer unregister()
+		// 登记为进行中的后台任务：重启前等待整队执行完成（受重启等待超时约束）
+		endWork := workstate.Begin(workstate.KindTeam, "Agent 团队 "+truncateTaskTitle(task))
+		defer endWork()
 		// 异常退出兜底：正常完成的条目已转 finished，取消路径由 runAsyncTeam 移除
 		defer p.retireTeamEntries(id, isGroup, runID, memberIDs)
 		p.runAsyncTeam(runCtx, b, id, isGroup, runID, task, timeoutSec, specs, memberIDs,

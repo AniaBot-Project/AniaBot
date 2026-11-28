@@ -95,10 +95,40 @@
             <span class="text-slate-300 mr-2">✦</span>{{ $route.meta.title || '' }}
           </h1>
         </div>
-        <Tag variant="solid" color="app-green" size="small" class="shrink-0">
-          <span class="w-1.5 h-1.5 rounded-full bg-white/90 pulse-dot" />Bot Online
-        </Tag>
+        <div class="flex items-center gap-2 shrink-0">
+          <button
+            v-if="restart.pending"
+            class="restart-chip"
+            :title="restartTitle"
+            @click="focusRestartBanner"
+          >
+            <span class="w-1.5 h-1.5 rounded-full bg-white/90 animate-pulse" />
+            重启等待中 · {{ restart.busy }}
+          </button>
+          <Tag variant="solid" color="app-green" size="small" class="shrink-0">
+            <span class="w-1.5 h-1.5 rounded-full bg-white/90 pulse-dot" />Bot Online
+          </Tag>
+        </div>
       </header>
+
+      <!-- 重启等待横幅：有进行中的消息 / AI 请求时，重启会等它们完成再执行 -->
+      <div v-if="restart.pending" ref="restartBannerEl" class="restart-banner mx-3 sm:mx-5 xl:mx-7 mt-3 px-4 py-3">
+        <div class="flex items-start gap-3 flex-wrap">
+          <span class="mt-1 w-4 h-4 shrink-0 rounded-full border-2 border-[var(--warn-line)] border-t-[var(--warn-ink)] animate-spin" />
+          <div class="min-w-0 flex-1">
+            <div class="text-xs font-bold tracking-[0.04em] text-[var(--warn-ink)]">{{ restartTitle }}</div>
+            <div class="text-[11px] text-[var(--warn-ink)] opacity-80 mt-0.5">{{ restartSubtitle }}</div>
+            <ul v-if="restart.items && restart.items.length" class="mt-1.5 space-y-0.5 text-[11px] text-[var(--warn-ink)] opacity-80">
+              <li v-for="it in restart.items" :key="it.id" class="truncate">
+                · {{ it.label }}<span class="opacity-70">（{{ elapsedText(it.since) }}）</span>
+              </li>
+            </ul>
+          </div>
+          <Button type="default" size="small" danger :disabled="forcingRestart" @click="onForceRestart">
+            {{ forcingRestart ? '重启中…' : '立即强制重启' }}
+          </Button>
+        </div>
+      </div>
       <div class="px-3 sm:px-5 xl:px-7 pt-4 sm:pt-5 pb-10 safe-bottom flex-1">
         <RouterView v-slot="{ Component }">
           <Transition name="fade" mode="out-in">
@@ -107,16 +137,6 @@
         </RouterView>
       </div>
     </main>
-
-    <!-- 重启中遮罩 -->
-    <Modal :open="restarting" :typewriter="false" :show-footer="false" :mask-closable="false" :width="320">
-      variant="default"
-      <div class="text-center space-y-3 py-2">
-        <span class="mx-auto block w-8 h-8 border-[3px] border-black/10 border-t-[#0071e3] rounded-full animate-spin" />
-        <div class="text-sm font-bold text-slate-900 tracking-[0.08em]">正在重启…</div>
-        <p class="text-xs text-slate-500">配置修改将在重启后生效，恢复后页面自动刷新</p>
-      </div>
-    </Modal>
 
     <!-- 修改密码弹窗 -->
     <Modal v-model:open="showPwd" title="修改密码" :typewriter="false" :show-footer="false" :width="420">
@@ -139,7 +159,7 @@
 
 <script setup>
 import { confirmAction } from './ui/confirm'
-import { onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Button, Input, Modal, Notification, NotificationContainer, Tag } from 'animal-island-vue'
 import { api, auth } from './api.js'
@@ -238,7 +258,121 @@ function isNavActive(item) {
 
 const showPwd = ref(false)
 const pwdForm = reactive({ next: '', msg: '', ok: false })
-const restarting = ref(false)
+
+// ---------- 重启等待状态（全局横幅 + 进程重启自动刷新）----------
+// 重启默认会等待进行中的消息 / AI 请求 / 后台任务完成；等待期间在后端
+// sysrestart 中保持 pending，这里轮询展示任务明细并提供强制重启入口。
+const restart = reactive({
+  pending: false,
+  busy: 0,
+  items: [],
+  source: '',
+  reason: '',
+  timeout_sec: 0,
+  remaining_sec: -1,
+  forced: false,
+  started_at: 0,
+})
+const forcingRestart = ref(false)
+const restartBannerEl = ref(null)
+let restartTimer = null
+let bootId = '' // 进程实例标识：变化说明 Bot 已重启，自动刷新页面
+
+const restartTitle = computed(() => {
+  if (!restart.pending) return ''
+  if (restart.busy > 0) return `正在等待重启：${restart.busy} 个任务处理中`
+  return '正在重启 Bot…'
+})
+const restartSubtitle = computed(() => {
+  if (!restart.pending) return ''
+  const parts = []
+  if (restart.reason) parts.push(restart.reason)
+  if (restart.forced) {
+    parts.push('已请求强制重启')
+  } else if (restart.timeout_sec > 0 && restart.remaining_sec >= 0) {
+    parts.push(`${restart.remaining_sec} 秒后自动强制重启`)
+  } else if (restart.timeout_sec === 0) {
+    parts.push('将一直等待到全部任务完成')
+  }
+  parts.push('重启后页面会自动刷新')
+  return parts.join(' · ')
+})
+
+// elapsedText 把开始时间格式化为「已进行 12 秒」。
+function elapsedText(since) {
+  if (!since) return '刚刚'
+  const ms = Date.now() - new Date(since).getTime()
+  const sec = Math.max(0, Math.round(ms / 1000))
+  if (sec < 60) return `${sec} 秒`
+  const min = Math.floor(sec / 60)
+  return `${min} 分 ${sec % 60} 秒`
+}
+
+// pollRestart 轮询重启状态：发现进程实例变化即刷新页面；
+// 等待中更新横幅；等待被取消（重启未能启动）时提示。
+async function pollRestart() {
+  if (!auth.loggedIn || auth.setupRequired || document.hidden) return
+  try {
+    const s = await api.getRestartStatus()
+    if (bootId && s.boot && s.boot !== bootId) {
+      location.reload()
+      return
+    }
+    if (s.boot) bootId = s.boot
+    const wasPending = restart.pending
+    Object.assign(restart, s)
+    if (wasPending && !s.pending) {
+      Notification.error({ message: '重启未能启动，已取消本次重启等待' })
+    }
+  } catch {
+    // 服务可能正在重启：等新进程回来后会因 boot 变化自动刷新
+  }
+}
+
+function startRestartPoll() {
+  if (restartTimer) clearInterval(restartTimer)
+  pollRestart()
+  restartTimer = setInterval(pollRestart, 2000)
+}
+
+function focusRestartBanner() {
+  restartBannerEl.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+// onRestart 点击侧边栏「重启 Bot」：等待进行中的任务结束后重启。
+async function onRestart() {
+  if (restart.pending) {
+    if (!await confirmAction('Bot 正在等待重启：仍有任务处理中。确定要立即强制重启吗？\n\n未完成的回复与工具调用会被中断。')) return
+    await onForceRestart()
+    return
+  }
+  if (!await confirmAction('确定要重启 Bot 吗？配置修改将在重启后生效。\n\n有正在处理的消息或 AI 请求时会先等它们完成，也可以稍后在顶部提示中强制重启。')) return
+  try {
+    const r = await api.restart(false)
+    if (r.status) {
+      if (r.status.boot) bootId = r.status.boot
+      Object.assign(restart, r.status)
+    }
+    // 演示模式没有真实进程重启，直接刷新模拟
+    if (isDemo) setTimeout(() => location.reload(), 800)
+  } catch {
+    // 进程可能已开始重启，交给轮询判断
+  }
+}
+
+// onForceRestart 立即强制重启（跳过等待进行中的任务）。
+async function onForceRestart() {
+  if (forcingRestart.value) return
+  forcingRestart.value = true
+  try {
+    const r = await api.restart(true)
+    if (r.status) Object.assign(restart, r.status)
+  } catch {
+    // 进程可能已开始重启
+  } finally {
+    forcingRestart.value = false
+  }
+}
 
 // 移动端抽屉侧边栏：切页后自动收起
 const mobileOpen = ref(false)
@@ -246,26 +380,18 @@ watch(() => router.currentRoute.value.path, () => {
   mobileOpen.value = false
 })
 
-onMounted(() => api.checkLogin())
+onMounted(() => {
+  api.checkLogin()
+  startRestartPoll()
+})
+
+onUnmounted(() => {
+  if (restartTimer) clearInterval(restartTimer)
+})
 
 async function onLogout() {
   await api.logout()
   router.push('/')
-}
-
-async function onRestart() {
-  if (!await confirmAction('确定要重启 Bot 吗？配置修改将在重启后生效。')) return
-  restarting.value = true
-  try {
-    await api.restart()
-  } catch { /* 进程可能已开始退出 */ }
-  const up = await api.waitUntilUp()
-  if (up) {
-    location.reload()
-  } else {
-    restarting.value = false
-    Notification.error({ message: '等待重启超时，请检查 Bot 运行状态' })
-  }
 }
 
 async function onChangePwd() {
@@ -344,6 +470,34 @@ async function onChangePwd() {
   height: 2px;
   border-radius: 999px;
   background: var(--sidebar-divider);
+}
+
+/* 顶栏「重启等待中」小标 + 内容区重启等待横幅（有任务进行中时显示，
+   可查看明细并强制重启） */
+.restart-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--warn-ink);
+  background: var(--warn-soft);
+  border: 1.5px solid var(--warn-line);
+  transition: filter 0.15s;
+}
+.restart-chip:hover {
+  filter: brightness(0.97);
+}
+.restart-banner {
+  border-radius: var(--r-card);
+  background: var(--warn-soft);
+  border: 2px solid var(--warn-line);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 /* 导航分组标题：小号字距标签，弱化到「分隔」层级，不抢选中项的视觉 */

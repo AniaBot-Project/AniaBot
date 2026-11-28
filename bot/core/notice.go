@@ -6,6 +6,7 @@ import (
 	"github.com/jeanhua/AniaBot/common/bot"
 	"github.com/jeanhua/AniaBot/common/model/message"
 	"github.com/jeanhua/AniaBot/common/plugin"
+	"github.com/jeanhua/AniaBot/common/workstate"
 )
 
 // broadcastNotice 向声明支持该平台的插件广播一条通知事件（不可中断）。
@@ -15,6 +16,9 @@ func broadcastNotice[T any](ania *AniaBot, e *adapterEntry, tag string, notice T
 	if key, ok := ania.noticeDedupKey(e, notice); ok && !ania.tryClaimEvent(key) {
 		return
 	}
+	// 登记为进行中的工作：重启前等待通知事件在插件链中处理完
+	endWork := workstate.Begin(workstate.KindNotice, tag)
+	defer endWork()
 	ctx := context.Background()
 	for _, p := range ania.plugins {
 		if !ania.supportsPlatform(p, e.def.Platform) {
@@ -115,6 +119,9 @@ func (ania *AniaBot) onGroupCardEvent(e *adapterEntry, notice message.GroupCardN
 
 // onPlatformEvent 平台特定事件广播（如飞书卡片回调、机器人入群等）。
 func (ania *AniaBot) onPlatformEvent(e *adapterEntry, event message.PlatformEvent) {
+	// 登记为进行中的工作：重启前等待事件在插件链中处理完
+	endWork := workstate.Begin(workstate.KindPlatform, "平台事件")
+	defer endWork()
 	ctx := context.Background()
 	for _, p := range ania.plugins {
 		if !ania.supportsPlatform(p, e.def.Platform) {

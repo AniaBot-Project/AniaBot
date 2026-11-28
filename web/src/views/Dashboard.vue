@@ -49,6 +49,10 @@
               <dt class="tlabel">Plugins</dt>
               <dd class="text-base font-semibold text-zinc-900">{{ status.plugin_count ?? '—' }}</dd>
             </div>
+            <div class="border-t border-dotted border-zinc-300 pt-1.5">
+              <dt class="tlabel">In Flight</dt>
+              <dd class="text-base font-semibold text-zinc-900">{{ status.busy_tasks ?? 0 }}</dd>
+            </div>
           </dl>
         </div>
 

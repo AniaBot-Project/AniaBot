@@ -178,7 +178,7 @@
             <span class="tlabel">Progress / 任务进度</span>
             <Tag v-if="status.error" color="app-red" variant="solid" size="small">{{ status.errKind || '操作失败' }}</Tag>
           </div>
-          <div v-if="status.restarting" class="mb-3 text-xs text-zinc-500">操作完成，等待 Bot 重启...</div>
+          <div v-if="status.restarting" class="mb-3 text-xs text-zinc-500">操作完成，等待进行中的任务结束后自动重启（进行中任务与强制重启见页面顶部提示）…</div>
           <div class="flex flex-wrap items-center gap-y-2 mb-5">
             <template v-for="(p, i) in phases" :key="p.key">
               <div class="flex items-center gap-1.5">
@@ -398,16 +398,6 @@
       </div>
     </Modal>
 
-    <!-- 重启中遮罩 -->
-    <Modal :open="rebooting" :typewriter="false" :show-footer="false" :mask-closable="false" :width="320">
-      variant="default"
-      <div class="w-full text-center space-y-3">
-        <span class="mx-auto block w-8 h-8 border-[3px] border-zinc-200 border-t-zinc-800 rounded-full animate-spin" />
-        <div class="text-sm font-semibold text-zinc-900 tracking-[0.15em] uppercase">Rebooting</div>
-        <p class="text-xs text-zinc-500">插件变更已应用，Bot 正在重启，恢复后页面自动刷新</p>
-      </div>
-    </Modal>
-
     <!-- 命令式通知宿主（alert 已改为 Notification） -->
   </div>
 </template>
@@ -417,9 +407,12 @@ import { confirmAction } from '../ui/confirm'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { Button, Card, Input, Modal, Notification, Skeleton, Tabs, Tag } from 'animal-island-vue'
+import { Button, Card, Input, Modal, Skeleton, Tabs, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
 import LoadingState from '../components/LoadingState.vue'
+
+// 演示模式没有真实进程，操作流程走到 done 后直接刷新模拟
+const isDemo = import.meta.env.MODE === 'demo'
 
 const phases = [
   { key: 'env', label: '环境检查' },
@@ -459,7 +452,6 @@ const detailFromCache = ref(false)
 const detailCache = new Map()
 
 const started = ref(false)
-const rebooting = ref(false)
 const progressEl = ref(null)
 const logEl = ref(null)
 const status = reactive({ running: false, restarting: false, action: '', plugin_id: '', phase: '', logs: [], error: '', errKind: '' })
@@ -468,7 +460,7 @@ const oauth = reactive({ status: '', user_code: '', verification_uri: '', expire
 let oauthTimer = null
 
 const areaReady = computed(() => !!info.value && info.value.mode === 'binary' && info.value.configured)
-const busy = computed(() => status.running || status.restarting || rebooting.value)
+const busy = computed(() => status.running || status.restarting)
 // 插件列表首次加载或空列表刷新中：显示加载中，而不是「0 / 0 个插件」
 const listLoading = computed(() => loading.value || refreshing.value)
 const canBrowse = computed(() => areaReady.value && !busy.value)
@@ -777,26 +769,18 @@ async function onRollback() {
 async function pollStatus() {
   try {
     const s = await api.getMarketplaceStatus()
-    const wasRunning = status.running
     Object.assign(status, s)
     if (s.running) started.value = true
-    if (started.value && (wasRunning || s.phase === 'done') && !s.running && s.phase === 'done' && !rebooting.value) {
-      waitReboot()
+    // 真实部署由全局「重启等待」横幅负责等待并在新进程起来后刷新页面；
+    // 演示模式没有真实进程，操作结束后直接刷新回放
+    if (isDemo && started.value && !s.running && s.phase === 'done') {
+      started.value = false
+      setTimeout(() => location.reload(), 1200)
     }
     nextTick(scrollLog)
   } catch { /* 服务可能正在重启 */ }
 }
 
-async function waitReboot() {
-  rebooting.value = true
-  const up = await api.waitUntilUp(120000)
-  if (up) {
-    location.reload()
-  } else {
-    rebooting.value = false
-    Notification.error({ message: '等待重启超时，请检查 Bot 运行状态' })
-  }
-}
 
 function scrollLog() {
   if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight

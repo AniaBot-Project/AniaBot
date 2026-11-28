@@ -364,7 +364,11 @@ export const api = {
   deleteKnowledgeDocs: (scope, ids) =>
     request('/api/knowledge/batch-delete', { method: 'POST', body: JSON.stringify({ scope, ids }) }),
 
-  restart: () => request('/api/restart', { method: 'POST' }),
+  // 重启 Bot：force=false 时先等待进行中的消息 / AI 请求完成（超时自动强制重启），
+  // force=true 立即强制重启
+  restart: (force = false) => request('/api/restart', { method: 'POST', body: JSON.stringify({ force }) }),
+  // 重启等待状态 + 进行中任务快照（面板轮询；boot 变化说明进程已重启）
+  getRestartStatus: () => request('/api/restart/status'),
 
   // 插件市场
   getMarketplaceInfo: () => request('/api/marketplace/info'),

@@ -449,9 +449,11 @@ type StreamHandle interface {
 
 ## 进程自重启（sysrestart）
 
-面板「重启 Bot」按钮、自动更新与系统插件的 `/reboot` 命令（仅管理员）共用 `bot/component/sysrestart.Self()`，实现极简但有一个关键陷阱：
+面板「重启 Bot」按钮、自动更新、插件市场与系统插件的 `/reboot` 命令（仅管理员）都通过 `bot/component/sysrestart.RequestRestart()` 发起**优雅重启**，最终由 `Self()` 替换进程：
 
-- **Unix**：`syscall.Exec(exe, os.Args, os.Environ())` **原地替换进程**——PID 不变、文件句柄与控制台无缝衔接，重启对用户几乎无感
+- **等待进行中的工作**：`common/workstate` 登记进程内的工作单元——core 登记群/私聊消息的插件链、通知与平台事件、按钮回调；`pluginaichat` 登记 AI 回合、面板试聊、定时任务、主动互动、异步子代理、团队运行与工作流。`RequestRestart` 轮询等待计数归零（再加 600ms 空闲确认），上限由 `bot.restart_wait_timeout_sec` 控制（默认 300 秒，`0` = 一直等待），超时或调用 `ForceRestart` 时立即重启。
+- **状态可见**：`RestartState()` 经 `GET /api/restart/status` 暴露等待来源、原因、剩余时间、进行中任务明细与本进程实例标识（`boot`）。面板顶部据此显示「重启等待中」横幅与「立即强制重启」，并轮询 `boot` 变化在新进程起来后自动刷新页面。
+- **Unix**：`syscall.Exec(exe, os.Args, os.Environ())` **原地替换进程**——PID 不变、文件句柄与控制台无缝衔接，重启对用户几乎无感（因此面板用 boot 标识而不是 PID 判断是否重启过）
 - **Windows**：没有 exec 语义，`exec.Command` 启动新进程（继承控制台与标准流）后 `os.Exit(0)`
 - **`selfExe` 必须在包初始化时缓存**：自动更新的「改名交换」会把运行中的二进制 rename 为 `<exe>.old`，此后 Linux 上 `os.Executable()` 读 `/proc/self/exe`（跟随 inode）会指向旧二进制，导致 swap 换错文件、重启回旧版本。启动时缓存路径后，无论二进制如何被替换，重启永远使用最初那个路径
 

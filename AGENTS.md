@@ -66,7 +66,8 @@ cmd/                     Entry point. main.go blank-imports adapter packages + r
                          tools/plugingen (never edit by hand)
 tools/plugingen/         Scans custom/plugins/*/plugin.json → regenerates cmd/marketplace_plugins.go
 common/                  Leaf packages (no upward deps): adapter, bot, aitool, model/{command,message},
-                         msgchain, plugin, pluginconfig, plugininfo, pluginmeta, storage, tracer, aniaerror
+                         msgchain, plugin, pluginconfig, plugininfo, pluginmeta, storage, tracer, aniaerror,
+                         workstate (in-flight work registry for graceful restart)
 bot/core/                Orchestrator: startup order, plugin lifecycle, event dispatch, ID routing,
                          DI, dedup, QID migration, unload, send events, interaction, goroutine tracer,
                          storage impls (memory/redis/sqlite/mysql), configstore/, CLI helpers
@@ -94,7 +95,9 @@ bot/component/           Engine components (no plugin lifecycle):
   consollog/               Console log ring buffer for the panel (memory only, ~2000 entries)
   tasklog/                 Clock-task execution log (SQL ania_task_log)
   querylog/                AI query execution log (SQL ania_query_log)
-  sysrestart/              Process self-restart hooks (panel restart/update, marketplace, /reboot)
+  sysrestart/              Process self-restart hooks + graceful restart coordinator (waits for
+                           in-flight work tracked in common/workstate; panel restart/update,
+                           marketplace, /reboot; force path and status snapshot for the panel)
 bot/plugins/             6 built-in plugins: pluginsys, pluginlog, plugininterceptor, pluginrepeat,
                          pluginnews, pluginaichat (the AI engine's plugin shell)
 bot/utils/               Command parsing, message extraction, URL/time helpers
@@ -329,6 +332,20 @@ Rules that most often break plugins:
   `pluginaichat` only uses this budget for its own legacy inner paths (the panel 试聊室 has an
   inner deadline); IM chat turns are enqueued and run by the session runner, so this value no
   longer limits AI turns (see "Session runner & task registry" below).
+- **In-flight work tracking (graceful restart)**: `common/workstate` is a leaf counter of
+  in-flight units — `Begin(kind, label)` returns an idempotent end func; `Snapshot()` returns
+  count + items and `WaitIdle(ctx)` blocks until idle. Core registers group/friend message
+  plugin chains, notice broadcasts, platform events and interaction callbacks;
+  `pluginaichat` registers AI turns, panel 试聊 requests, clock runs, proactive generations,
+  async subagents, team runs and workflows. `sysrestart` (`RequestRestart` / `ForceRestart` /
+  `RestartState`) waits for the count to hit zero (600ms idle confirmation, capped by
+  `bot.restart_wait_timeout_sec`, default 300s, 0 = unlimited) before calling `Self`, and
+  exposes the wait state as `GET /api/restart/status` (boot id + busy count + item list). All
+  restart paths — panel button, `/reboot [force]`, auto-update finish, marketplace finish —
+  go through `sysrestart.RequestRestart`; update/marketplace refuse to start while a restart
+  is already pending. The panel polls the status endpoint: it shows a global 重启等待中 banner
+  with the item list and a force button, and reloads when the boot id changes. Work started
+  with bare `b.Go` by third-party plugins is not tracked and is not waited for.
 - **Broadcast notices**: all 14 notice types (upload/admin/decrease/increase/ban/friend-add/
   recall×2/poke/lucky-king/honor/emoji-like/essence/card) go to every plugin with no
   short-circuit, 5 min timeout. QQ-only notices simply never fire on other platforms.
@@ -880,13 +897,16 @@ the panel Query-log list/detail and export show them, and `task_id` doubles as a
 - Marketplace (`bot/marketplace`): reads the AniaBot-Plugins GitHub repo (cached), supports
   GitHub OAuth device-flow login (optional token raises rate limits), then batch
   install/upgrade/uninstall pipelines — sync sources → `go run ./tools/plugingen` registry
-  regeneration → `go mod tidy` → `go build` → restart via `sysrestart` — plus a `Rollback` that
+  regeneration → `go mod tidy` → `go build` → restart via `sysrestart` (graceful: waits for
+  in-flight work, `bot.restart_wait_timeout_sec` cap, panel can force) — plus a `Rollback` that
   restores the previous binary and the backed-up plugin manifest. Dev (`go run`) mode is refused.
   Installed plugin copies live in `./data/plugins`, cache in `./data/marketplace`.
 - Auto-update (`bot/adminpanel/update.go`): driven by `bot.update.source_dir` (auto-cloned when
   empty + `bot.update.git_url` is set) on `bot.update.branch`; replays installed marketplace
   plugins, installs deps, rebuilds frontend + Go binary, swaps the executable (keeping `.old`)
-  and restarts; version comes from `bot/version.Ldflags`. `go run` mode is refused.
+  and restarts through `sysrestart.RequestRestart` — the restart waits for in-flight
+  messages/AI requests/background tasks (panel banner + force button); version comes from
+  `bot/version.Ldflags`. `go run` mode is refused.
 - Frontend: Vite + Vue 3 + Tailwind v4 + `animal-island-vue`. `web/scripts/sync-theme.mjs` runs
   before dev/build and emits the gitignored `web/src/styles/animal-island.vendor.css`; the
   generated `files/` font subsets are gitignored too. Page controls should be library components

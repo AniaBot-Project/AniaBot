@@ -13,6 +13,7 @@ import (
 	"github.com/jeanhua/AniaBot/bot/component/tasklog"
 	"github.com/jeanhua/AniaBot/common/bot"
 	"github.com/jeanhua/AniaBot/common/model/message"
+	"github.com/jeanhua/AniaBot/common/workstate"
 )
 
 const (
@@ -664,6 +665,15 @@ func validSubagentName(name string) bool {
 	return true
 }
 
+// subagentWorkLabel 构造面板「重启等待」里的子代理描述：优先用名字，
+// 否则用任务摘要。
+func subagentWorkLabel(name, task string) string {
+	if strings.TrimSpace(name) != "" {
+		return name
+	}
+	return truncateTaskTitle(task)
+}
+
 // launchAsyncSubagent 在后台 goroutine 中启动子代理，立即返回占位文本。
 //
 // ctx 为主请求上下文：仅用于检查父回合剩余预算。
@@ -766,6 +776,9 @@ func (p *AIChatPlugin) startAsyncSubagent(
 		if p.subagentSem != nil {
 			defer func() { <-p.subagentSem }()
 		}
+		// 登记为进行中的后台任务：重启前等待子代理执行完成（受重启等待超时约束）
+		endWork := workstate.Begin(workstate.KindSubagent, "子代理 "+subagentWorkLabel(opts.Name, task))
+		defer endWork()
 		// 异常退出兜底：onSubagentComplete 未及执行时移除运行中条目（正常结束的
 		// 完成条目已转 finished，不会被这里误删）
 		defer p.retireRunningAsyncSubagent(id, isGroup, launchID)

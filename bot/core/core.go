@@ -33,6 +33,7 @@ import (
 	"github.com/jeanhua/AniaBot/common/pluginconfig"
 	"github.com/jeanhua/AniaBot/common/plugininfo"
 	"github.com/jeanhua/AniaBot/common/storage"
+	"github.com/jeanhua/AniaBot/common/workstate"
 	"github.com/robfig/cron/v3"
 	"github.com/spf13/viper"
 )
@@ -340,6 +341,13 @@ func (ania *AniaBot) Run() {
 		// 补齐缺失的默认值后再构建 viper，保证插件 Start 读到的配置已含默认值。
 		cs.EnsureDefaults(pluginconfig.Defaults())
 		ania.cfg = cs.ToViper()
+	}
+
+	// 重启等待上限：面板重启、/reboot、自动更新与插件市场在重启前最多等待
+	// 多久让进行中的消息 / AI 请求完成（0 = 一直等待）。配置改动本身要重启才生效，
+	// 所以启动时下发一次即可。
+	if ania.cfg != nil && ania.cfg.IsSet("bot.restart_wait_timeout_sec") {
+		sysrestart.SetDefaultWaitTimeout(time.Duration(ania.cfg.GetInt("bot.restart_wait_timeout_sec")) * time.Second)
 	}
 
 	// 适配器：按注册表创建（各平台包 init() 中 adapter.Register，以
@@ -785,6 +793,10 @@ func (ania *AniaBot) onGroupEvent(e *adapterEntry, msg message.Message) {
 	}
 
 	cmd := utils.ParseCommand(msg)
+	// 登记为进行中的工作：重启（面板 / /reboot / 自动更新 / 插件市场）时会等待
+	// 消息在插件链中的处理完成，避免回复发到一半进程被替换。
+	endWork := workstate.Begin(workstate.KindMessage, "群消息 "+string(msg.GroupId))
+	defer endWork()
 
 	for _, p := range ania.plugins {
 		if !ania.supportsPlatform(p, e.def.Platform) {
@@ -822,6 +834,9 @@ func (ania *AniaBot) onFriendEvent(e *adapterEntry, msg message.Message) {
 	}
 
 	cmd := utils.ParseCommand(msg)
+	// 登记为进行中的工作，重启时等待插件链处理完成（见 onGroupEvent）。
+	endWork := workstate.Begin(workstate.KindMessage, "私聊 "+string(msg.Sender.UserId))
+	defer endWork()
 
 	for _, p := range ania.plugins {
 		if !ania.supportsPlatform(p, e.def.Platform) {

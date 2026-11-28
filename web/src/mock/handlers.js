@@ -552,7 +552,24 @@ function statusSnapshot() {
     started_at: toLocalIso(new Date(bootAt)),
     uptime_sec: Math.floor((Date.now() - bootAt) / 1000),
     goroutines: 42 + (Math.floor(Date.now() / 5000) % 7),
+    busy_tasks: 0,
+    restart_pending: false,
   }
+}
+
+// 演示模式没有真实进程重启：始终返回空闲状态
+const demoRestartStatus = {
+  boot: 'demo-boot',
+  pid: 1,
+  pending: false,
+  source: '',
+  reason: '',
+  started_at: 0,
+  timeout_sec: 0,
+  remaining_sec: -1,
+  forced: false,
+  busy: 0,
+  items: [],
 }
 
 function marketPluginsList() {
@@ -831,7 +848,8 @@ const routes = [
   { m: 'GET', re: /^\/api\/host$/, h: () => hostSnapshot() },
   { m: 'GET', re: /^\/api\/plugins$/, h: () => plugins },
   { m: 'GET', re: /^\/api\/balance$/, h: () => ({ ...rebase(seedBalance), updated_at: toLocalIso(new Date(Date.now() - 120_000)) }) },
-  { m: 'POST', re: /^\/api\/restart$/, h: () => { addOpLog('system', 'restart', '面板请求重启 Bot，IP: 127.0.0.1'); return { ok: true } } },
+  { m: 'POST', re: /^\/api\/restart$/, h: () => { addOpLog('system', 'restart', '面板请求重启 Bot，IP: 127.0.0.1'); return { ok: true, pending: false, busy: 0, status: demoRestartStatus } } },
+  { m: 'GET', re: /^\/api\/restart\/status$/, h: () => demoRestartStatus },
 
   // 通讯录
   { m: 'GET', re: /^\/api\/contact\/sources$/, h: () => contactSources },

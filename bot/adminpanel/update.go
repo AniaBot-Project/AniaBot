@@ -1,7 +1,8 @@
 // 自动更新：从配置的 git 源码目录拉取最新代码，拉依赖、构建前端、编译 Go，
 // 以「改名交换」方式替换运行中的二进制（Windows 不允许覆盖运行中的 exe，
 // 但允许重命名，故先编译为 AniaBot.update，再拷贝为 <exe>.new 做 rename 交换，
-// 旧二进制保留为 <exe>.old 以便手动回滚），最后复用 sysrestart.Self 重启进程。
+// 旧二进制保留为 <exe>.old 以便手动回滚），最后通过 sysrestart.RequestRestart
+// 优雅重启进程（等待进行中的消息 / AI 请求 / 后台任务结束后再替换进程）。
 //
 // 任一阶段失败都会中止更新，并记录错误分类（环境/仓库/依赖/前端/编译/系统），
 // 前端轮询 GET /api/update/status 展示实时日志与失败原因。
@@ -23,6 +24,7 @@ import (
 	"github.com/jeanhua/AniaBot/bot/component/sysrestart"
 	"github.com/jeanhua/AniaBot/bot/marketplace"
 	"github.com/jeanhua/AniaBot/bot/version"
+	"github.com/jeanhua/AniaBot/common/workstate"
 )
 
 // 更新流水线阶段
@@ -306,6 +308,11 @@ func (s *Server) handleUpdateStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "当前为 go run 开发模式运行，不支持自动更新")
 		return
 	}
+	// 已有重启在等待/进行中：此时开始更新会在编译途中被重启打断，直接拒绝。
+	if sysrestart.RestartState().Pending {
+		writeError(w, http.StatusConflict, "Bot 正在等待重启，请等重启完成后再开始更新")
+		return
+	}
 	srcDir := s.cfgStr("bot.update.source_dir")
 	if srcDir == "" {
 		writeError(w, http.StatusBadRequest, "未配置源码目录（bot.update.source_dir），请先在「配置管理」中设置")
@@ -494,17 +501,20 @@ func (s *Server) runUpdate(srcDir, gitURL, branch string) {
 	}
 	upd.appendLog("  已替换，旧版本备份为 " + filepath.Base(backup))
 
-	// 7. 完成，延迟后重启（先让前端拿到 done 状态）
+	// 7. 完成，走优雅重启：等待进行中的消息 / AI 请求 / 后台任务结束
+	//（上限 bot.restart_wait_timeout_sec），面板可在此期间强制重启。
 	upd.finish()
-	upd.appendLog("== 更新完成，正在重启 ==")
-	s.opt.Logger.Info("自动更新完成，正在重启 AniaBot")
-	go func() {
-		time.Sleep(1500 * time.Millisecond)
-		sysrestart.Self(s.opt.Logger)
-		// Self 正常时会替换/退出当前进程；只有重启失败才会回到这里，
-		// 此时清掉重启标记，允许手动重试下一次更新。
-		upd.clearRestarting()
-	}()
+	if busy := workstate.Snapshot().Count; busy > 0 {
+		upd.appendLog(fmt.Sprintf("== 更新完成，等待 %d 个进行中的任务结束后重启 ==", busy))
+	} else {
+		upd.appendLog("== 更新完成，正在重启 ==")
+	}
+	s.opt.Logger.Info("自动更新完成，进入重启等待", "busy", workstate.Snapshot().Count)
+	sysrestart.RequestRestart(s.opt.Logger, sysrestart.RestartOptions{
+		Source:   "update",
+		Reason:   "自动更新完成",
+		OnFailed: upd.clearRestarting,
+	})
 }
 
 // copyFile 复制文件并保留可执行权限。

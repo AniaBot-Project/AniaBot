@@ -16,6 +16,7 @@ import (
 	"github.com/jeanhua/AniaBot/bot/component/sysrestart"
 	"github.com/jeanhua/AniaBot/bot/version"
 	"github.com/jeanhua/AniaBot/common/pluginmeta"
+	"github.com/jeanhua/AniaBot/common/workstate"
 )
 
 // 流水线阶段
@@ -306,6 +307,10 @@ func normalizeIDs(ids []string) ([]string, error) {
 
 // start 占用任务槽并异步执行批量操作。
 func (s *Service) start(ops []operation) error {
+	// 已有重启在等待/进行中：此时开始编译会在重启时被打断，直接拒绝。
+	if sysrestart.RestartState().Pending {
+		return fmt.Errorf("Bot 正在等待重启，请等重启完成后再操作")
+	}
 	if !s.state.tryBegin() {
 		return fmt.Errorf("已有插件任务正在进行中或正在重启")
 	}
@@ -653,6 +658,9 @@ func (s *Service) fireUnloadHook(ctx context.Context, id string) {
 
 // Rollback 开始回滚（异步）：恢复上次替换前的二进制与插件清单。
 func (s *Service) Rollback() error {
+	if sysrestart.RestartState().Pending {
+		return fmt.Errorf("Bot 正在等待重启，请等重启完成后再操作")
+	}
 	if !s.state.tryBegin() {
 		return fmt.Errorf("已有插件任务正在进行中或正在重启")
 	}
@@ -727,17 +735,22 @@ func (s *Service) swapBinary(builtPath string) error {
 	return nil
 }
 
-// finishAndRestart 标记任务完成并延迟重启。
+// finishAndRestart 标记任务完成并走优雅重启：等待进行中的消息 / AI 请求 /
+// 后台任务结束（上限 bot.restart_wait_timeout_sec），面板可在此期间强制重启。
 func (s *Service) finishAndRestart() {
 	s.state.finish()
-	s.state.appendLog("== 操作完成，正在重启 ==")
-	s.logger.Info("插件市场操作完成，正在重启 AniaBot")
-	go func() {
-		time.Sleep(1500 * time.Millisecond)
-		sysrestart.Self(s.logger)
-		// Self 正常时会替换/退出当前进程；只有重启失败才会回到这里
-		s.state.clearRestarting()
-	}()
+	snap := workstate.Snapshot()
+	if snap.Count > 0 {
+		s.state.appendLog(fmt.Sprintf("== 操作完成，等待 %d 个进行中的任务结束后重启 ==", snap.Count))
+	} else {
+		s.state.appendLog("== 操作完成，正在重启 ==")
+	}
+	s.logger.Info("插件市场操作完成，进入重启等待", "busy", snap.Count)
+	sysrestart.RequestRestart(s.logger, sysrestart.RestartOptions{
+		Source:   "marketplace",
+		Reason:   "插件市场操作完成",
+		OnFailed: s.state.clearRestarting,
+	})
 }
 
 // replaceDir 用 src 整体替换 dst（先删后拷，目录内容必须完全一致）。

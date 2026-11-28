@@ -90,7 +90,7 @@
     <!-- 进度 -->
     <Card v-if="started">
       <div class="tlabel mb-4">Progress / 更新进度</div>
-      <div v-if="status.restarting" class="mb-3 text-xs text-zinc-500">更新完成，等待 Bot 重启...</div>
+      <div v-if="status.restarting" class="mb-3 text-xs text-zinc-500">更新完成，等待进行中的任务结束后自动重启（进行中任务与强制重启见页面顶部提示）…</div>
       <div class="flex flex-wrap items-center gap-y-2 mb-5">
         <template v-for="(p, i) in phases" :key="p.key">
           <div class="flex items-center gap-1.5">
@@ -115,15 +115,6 @@
       </div>
     </Card>
 
-    <!-- 重启中遮罩 -->
-    <Modal :open="rebooting" :typewriter="false" :show-footer="false" :mask-closable="false" :width="320">
-      <div class="w-full text-center space-y-3">
-        <span class="mx-auto block w-8 h-8 border-[3px] border-zinc-200 border-t-zinc-800 rounded-full animate-spin" />
-        <div class="text-sm font-semibold text-zinc-900 tracking-[0.15em] uppercase">Updating</div>
-        <p class="text-xs text-zinc-500">更新完成，Bot 正在重启，恢复后页面自动刷新</p>
-      </div>
-    </Modal>
-
     <!-- 命令式通知宿主（alert 已改为 Notification） -->
   </div>
 </template>
@@ -131,8 +122,11 @@
 <script setup>
 import { confirmAction } from '../ui/confirm'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { Button, Card, Modal, Notification, Tag } from 'animal-island-vue'
+import { Button, Card, Tag } from 'animal-island-vue'
 import { api } from '../api.js'
+
+// 演示模式没有真实进程，更新流程走到 done 后直接刷新模拟
+const isDemo = import.meta.env.MODE === 'demo'
 
 const phases = [
   { key: 'env', label: '环境检查' },
@@ -152,7 +146,6 @@ const info = ref(null)
 const infoLoading = ref(false)
 const startMsg = ref('')
 const started = ref(false)      // 本页面观察到过更新任务在运行
-const rebooting = ref(false)
 const logEl = ref(null)
 const status = reactive({ running: false, restarting: false, phase: '', logs: [], error: '', errKind: '' })
 
@@ -164,7 +157,6 @@ const canUpdate = computed(() =>
   && !(info.value.needClone && !info.value.gitUrl)
   && !status.running
   && !status.restarting
-  && !rebooting.value,
 )
 
 let timer = null
@@ -191,12 +183,13 @@ async function loadInfo() {
 async function pollStatus() {
   try {
     const s = await api.getUpdateStatus()
-    const wasRunning = status.running
     Object.assign(status, s)
     if (s.running) started.value = true
-    // 观察过运行中的任务进入 done → 等待重启完成
-    if (started.value && (wasRunning || s.phase === 'done') && !s.running && s.phase === 'done' && !rebooting.value) {
-      waitReboot()
+    // 真实部署由全局「重启等待」横幅负责等待并在新进程起来后刷新页面；
+    // 演示模式没有真实进程，更新结束后直接刷新回放
+    if (isDemo && started.value && !s.running && s.phase === 'done') {
+      started.value = false
+      setTimeout(() => location.reload(), 1200)
     }
     nextTick(scrollLog)
   } catch { /* 服务可能正在重启 */ }
@@ -204,24 +197,13 @@ async function pollStatus() {
 
 async function onStart() {
   startMsg.value = ''
-  if (!await confirmAction('确定要开始更新吗？将拉取最新代码、重新编译并重启 Bot，过程约需几分钟。')) return
+  if (!await confirmAction('确定要开始更新吗？将拉取最新代码、重新编译并重启 Bot，过程约需几分钟。重启前会等待正在处理的消息 / AI 请求完成。')) return
   try {
     await api.startUpdate()
     started.value = true
     await pollStatus()
   } catch (e) {
     startMsg.value = e.message
-  }
-}
-
-async function waitReboot() {
-  rebooting.value = true
-  const up = await api.waitUntilUp(120000)
-  if (up) {
-    location.reload()
-  } else {
-    rebooting.value = false
-    Notification.error({ message: '等待重启超时，请检查 Bot 运行状态' })
   }
 }
 

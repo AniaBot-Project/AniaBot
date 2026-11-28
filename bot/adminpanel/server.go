@@ -401,6 +401,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/qrlogin/{platform}/status", s.requireAuth(http.HandlerFunc(s.handleQRLoginStatus)))
 	s.mux.Handle("POST /api/qrlogin/{platform}/verify", s.requireAuth(http.HandlerFunc(s.handleQRLoginVerify)))
 	s.mux.Handle("POST /api/restart", s.requireAuth(http.HandlerFunc(s.handleRestart)))
+	s.mux.Handle("GET /api/restart/status", s.requireAuth(http.HandlerFunc(s.handleRestartStatus)))
 	s.registerChatConsoleRoutes()
 	s.registerContextRoutes()
 	s.mux.Handle("GET /api/update/info", s.requireAuth(http.HandlerFunc(s.handleUpdateInfo)))
@@ -780,14 +781,17 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		adapters = s.opt.AdapterStatuses()
 	}
 	uptime := time.Since(s.opt.Bot.StartTime())
+	restartState := sysrestart.RestartState()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"uptime_sec":     int64(uptime.Seconds()),
-		"started_at":     s.opt.Bot.StartTime().Format(time.RFC3339),
-		"goroutines":     s.opt.Bot.GoroutineNum(),
-		"adapter_status": adapterStatus,
-		"adapter_detail": adapterDetail,
-		"adapters":       adapters,
-		"plugin_count":   len(s.opt.Bot.GetPluginList()),
+		"uptime_sec":      int64(uptime.Seconds()),
+		"started_at":      s.opt.Bot.StartTime().Format(time.RFC3339),
+		"goroutines":      s.opt.Bot.GoroutineNum(),
+		"adapter_status":  adapterStatus,
+		"adapter_detail":  adapterDetail,
+		"adapters":        adapters,
+		"plugin_count":    len(s.opt.Bot.GetPluginList()),
+		"busy_tasks":      restartState.Busy,
+		"restart_pending": restartState.Pending,
 	})
 }
 
@@ -2238,13 +2242,35 @@ func deleteKnowledgeDocs(src KnowledgeBaseSource, scope string, ids []string) (i
 	return deleteEach(ids, func(id string) error { return src.KnowledgeDelete(scope, id) })
 }
 
-// handleRestart 自重启 Bot：先响应请求，再延迟以相同命令行参数重启进程。
-// 配置修改随之生效；面板会话持久化在数据库中，重启后无需重新登录。
+// handleRestart 自重启 Bot：立即响应请求，后台走优雅重启（以相同命令行参数
+// 重启进程）。配置修改随之生效；面板会话持久化在数据库中，重启后无需重新登录。
+//
+// 默认等待正在处理的消息 / AI 请求 / 后台任务结束（上限由
+// bot.restart_wait_timeout_sec 控制），期间面板可查看进行中的任务并强制重启；
+// 请求体 {"force": true} 表示立即强制重启。
 func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
-	oplog.Record(oplog.CategorySystem, "restart", "面板请求重启 Bot，IP: "+clientIP(r))
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		sysrestart.Self(s.opt.Logger)
-	}()
+	var req struct {
+		Force bool `json:"force"`
+	}
+	_ = readJSON(r, &req) // 请求体可省略
+
+	if req.Force {
+		oplog.Record(oplog.CategorySystem, "restart", "面板强制重启 Bot，IP: "+clientIP(r))
+		st := sysrestart.ForceRestart(s.opt.Logger)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "forced": true, "status": st})
+		return
+	}
+	st := sysrestart.RequestRestart(s.opt.Logger, sysrestart.RestartOptions{
+		Source: "panel",
+		Reason: "面板重启",
+	})
+	oplog.Record(oplog.CategorySystem, "restart",
+		fmt.Sprintf("面板请求重启 Bot（等待 %d 个进行中的任务完成），IP: %s", st.Busy, clientIP(r)))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "pending": st.Pending, "busy": st.Busy, "status": st})
+}
+
+// handleRestartStatus 返回重启等待状态与进行中任务快照（面板轮询）。
+// 即使没有等待中的重启，也返回当前进行中的任务数，供总览页展示。
+func (s *Server) handleRestartStatus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, sysrestart.RestartState())
 }

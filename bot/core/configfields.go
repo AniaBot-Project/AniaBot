@@ -12,6 +12,7 @@ var frameworkConfigFields = []pluginconfig.Field{
 	// Bot 基础
 	{Key: "bot.admin_ids", Label: "管理员 ID（可多个）", Type: "strings", Group: "Bot 基础", Help: "管理员 ID 列表，每行一个，可配置多个；任一管理员均拥有最高权限（/reboot、/exit、查看全部定时任务、接收启动/异常通知、审批 AI 配置修改等）。QQ 为 qq:QQ号（如 qq:123456789）；其他平台为带平台前缀的 ID（如飞书 fs:ou_xxx、Telegram tg:123456、Discord dc:123456）"},
 	{Key: "bot.msg_event_timeout_sec", Label: "消息处理超时(秒)", Type: "int", Group: "Bot 基础", Help: "单条消息在框架插件链中的最大处理时长：超时取消该插件本次调用的上下文，各插件独立计时、互不影响（一个插件超时不影响其余插件）。仅当某个插件确实需要更久时调大；0 或负数回退默认 300 秒，上限 86400 秒", Default: 300},
+	{Key: "bot.restart_wait_timeout_sec", Label: "重启等待超时(秒)", Type: "int", Group: "Bot 基础", Help: "重启 Bot（面板重启、/reboot、自动更新、插件市场）时，等待正在处理的消息、AI 请求与后台任务完成的最长秒数；0 表示一直等到全部完成，超时后自动强制重启。等待期间面板会显示进行中的任务，可随时手动「立即强制重启」", Default: 300},
 
 	// Web 面板
 	{Key: "bot.admin_panel.enable", Label: "启用面板", Type: "bool", Group: "Web 面板", Help: "是否启用 Web 控制面板；关闭后可用环境变量 ANIA_BOT_ADMIN_PANEL_ENABLE=true 覆盖重新开启", Default: true},

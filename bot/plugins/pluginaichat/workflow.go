@@ -13,6 +13,7 @@ import (
 	"github.com/jeanhua/AniaBot/bot/component/llmtool"
 	"github.com/jeanhua/AniaBot/common/bot"
 	"github.com/jeanhua/AniaBot/common/model/message"
+	"github.com/jeanhua/AniaBot/common/workstate"
 )
 
 // 后台工作流（DAG 多子代理编排）：模型把复杂任务拆成带依赖的步骤，工具同步
@@ -551,6 +552,9 @@ func (p *AIChatPlugin) launchWorkflow(b bot.Bot, id message.QID, isGroup bool, p
 	})
 	b.Go("workflow:"+taskID, func() {
 		defer cancel()
+		// 登记为进行中的后台任务：重启前等待工作流执行完成（受重启等待超时约束）
+		endWork := workstate.Begin(workstate.KindWorkflow, "工作流 "+workflowTaskTitle(plan))
+		defer endWork()
 		// 异常退出兜底：正常完成的条目已转 finished，取消路径由 runWorkflow 移除
 		defer p.retireRunningAsyncSubagent(id, isGroup, taskID)
 		p.runWorkflow(ctx, b, id, isGroup, taskID, task, plan, parentCbs)

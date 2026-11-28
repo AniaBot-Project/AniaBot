@@ -8,6 +8,7 @@ import (
 	"github.com/jeanhua/AniaBot/bot/component/aichat"
 	"github.com/jeanhua/AniaBot/common/bot"
 	"github.com/jeanhua/AniaBot/common/model/message"
+	"github.com/jeanhua/AniaBot/common/workstate"
 )
 
 // 回合运行器（Session Runner）：消息事件只做去重/自过滤/命令/mention 门，
@@ -77,6 +78,11 @@ func (p *AIChatPlugin) runSessionOnce(parent context.Context, b bot.Bot, id mess
 	}
 	defer lock.release()
 	p.touchChat(key)
+
+	// 登记为进行中的 AI 请求：重启前等待本次回合（含工具循环与分包处理）结束，
+	// 避免用户正在等待的回复被进程重启截断。
+	endWork := workstate.Begin(workstate.KindTurn, "AI 对话 "+key)
+	defer endWork()
 
 	chat, err := p.getChat(b, id, isGroup, p.getPromptForID(id, isGroup))
 	if err != nil {

@@ -22,6 +22,7 @@ import (
 	"github.com/jeanhua/AniaBot/common/bot"
 	"github.com/jeanhua/AniaBot/common/plugininfo"
 	"github.com/jeanhua/AniaBot/common/storage"
+	"github.com/jeanhua/AniaBot/common/workstate"
 )
 
 // 试聊室：把聊天搬到面板上，管理员直接在 Web 控制面板里和 AI 对话做测试。
@@ -495,6 +496,9 @@ func (m *chatConsoleManager) send(id, text string) error {
 func (m *chatConsoleManager) run(ctx context.Context, cancel context.CancelFunc, s *chatConsoleSession, input, raw string, asstSeq int64, timeout time.Duration) {
 	p := m.plugin
 	start := time.Now()
+	// 登记为进行中的 AI 请求：重启前等待试聊回复生成完成
+	endWork := workstate.Begin(workstate.KindConsole, "面板试聊「"+s.info.Title+"」")
+	defer endWork()
 	// rec 是本轮 Query 日志记录；持久化不支持 SQL 等情况下为 nil（只回显转录）
 	var rec *queryRecorder
 	defer func() {

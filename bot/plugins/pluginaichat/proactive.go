@@ -36,6 +36,7 @@ import (
 	"github.com/jeanhua/AniaBot/common/bot"
 	"github.com/jeanhua/AniaBot/common/model/message"
 	"github.com/jeanhua/AniaBot/common/storage"
+	"github.com/jeanhua/AniaBot/common/workstate"
 )
 
 // 意图来源：决定闸门怎么判断「现场是否已经不需要这句话了」。
@@ -924,6 +925,9 @@ func (m *proactiveManager) launch(it *ProactiveIntention, forced bool) {
 			delete(m.running, it.ID)
 			m.mu.Unlock()
 		}()
+		// 登记为进行中的 AI 请求：重启前等待本次主动互动生成/发送完成
+		endWork := workstate.Begin(workstate.KindProactive, "主动互动 "+it.ID)
+		defer endWork()
 		m.execute(it, forced)
 	}
 	if b != nil {
