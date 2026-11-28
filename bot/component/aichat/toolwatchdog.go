@@ -31,6 +31,15 @@ const (
 	softDeadlineReminder = "[系统提醒] 本轮已运行较久：能收尾就收尾；如果还有较多工作，调用 task_handoff 把剩余工作转入后台，并给出进度摘要。"
 )
 
+// reminderText 返回实际注入的提醒文本：插件层按会话已注册的工具定制措辞
+// （WatchdogOptions.ProgressReminder / SoftDeadlineReminder），未定制时用默认文案。
+func reminderText(custom, fallback string) string {
+	if strings.TrimSpace(custom) != "" {
+		return custom
+	}
+	return fallback
+}
+
 // watchdogState 单次 ExecuteWithTools 调用的循环保护状态：不跨请求复用，
 // 保证同一 ChatBot 串行调用下互不影响。
 type watchdogState struct {

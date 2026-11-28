@@ -299,7 +299,7 @@ func (m *proactiveManager) chat(ctx context.Context, it *ProactiveIntention, id 
 	if p.hookManager != nil {
 		chat.SetHookRunner(p.hookManager, sessionKey(id, isGroup), agenthook.AgentKindClock)
 	}
-	chatOpts := p.buildChatOptions()
+	chatOpts := p.buildBackgroundChatOptions()
 	chatOpts.PreToolGate = p.buildPreToolGate(sessionKey(id, isGroup), agenthook.AgentKindClock,
 		message.FromUint64(0),
 		func(text string) { p.sendPlainText(b, id, isGroup, text) },

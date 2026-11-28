@@ -474,9 +474,9 @@ AI 回复不再有"5 分钟一刀切"的总超时：框架的 `bot.msg_event_tim
 
 | 配置键 | 默认值 | 说明 |
 | --- | --- | --- |
-| `plugin.ai_chat_bot.turn.soft_timeout_sec` | `600` | 软截止（秒）：到达后向模型注入一次「收尾或转后台（`task_handoff`）」提醒，**不取消**回合；`0` 关闭 |
+| `plugin.ai_chat_bot.turn.soft_timeout_sec` | `600` | 软截止（秒）：到达后向模型注入一次「收尾或转后台」提醒，**不取消**回合；主会话的提醒点名 `task_handoff`，没有该工具的会话用通用收尾措辞；`0` 关闭 |
 | `plugin.ai_chat_bot.turn.hard_timeout_sec` | `14400` | 硬截止（秒）：最终兜底，超时取消当前回合并向用户说明原因；`0` 表示不限制（仅 `/stop` 与进程关闭可停）。默认 4 小时 |
-| `plugin.ai_chat_bot.turn.progress_reminder_after` | `6` | 同一回合内工具轮数达到该值时提醒模型「可把独立部分交给 `subagent_run`」；`0` 关闭 |
+| `plugin.ai_chat_bot.turn.progress_reminder_after` | `6` | 同一回合内工具轮数达到该值时提醒模型「可把独立部分交给 `subagent_run`」；子代理自身、主动互动、面板试聊等没有该工具的会话改用通用收尾提醒；`0` 关闭 |
 | `plugin.ai_chat_bot.turn.repeat_tool_warn` | `3,5,8` | 相同工具 + 相同参数连续重复达到这些次数时各提醒一次「换方案/收尾」；留空关闭 |
 | `plugin.ai_chat_bot.turn.no_progress_limit` | `12` | 相同工具 + 相同参数连续重复达到该次数时**终止回合**并回报原因（防死循环烧 token）；`0` 表示只提醒不终止 |
 | `plugin.ai_chat_bot.llm.request_timeout_sec` | `600` | 单次 LLM HTTP 请求（含流式）的总超时（秒），每次重试/备用模型切换独立计时；超时按可重试错误处理；`0` 不限制（不推荐） |

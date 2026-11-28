@@ -79,9 +79,17 @@ type WatchdogOptions struct {
 	// SoftDeadline 软截止时刻：到达后向模型注入一次「收尾或转后台」提醒，
 	// 不中断本轮；零值表示不启用。
 	SoftDeadline time.Time
+	// SoftDeadlineReminder 软截止提醒的文本；空表示使用默认文案。默认文案会点名
+	// task_handoff，只有注册了该工具的会话适用；其余会话（定时任务 / 主动互动 /
+	// 面板试聊）由插件层传入不带工具名的通用文案，避免诱导模型调用不存在的工具。
+	SoftDeadlineReminder string
 	// ProgressReminderAfter 连续工具轮数达到该值后注入一次「考虑委派子代理」
 	// 提醒；0 表示关闭。
 	ProgressReminderAfter int
+	// ProgressReminder 工具轮数提醒的文本；空表示使用默认文案。默认文案会点名
+	// subagent_run，只有注册了该工具的会话适用；没有子代理工具的会话（子代理
+	// 自身 / 主动互动 / 面板试聊）由插件层传入通用文案。
+	ProgressReminder string
 	// RepeatWarnThresholds 相同工具+参数重复次数达到各阈值时各提醒一次，
 	// 如 [3,5,8]；空/nil 表示关闭。
 	RepeatWarnThresholds []int

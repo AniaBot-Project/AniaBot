@@ -308,7 +308,7 @@ type sessionConfig struct {
 type turnConfig struct {
 	SoftTimeoutSec        int    `cfg:"soft_timeout_sec" label:"软截止(秒)" group:"AI 对话 · 回合与任务" help:"回合运行超过该时长后，向模型注入一次「收尾或转后台」提醒，不取消回合；0 表示关闭" default:"600"`
 	HardTimeoutSec        int    `cfg:"hard_timeout_sec" label:"硬截止(秒)" group:"AI 对话 · 回合与任务" help:"回合运行的最终兜底，超时取消当前回合并提示原因；0 表示不限制（仅 /stop 与进程关闭可停）" default:"14400"`
-	ProgressReminderAfter int    `cfg:"progress_reminder_after" label:"委派提醒阈值(轮)" group:"AI 对话 · 回合与任务" help:"同一回合内连续工具调用达到该轮数时提醒模型考虑委派子代理；0 表示关闭" default:"6"`
+	ProgressReminderAfter int    `cfg:"progress_reminder_after" label:"委派提醒阈值(轮)" group:"AI 对话 · 回合与任务" help:"同一回合内工具轮数达到该值时提醒模型考虑委派子代理；没有子代理工具的会话（子代理自身 / 主动互动 / 面板试聊）改用不带工具名的通用收尾提醒；0 表示关闭" default:"6"`
 	RepeatToolWarn        string `cfg:"repeat_tool_warn" label:"重复调用提醒阈值" group:"AI 对话 · 回合与任务" help:"相同工具+参数重复调用达到这些次数时提醒模型换方案，逗号分隔；留空关闭提醒" default:"3,5,8"`
 	NoProgressLimit       int    `cfg:"no_progress_limit" label:"无进展终止阈值(步)" group:"AI 对话 · 回合与任务" help:"相同工具+参数重复调用达到该次数时终止回合并回报原因，防止死循环烧 token；0 表示只提醒不终止" default:"12"`
 }

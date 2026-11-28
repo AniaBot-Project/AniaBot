@@ -359,7 +359,7 @@ func (m *clockManager) drainClockSubagents(ctx context.Context, task *ClockTask,
 		}
 		pending := set.pendingCount()
 		m.logger.Info("定时任务子代理结果回喂", "task", task.ID, "finished", len(finished), "pending", pending, "round", round+1)
-		r2, u2, err := chat.Chat(ctx, buildClockSubagentReport(finished, pending), cbs, p.buildChatOptions())
+		r2, u2, err := chat.Chat(ctx, buildClockSubagentReport(finished, pending), cbs, p.buildClockChatOptions())
 		usage.PromptTokens += u2.PromptTokens
 		usage.CompletionTokens += u2.CompletionTokens
 		usage.TotalTokens += u2.TotalTokens

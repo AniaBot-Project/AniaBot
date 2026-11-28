@@ -277,12 +277,14 @@ func (o *ToolOrchestrator) ExecuteWithTools(
 		if wd := opts.Watchdog; wd.ProgressReminderAfter > 0 &&
 			watchdog.toolRounds >= wd.ProgressReminderAfter && !watchdog.progressReminded {
 			watchdog.progressReminded = true
-			messages = append(messages, TextMessage(RoleUser, progressReminder))
+			messages = append(messages, TextMessage(RoleUser,
+				reminderText(wd.ProgressReminder, progressReminder)))
 		}
 		if !opts.Watchdog.SoftDeadline.IsZero() && !watchdog.softDeadlineReminded &&
 			time.Now().After(opts.Watchdog.SoftDeadline) {
 			watchdog.softDeadlineReminded = true
-			messages = append(messages, TextMessage(RoleUser, softDeadlineReminder))
+			messages = append(messages, TextMessage(RoleUser,
+				reminderText(opts.Watchdog.SoftDeadlineReminder, softDeadlineReminder)))
 		}
 
 		// 有轮数上限的旧语义：最后一轮强制模型直接给出文本回答（仅在

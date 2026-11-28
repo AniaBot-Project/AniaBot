@@ -222,7 +222,8 @@ func TestParseRepeatToolWarn(t *testing.T) {
 	}
 }
 
-// TestWatchdogOptionsFromConfig 配置映射：软截止仅在主回合注入，子代理不注入。
+// TestWatchdogOptionsFromConfig 配置映射：软截止只在主回合/后台会话注入，子代理
+// 不注入；提醒措辞按会话是否注册了 subagent_run / task_handoff 切换。
 func TestWatchdogOptionsFromConfig(t *testing.T) {
 	p := &AIChatPlugin{}
 	p.cfg.Turn.ProgressReminderAfter = 6
@@ -230,16 +231,47 @@ func TestWatchdogOptionsFromConfig(t *testing.T) {
 	p.cfg.Turn.NoProgressLimit = 12
 	p.turnSoftTimeout = 10 * time.Minute
 
-	main := p.watchdogOptions(true)
+	// 主会话启用子代理：subagent_run / task_handoff 都在，沿用点名工具的默认文案
+	p.cfg.Subagent.Enable = true
+	main := p.buildChatOptions().Watchdog
 	if main.SoftDeadline.IsZero() {
 		t.Fatal("主回合应注入软截止")
 	}
 	if main.ProgressReminderAfter != 6 || main.NoProgressLimit != 12 || len(main.RepeatWarnThresholds) != 3 {
 		t.Fatalf("看门狗配置映射错误: %+v", main)
 	}
-	sub := p.watchdogOptions(false)
+	if main.ProgressReminder != "" || main.SoftDeadlineReminder != "" {
+		t.Fatalf("主会话应使用默认提醒文案: %+v", main)
+	}
+
+	// 关闭子代理：主会话不再注册这两个工具，措辞退化为通用文案
+	p.cfg.Subagent.Enable = false
+	mainNoSub := p.buildChatOptions().Watchdog
+	if mainNoSub.ProgressReminder != progressReminderGeneric ||
+		mainNoSub.SoftDeadlineReminder != softDeadlineReminderGeneric {
+		t.Fatalf("未启用子代理时提醒应使用通用文案: %+v", mainNoSub)
+	}
+
+	// 定时任务：注册了自己的 subagent_run，但没有 task_handoff
+	clock := p.buildClockChatOptions().Watchdog
+	if clock.ProgressReminder != "" || clock.SoftDeadlineReminder != softDeadlineReminderGeneric {
+		t.Fatalf("定时任务提醒措辞错误: %+v", clock)
+	}
+
+	// 后台/辅助会话（主动互动、面板试聊）：两个工具都没有
+	bg := p.buildBackgroundChatOptions().Watchdog
+	if bg.ProgressReminder != progressReminderGeneric ||
+		bg.SoftDeadlineReminder != softDeadlineReminderGeneric {
+		t.Fatalf("后台会话提醒应使用通用文案: %+v", bg)
+	}
+
+	// 子代理：不注入软截止，委派提醒用通用文案
+	sub := p.buildSubagentChatOptions().Watchdog
 	if !sub.SoftDeadline.IsZero() {
 		t.Fatal("子代理不应注入软截止提醒")
+	}
+	if sub.ProgressReminder != progressReminderGeneric {
+		t.Fatalf("子代理委派提醒应使用通用文案: %+v", sub)
 	}
 }
 

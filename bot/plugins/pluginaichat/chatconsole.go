@@ -520,7 +520,7 @@ func (m *chatConsoleManager) run(ctx context.Context, cancel context.CancelFunc,
 		m.finish(s, asstSeq, "", aichat.TokenUsage{}, err, timeout, start)
 		return
 	}
-	opts := p.buildChatOptions()
+	opts := p.buildBackgroundChatOptions()
 	opts.PreToolGate = m.preToolGate(s)
 	opts.PersistUserText = raw
 	opts.OnStreamDelta = func(delta string) { m.onStreamDelta(s, asstSeq, delta) }

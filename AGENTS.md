@@ -424,8 +424,11 @@ registry and goal continuation, and owns all session-scoped tool registration.
   (default `3,5,8`), aborts with `aichat.WatchdogAbortError` at `no_progress_limit` (default 12,
   0 = remind only); `progress_reminder_after` (default 6) injects one delegation reminder;
   `soft_timeout_sec` (default 600) injects one "wrap up / hand off" reminder without cancelling.
-  Reminders are appended as user-role messages and returned to the plugin, so they persist in
-  history deliberately.
+  The default texts name `subagent_run` / `task_handoff`; the plugin passes generic texts
+  (`WatchdogOptions.ProgressReminder` / `SoftDeadlineReminder`) for sessions that don't register
+  those tools (subagent, proactive, panel chat), so the model is never told to call a tool it
+  doesn't have. Reminders are appended as user-role messages and returned to the plugin, so they
+  persist in history deliberately.
 
 **History & sessions**
 

@@ -281,6 +281,69 @@ func TestSoftDeadlineReminderOnce(t *testing.T) {
 	}
 }
 
+// TestSoftDeadlineCustomText 软截止提醒同样可被插件层替换：没有 task_handoff
+// 的会话用通用文案，不再点名该工具。
+func TestSoftDeadlineCustomText(t *testing.T) {
+	srv, _ := mockToolLoopServer(func(n int) string {
+		if n <= 1 {
+			return toolCallLLMResponse("call_1", "tool_a", `{"step":1}`, 10)
+		}
+		return finalLLMResponse("完成", 10)
+	})
+	defer srv.Close()
+
+	exec := &fakeToolExecutor{}
+	o := toolLoopOrchestrator(exec)
+	o.SetMaxIterations(2)
+
+	const custom = "[系统提醒] 本轮已运行较久，请收尾"
+	_, messages, _, err := o.ExecuteWithTools(context.Background(), newTestClient(srv.URL),
+		[]Message{TextMessage(RoleUser, "长任务")}, llmtool.CallBackFuncs{},
+		ChatOptions{Watchdog: WatchdogOptions{
+			SoftDeadline:         time.Now().Add(-time.Minute),
+			SoftDeadlineReminder: custom,
+		}})
+	if err != nil {
+		t.Fatalf("ExecuteWithTools 失败: %v", err)
+	}
+	if n := countMessagesContaining(messages, custom); n != 1 {
+		t.Fatalf("定制软截止提醒应注入一次, got %d", n)
+	}
+	if n := countMessagesContaining(messages, "task_handoff"); n != 0 {
+		t.Fatalf("定制文案生效时不应再出现默认工具名, got %d", n)
+	}
+}
+
+// TestProgressReminderCustomText 插件层可为没有子代理工具的会话定制提醒文案：
+// 注入定制文本，不再出现默认文案里点名的 subagent_run。
+func TestProgressReminderCustomText(t *testing.T) {
+	srv, _ := mockToolLoopServer(func(n int) string {
+		if n <= 2 {
+			return toolCallLLMResponse(fmt.Sprintf("call_%d", n), "tool_a", fmt.Sprintf(`{"step":%d}`, n), 10)
+		}
+		return finalLLMResponse("完成", 10)
+	})
+	defer srv.Close()
+
+	exec := &fakeToolExecutor{}
+	o := toolLoopOrchestrator(exec)
+	o.SetMaxIterations(2)
+
+	const custom = "[系统提醒] 任务已进行多轮工具调用，请收尾"
+	_, messages, _, err := o.ExecuteWithTools(context.Background(), newTestClient(srv.URL),
+		[]Message{TextMessage(RoleUser, "多轮")}, llmtool.CallBackFuncs{},
+		ChatOptions{Watchdog: WatchdogOptions{ProgressReminderAfter: 2, ProgressReminder: custom}})
+	if err != nil {
+		t.Fatalf("ExecuteWithTools 失败: %v", err)
+	}
+	if n := countMessagesContaining(messages, custom); n != 1 {
+		t.Fatalf("定制工具轮数提醒应注入一次, got %d", n)
+	}
+	if n := countMessagesContaining(messages, "subagent_run"); n != 0 {
+		t.Fatalf("定制文案生效时不应再出现默认工具名, got %d", n)
+	}
+}
+
 // TestContextPruneOldToolResults 单请求内上下文保护：prompt 用量超过窗口
 // 85% 时，较旧的大工具结果被裁成头尾摘要（ToolCallID 保留），最近 6 条
 // 消息免疫；未设置/未超阈值时不裁剪。

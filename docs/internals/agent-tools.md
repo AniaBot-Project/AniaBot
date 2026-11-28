@@ -243,8 +243,8 @@ clock 任务里注册的是**异步**子代理变体（`clocksubagent.go`）：�
 
 ## 后台交接（task_handoff）与看门狗
 
-- **`task_handoff`**（主会话、`subagent.enable=true` 时注册）：模型把「已完成摘要 `summary` + 剩余工作 `remaining` + 验收标准 `acceptance`」交给后台子代理继续，当前回合立即结束。工具内部把三段拼成自包含的后台任务提示词，复用异步子代理通道（kind=`handoff`），完成后结果照常回到会话。软截止提醒会明确引导模型调用它，把「超时」变成「换一个地方继续做」。
-- **委派提醒**：同一回合工具轮数达到 `turn.progress_reminder_after`（6）时注入一次「考虑用 `subagent_run` 拆出独立部分」提醒。
+- **`task_handoff`**（主会话、`subagent.enable=true` 时注册）：模型把「已完成摘要 `summary` + 剩余工作 `remaining` + 验收标准 `acceptance`」交给后台子代理继续，当前回合立即结束。工具内部把三段拼成自包含的后台任务提示词，复用异步子代理通道（kind=`handoff`），完成后结果照常回到会话。主会话的软截止提醒会明确引导模型调用它，把「超时」变成「换一个地方继续做」；没有该工具的会话由插件层换成通用收尾措辞。
+- **委派提醒**：同一回合工具轮数达到 `turn.progress_reminder_after`（6）时注入一次「考虑用 `subagent_run` 拆出独立部分」提醒。只有注册了 `subagent_run` 的会话（主会话、定时任务）使用点名工具的文案，子代理自身、主动互动与面板试聊改用不带工具名的通用提醒，避免诱导模型调用本次没有注册的工具。
 - **重复/无进展看门狗**（`bot/component/aichat/toolwatchdog.go`）：同一轮工具调用的签名 = 排序后的 `name+args`；签名连续不变时按 `turn.repeat_tool_warn`（`3,5,8`）各注入一次换方案提醒，达到 `turn.no_progress_limit`（12）时返回 `aichat.WatchdogAbortError` 终止工具循环（`0` 只提醒）；提醒以 user 角色追加并随本轮返回进入历史，后续回合模型仍能看到。
 - **单请求内上下文保护**：每步 LLM 返回的 prompt token 超过窗口 85% 时，把较旧的大工具结果裁剪为「标记 + 原始长度 + 头尾片段」（保留最近 6 条消息与 tool_call 配对），窗口级压缩仍由回合开始时的 `messageWindow` 负责。
 

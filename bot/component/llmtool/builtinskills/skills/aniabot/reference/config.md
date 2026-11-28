@@ -203,9 +203,9 @@
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
-| `turn.soft_timeout_sec` | `600` | 软截止：到时向模型注入一次「收尾或转后台」提醒，**不取消**；0 关闭 |
+| `turn.soft_timeout_sec` | `600` | 软截止：到时向模型注入一次「收尾或转后台」提醒，**不取消**；没有 `task_handoff` 的会话用通用收尾措辞；0 关闭 |
 | `turn.hard_timeout_sec` | `14400` | 硬截止（默认 4 小时）：最终兜底，超时取消回合并提示原因；0 表示不限制 |
-| `turn.progress_reminder_after` | `6` | 工具轮数达到该值时提醒模型考虑委派子代理；0 关闭 |
+| `turn.progress_reminder_after` | `6` | 工具轮数达到该值时提醒模型考虑委派子代理；没有 `subagent_run` 的会话改用通用收尾提醒；0 关闭 |
 | `turn.repeat_tool_warn` | `3,5,8` | 相同工具+参数连续重复达到这些次数时各提醒一次；留空关闭 |
 | `turn.no_progress_limit` | `12` | 连续相同工具调用达到该次数时终止回合并回报原因；0 只提醒 |
 | `llm.request_timeout_sec` | `600` | 单次 LLM 请求（含流式）总超时，按可重试错误处理；0 不限制 |

@@ -829,7 +829,7 @@ func (m *clockManager) executeTask(ctx context.Context, task *ClockTask, rec *ta
 	}
 
 	cbs := m.makeClockCallback(ctx, task, extra.add)
-	chatOpts := p.buildChatOptions()
+	chatOpts := p.buildClockChatOptions()
 	chatOpts.PreToolGate = p.buildPreToolGate(sessionKey(targetQID, isGroup), agenthook.AgentKindClock, message.FromUint64(0),
 		func(text string) { m.sendText(task, text) },
 		p.buildAdminPromptSender(m.bot))

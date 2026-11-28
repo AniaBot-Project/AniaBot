@@ -867,27 +867,63 @@ func (p *AIChatPlugin) buildAdminPromptSender(b bot.Bot) func(text string) bool 
 	}
 }
 
+// 循环保护提醒的通用文案：组件默认文案会点名 subagent_run / task_handoff，
+// 只有注册了对应工具的会话才适用。子代理、主动互动、面板试聊等会话改用不带
+// 工具名的说法，避免把模型引导去调用本次根本没有注册的工具。
+const (
+	progressReminderGeneric     = "[系统提醒] 任务已进行多轮工具调用；请检查是否在原地打转，能收尾就收尾，必要时先说明进展。"
+	softDeadlineReminderGeneric = "[系统提醒] 本轮已运行较久：能收尾就收尾；如果还有较多工作，先给出进度摘要，并说明剩余部分。"
+)
+
 func (p *AIChatPlugin) buildChatOptions() aichat.ChatOptions {
 	opts := p.thinkingOpts()
-	opts.Watchdog = p.watchdogOptions(true)
+	// 主会话：subagent_run 与 task_handoff 都在 subagent.enable 的同一个分支里
+	// 注册（见 getChat），关闭子代理后两者都不存在，提醒改用通用文案。
+	opts.Watchdog = p.watchdogOptions(true, p.cfg.Subagent.Enable, p.cfg.Subagent.Enable)
+	return opts
+}
+
+// buildClockChatOptions 定时任务回合参数：定时任务注册了自己的 subagent_run
+// （见 clocksubagent.go），但没有 task_handoff，软截止提醒用通用文案。
+func (p *AIChatPlugin) buildClockChatOptions() aichat.ChatOptions {
+	opts := p.thinkingOpts()
+	opts.Watchdog = p.watchdogOptions(true, true, false)
+	return opts
+}
+
+// buildBackgroundChatOptions 后台与辅助会话（主动互动、面板试聊）的回合参数：
+// 这类会话既没有子代理工具也没有转后台工具，两类提醒都用通用文案。
+func (p *AIChatPlugin) buildBackgroundChatOptions() aichat.ChatOptions {
+	opts := p.thinkingOpts()
+	opts.Watchdog = p.watchdogOptions(true, false, false)
 	return opts
 }
 
 // buildSubagentChatOptions 子代理/团队成员的一次性会话参数：保留重复调用与
 // 无进展保护，但不注入"收尾或转后台"软截止提醒（子代理没有 handoff 工具，
-// 其生命周期由 subagent 超时与 /stop 管理）。
+// 其生命周期由 subagent 超时与 /stop 管理），委派提醒也用通用文案。
 func (p *AIChatPlugin) buildSubagentChatOptions() aichat.ChatOptions {
 	opts := p.thinkingOpts()
-	opts.Watchdog = p.watchdogOptions(false)
+	opts.Watchdog = p.watchdogOptions(false, false, false)
 	return opts
 }
 
 // watchdogOptions 构造 aichat 编排层的工具循环保护配置。
-func (p *AIChatPlugin) watchdogOptions(withSoftDeadline bool) aichat.WatchdogOptions {
+//
+// canDelegate / canHandoff 表示本次会话是否注册了 subagent_run / task_handoff：
+// 没有时对应提醒改用通用文案（见 progressReminderGeneric 等），其余参数照旧，
+// 仍然会提醒「轮数很多 / 该收尾了」，只是不提具体工具名。
+func (p *AIChatPlugin) watchdogOptions(withSoftDeadline, canDelegate, canHandoff bool) aichat.WatchdogOptions {
 	wo := aichat.WatchdogOptions{
 		ProgressReminderAfter: p.cfg.Turn.ProgressReminderAfter,
 		RepeatWarnThresholds:  parseRepeatToolWarn(p.cfg.Turn.RepeatToolWarn),
 		NoProgressLimit:       p.cfg.Turn.NoProgressLimit,
+	}
+	if !canDelegate {
+		wo.ProgressReminder = progressReminderGeneric
+	}
+	if !canHandoff {
+		wo.SoftDeadlineReminder = softDeadlineReminderGeneric
 	}
 	if withSoftDeadline && p.turnSoftTimeout > 0 {
 		wo.SoftDeadline = time.Now().Add(p.turnSoftTimeout)
