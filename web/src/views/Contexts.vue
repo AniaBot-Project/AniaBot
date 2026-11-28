@@ -293,7 +293,7 @@ const loading = ref(true)
 const detailLoading = ref(false)
 const keyword = ref('')
 const kindFilter = ref('all')
-const autoRefresh = ref(false)
+const autoRefresh = ref(true)
 const clearing = ref(false)
 const exporting = ref(false)
 const msg = ref('')
@@ -684,9 +684,14 @@ function stopTimer() {
   }
 }
 
+function startTimer() {
+  stopTimer()
+  timer = setInterval(() => loadSessions(true), 10000)
+}
+
 watch(autoRefresh, (on) => {
   stopTimer()
-  if (on) timer = setInterval(() => loadSessions(true), 10000)
+  if (on) startTimer()
 })
 
 onBeforeUnmount(stopTimer)
@@ -694,6 +699,8 @@ onBeforeUnmount(stopTimer)
 onMounted(async () => {
   await loadSessions()
   loadNames()
+  // 默认开启：watch 只在开关变化时触发，首次进入需要主动启动轮询
+  if (autoRefresh.value) startTimer()
 })
 </script>
 
