@@ -208,6 +208,44 @@ func (p *MyPlugin) OnUnload(ctx context.Context, reason plugin.UnloadReason) err
 - 裸 `go` 没有这些保护；事件回调里如果确实需要「崩溃即告警」，把工作放进 `b.Go`；
 - cron 回调不在 `safeExecute` 内，也不在 `b.Go` 内，务必用 `b.Go` 或自行 recover。
 
+## 长后台任务与优雅重启
+
+Bot 重启（面板重启、`/reboot`、自动更新、插件市场完成后的重启）默认会**等待正在处理的工作结束**再替换进程，避免打断用户正在等的回复。插件需要分清两类后台工作：
+
+| 工作形态 | 是否自动等待 | 做法 |
+| --- | --- | --- |
+| 事件回调内同步完成（含回调内 `wg.Wait()` 的并发下载） | ✅ 框架自动登记 | 无需处理 |
+| 事件返回后继续跑的**一次性**任务（`b.Go` 异步推送、cron 里的一次播报、下载后再发送） | ❌ 需要显式登记 | 用 `b.TrackWork(label)` 包住任务体 |
+| 常驻循环 / 长期服务（ticker 轮询、长连接重连循环） | 不应登记 | 保持原样，由 `OnUnload` 取消 |
+
+```go
+// 一次性后台任务：登记后优雅重启会等它结束（上限 bot.restart_wait_timeout_sec）
+b.Go("my-push", func() {
+	end := b.TrackWork("我的插件 · 推送")
+	defer end()
+	// 生成/发送内容……
+})
+
+// 常驻循环：不要登记，否则每次重启都要等到超时
+go p.loop(bgCtx)
+```
+
+- `TrackWork(label)` 返回**幂等的结束函数**，必须调用（通常 `defer`）；`label` 会显示在面板「重启等待中」横幅里，建议写成「插件名 · 任务摘要」；
+- 只登记一次性任务；等待上限由 `bot.restart_wait_timeout_sec` 控制（默认 300 秒，`0` = 一直等），管理员可随时在面板强制重启；
+- **兼容旧版框架**：`TrackWork` 是 `bot.Bot` 上的新方法，插件若还要能装在旧版框架上，用可选接口断言探测，旧框架下自动退化为不登记（功能不受影响）：
+
+```go
+type workTracker interface{ TrackWork(label string) func() }
+
+end := func() {}
+if wt, ok := b.(workTracker); ok {
+	end = wt.TrackWork("我的插件 · 推送")
+}
+defer end()
+```
+
+旧框架没有优雅重启等待，断言失败直接执行即可；事件回调里同步完成的工作在所有版本都由框架处理，不需要这段代码。
+
 ## 调试与测试
 
 - 保留 `pluginlog` 插件，控制台会打印收发消息与通知，便于确认事件是否到达；

@@ -714,6 +714,13 @@ func (ania *AniaBot) GoroutineNum() int32 {
 	return ania.goroutineNum.Load()
 }
 
+// TrackWork 登记一个进行中的后台工作单元（bot.Bot 接口实现，供插件异步任务用）。
+// 优雅重启会先等待登记的工作完成再替换进程；返回的结束函数必须调用（幂等）。
+// 只用于一次性后台任务，常驻循环不要登记（否则重启要等到超时）。
+func (ania *AniaBot) TrackWork(label string) func() {
+	return workstate.Begin(workstate.KindPlugin, label)
+}
+
 // StartTime 返回 Bot 启动时间。
 func (ania *AniaBot) StartTime() time.Time {
 	return ania.startTime

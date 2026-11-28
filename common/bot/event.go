@@ -44,6 +44,20 @@ type botGetMsgItf interface {
 type pluginItf interface {
 	// GetPluginList 获取插件列表
 	GetPluginList() []plugininfo.PluginInfo
+	// TrackWork 登记一个进行中的后台工作单元（插件异步任务用），返回幂等的结束函数。
+	//
+	// 优雅重启（面板重启、/reboot、自动更新、插件市场）会先等待登记的工作完成再
+	// 替换进程；事件回调里同步完成的工作由框架自动登记，无需调用本方法。
+	// 只用于「一次性」后台任务（如异步推送、下载后发送）：常驻循环/长期服务不要
+	// 登记，否则每次重启都要等到超时。
+	//
+	// 该能力在新框架上始终可用；插件若要兼容旧版框架，可用可选接口断言探测：
+	//
+	//	if wt, ok := b.(interface{ TrackWork(string) func() }); ok {
+	//		end := wt.TrackWork("我的推送任务")
+	//		defer end()
+	//	}
+	TrackWork(label string) func()
 }
 
 // StreamHandle 流式消息句柄：Patch 更新已发送消息的内容；End 结束（此后不可再 Patch）。

@@ -31,6 +31,7 @@ func (f *fakeBaseBot) GetFriendMsgHistory(message.QID, int, int) (*[]message.Mes
 func (f *fakeBaseBot) GetPluginList() []plugininfo.PluginInfo { return nil }
 func (f *fakeBaseBot) Stop()                                  {}
 func (f *fakeBaseBot) Go(name string, fn func())              {}
+func (f *fakeBaseBot) TrackWork(label string) func()          { return func() {} }
 
 // plainAdapter 不具备 QQ 能力的适配器（模拟飞书等未来平台）。
 type plainAdapter struct{}
@@ -101,6 +102,12 @@ func TestQQBotWrapper(t *testing.T) {
 	wrapped := adapter.WrapBot(base, NewNapcatWebSocketAdapter())
 	if _, ok := wrapped.(bot.QQ); !ok {
 		t.Fatal("NapCat 适配器包装后的 bot 应可断言为 bot.QQ")
+	}
+	// 包装器必须透传 bot.Bot 上的 TrackWork（插件用可选接口断言探测优雅重启能力）
+	if wt, ok := wrapped.(interface{ TrackWork(string) func() }); !ok {
+		t.Fatal("包装后的 bot 应可断言为 TrackWork 能力")
+	} else {
+		wt.TrackWork("测试")()
 	}
 
 	// 非 QQ 适配器 → 断言失败（原样返回 base）

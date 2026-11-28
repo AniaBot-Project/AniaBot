@@ -50,9 +50,25 @@ GetPluginList() []plugininfo.PluginInfo
 
 // Stop 停止机器人
 Stop()
+
+// TrackWork 登记一次性后台工作单元，返回幂等的结束函数；
+// 优雅重启会等待登记的工作完成后再替换进程（常驻循环不要登记）
+TrackWork(label string) func()
 ```
 
 `plugininfo.PluginInfo` 包含 `Name` / `HelpWords` / `AdminOnly` / `ShowFor` / `Author` / `Version`。
+
+`TrackWork` 用于事件返回后继续跑的一次性后台任务（异步推送、下载后发送、cron 单次播报）：
+
+```go
+b.Go("my-push", func() {
+	end := b.TrackWork("我的插件 · 推送")
+	defer end()
+	// …
+})
+```
+
+事件回调内同步完成的工作、以及带 `wg.Wait()` 的并发下载由框架自动等待，不需要 `TrackWork`；常驻循环/长期服务**不要**登记，否则每次重启都要等到 `bot.restart_wait_timeout_sec` 超时。兼容旧版框架时可用 `interface{ TrackWork(string) func() }` 断言探测（旧框架断言失败则不登记）。详见 [生命周期 · 长后台任务与优雅重启](/plugin/lifecycle#长后台任务与优雅重启)。
 
 ### 协程管理（Tracer）
 

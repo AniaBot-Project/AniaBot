@@ -137,6 +137,7 @@ func (b *recordBot) GetFriendMsgHistory(message.QID, int, int) (*[]message.Messa
 func (b *recordBot) GetPluginList() []plugininfo.PluginInfo { return nil }
 func (b *recordBot) Stop()                                  {}
 func (b *recordBot) Go(_ string, f func())                  { go f() }
+func (b *recordBot) TrackWork(string) func()                { return func() {} }
 
 // TestSendFinalOutputSkipSuppresses 验证收尾推送的核心语义：
 // AI 调用 skip_output 时最终回复不发送（只记日志），未调用时正常发送，空文本不发送。

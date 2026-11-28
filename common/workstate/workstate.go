@@ -28,6 +28,7 @@ const (
 	KindSubagent  = "subagent"  // 后台子代理/交接/追问
 	KindTeam      = "team"      // Agent 团队运行
 	KindWorkflow  = "workflow"  // 工作流运行
+	KindPlugin    = "plugin"    // 插件登记的一次性后台任务（bot.Bot.TrackWork）
 )
 
 // Item 一个正在处理的工作单元。

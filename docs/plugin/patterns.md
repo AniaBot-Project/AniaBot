@@ -78,6 +78,8 @@ func (p *MyPlugin) Awake(ctx context.Context, b bot.Bot) error {
 
 不要用裸 `go f()` 启动可能 panic 的后台任务，也不要在 `Start` 里用 `context.Background()` 起永不退出的循环——卸载时无法取消。
 
+> **一次性任务 vs 常驻循环**：Bot 重启前会等待进行中的工作结束。事件回调里同步完成的处理自动登记；`b.Go` 起的**一次性**任务（异步推送、下载后发送、cron 单次播报）要用 `b.TrackWork(label)` 登记才会被等待，常驻循环则**不要**登记（否则重启要等到超时）。详见 [生命周期 · 长后台任务与优雅重启](/plugin/lifecycle#长后台任务与优雅重启)。
+
 ## 消息拦截器
 
 利用 Order 实现前置拦截：

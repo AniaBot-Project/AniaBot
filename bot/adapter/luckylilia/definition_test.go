@@ -31,6 +31,7 @@ func (f *fakeBaseBot) GetFriendMsgHistory(message.QID, int, int) (*[]message.Mes
 func (f *fakeBaseBot) GetPluginList() []plugininfo.PluginInfo { return nil }
 func (f *fakeBaseBot) Stop()                                  {}
 func (f *fakeBaseBot) Go(name string, fn func())              {}
+func (f *fakeBaseBot) TrackWork(label string) func()          { return func() {} }
 
 // plainAdapter 不具备 QQ 能力的适配器（模拟飞书等未来平台）。
 type plainAdapter struct{}

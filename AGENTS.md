@@ -303,7 +303,11 @@ Rules that most often break plugins:
 5. `Start(ctx, *viper.Viper)`: the ctx is canceled when `Start` returns — do **not** pass it to
    long-running goroutines; create your own context and cancel it in `OnUnload`.
 6. Background goroutines use `b.Go(name, f)` (panic recovery + `OnPanic` broadcast), never bare
-   `go`; cron callbacks must wrap their work in `b.Go`.
+   `go`; cron callbacks must wrap their work in `b.Go`. One-shot background work that must not be
+   cut off by a restart should be wrapped with `b.TrackWork(label)` (idempotent end func; optional
+   `interface{ TrackWork(string) func() }` assertion keeps the plugin source compatible with older
+   frameworks); long-lived service loops must **not** be registered (a graceful restart would then
+   wait for them until timeout).
 7. Optional capabilities are type-asserted (`bot.QQ`, `bot.GroupForwardSender`,
    `bot.FriendForwardSender`, `bot.StreamSender`, `bot.MediaRefresher`, `bot.GroupMembers`,
    `bot.Interactive`, `bot.MsgEditor`); after asserting, still check the call's `bool` — core
@@ -344,8 +348,11 @@ Rules that most often break plugins:
   restart paths — panel button, `/reboot [force]`, auto-update finish, marketplace finish —
   go through `sysrestart.RequestRestart`; update/marketplace refuse to start while a restart
   is already pending. The panel polls the status endpoint: it shows a global 重启等待中 banner
-  with the item list and a force button, and reloads when the boot id changes. Work started
-  with bare `b.Go` by third-party plugins is not tracked and is not waited for.
+  with the item list and a force button, and reloads when the boot id changes. Plugins can
+  register one-shot background work through `b.TrackWork(label)` (`bot.Bot` method → core →
+  `workstate.Begin(KindPlugin, …)`); events/notice/interaction handlers are tracked
+  automatically, and long-lived service loops must not be registered. Work started with bare
+  `b.Go` without `TrackWork` is not waited for.
 - **Broadcast notices**: all 14 notice types (upload/admin/decrease/increase/ban/friend-add/
   recall×2/poke/lucky-king/honor/emoji-like/essence/card) go to every plugin with no
   short-circuit, 5 min timeout. QQ-only notices simply never fire on other platforms.

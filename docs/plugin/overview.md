@@ -168,6 +168,7 @@ func (p *MyPlugin) OnGroupMsg(ctx context.Context, b bot.Bot, cmd command.Comman
 
 - 每个插件的每次调用都被 `safeExecute` 包裹 —— 单个插件 panic **不会**影响其他插件或主进程（只记录错误日志，消息链视为放行）
 - 插件内需要起协程时，使用 `b.Go(name, f)` 代替裸 `go f()`：协程 panic 会被恢复，并回调所有插件的 `OnPanic`（系统插件默认私聊告警管理员）
+- 事件返回后继续跑的一次性后台任务（异步推送、cron 单次播报、下载后再发送）用 `b.TrackWork(label)` 登记，Bot 重启会等待其完成；常驻循环不要登记（详见 [生命周期 · 长后台任务与优雅重启](/plugin/lifecycle#长后台任务与优雅重启)）
 - 事件回调自身的 panic 不会触发 `OnPanic`，只会记日志；需要告警时把可能失败的工作放进 `b.Go` 或自行 recover 后处理
 
 ## 注册插件
